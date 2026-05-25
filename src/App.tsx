@@ -1,0 +1,29 @@
+import { Route, Routes } from 'react-router-dom'
+import Layout from './components/Layout'
+import LandingPage from './pages/LandingPage'
+import DashboardPage from './pages/DashboardPage'
+import CaseQueuePage from './pages/CaseQueuePage'
+import CaseDetailPage from './pages/CaseDetailPage'
+import MethodologyPage from './pages/MethodologyPage'
+import PrivacyPage from './pages/PrivacyPage'
+import LoginPage from './pages/LoginPage'
+import HowItWorksPage from './pages/HowItWorksPage'
+import NotFoundPage from './pages/NotFoundPage'
+
+export default function App() {
+  return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/how-it-works" element={<HowItWorksPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/cases" element={<CaseQueuePage />} />
+        <Route path="/cases/:id" element={<CaseDetailPage />} />
+        <Route path="/methodology" element={<MethodologyPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Routes>
+  )
+}

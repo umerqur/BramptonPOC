@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    @apply bg-slate-50 text-ink font-sans;
+  }
+  h1, h2, h3, h4 {
+    @apply text-navy-900;
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+  .card {
+    @apply bg-white border border-slate-200 rounded-xl shadow-card;
+  }
+  .card-hover {
+    @apply transition hover:shadow-cardHover hover:border-slate-300;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500;
+  }
+  .btn-primary {
+    @apply btn bg-navy-900 text-white hover:bg-navy-800;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-navy-900 border border-slate-300 hover:border-navy-400 hover:bg-slate-50;
+  }
+  .btn-accent {
+    @apply btn bg-accent-600 text-white hover:bg-accent-700;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+  .badge-low { @apply badge bg-slate-100 text-slate-700; }
+  .badge-medium { @apply badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200; }
+  .badge-high { @apply badge bg-orange-50 text-orange-800 ring-1 ring-inset ring-orange-200; }
+  .badge-critical { @apply badge bg-red-50 text-red-800 ring-1 ring-inset ring-red-200; }
+  .stat-label { @apply text-xs font-medium uppercase tracking-wide text-ink-subtle; }
+  .stat-value { @apply text-2xl font-semibold text-navy-900 mt-1; }
+  .section-eyebrow { @apply text-xs font-semibold uppercase tracking-wider text-accent-700; }
+  .link-quiet { @apply text-navy-700 hover:text-navy-900 underline-offset-2 hover:underline; }
+}
