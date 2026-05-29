@@ -41,8 +41,9 @@ export default function LandingPage() {
                 prioritize inspection queues, summarize case history, and prepare officer ready case briefings.
               </p>
               <p>
-                Built using public municipal service request data, open geospatial data, and synthetic enforcement
-                records. No private City data is required for the initial POC.
+                Built around real public 311 service request data, normalized into a municipal enforcement schema,
+                with synthetic fields used only where internal patrol, ticket, or closure data is not publicly
+                available. No private City data is required for the initial POC.
               </p>
             </div>
 
@@ -57,7 +58,7 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-navy-200">
-              <span className="inline-flex items-center gap-1.5"><Dot /> Public + synthetic data only</span>
+              <span className="inline-flex items-center gap-1.5"><Dot /> Real public 311 data + synthetic internal fields</span>
               <span className="inline-flex items-center gap-1.5"><Dot /> Decision support, not automated enforcement</span>
               <span className="inline-flex items-center gap-1.5"><Dot /> Human in the loop by design</span>
             </div>
@@ -96,14 +97,14 @@ export default function LandingPage() {
             title="An assistive layer over existing intake and enforcement workflows"
           />
           <p className="mt-4 max-w-3xl text-ink-muted">
-            The system combines public 311 style service request data, synthetic enforcement records, rules based risk
-            scoring, machine learning ready features, and AI generated case summaries to support faster triage and
-            better operational visibility.
+            The system combines real public 311 service request data normalized into an enforcement schema,
+            synthetic records for missing internal workflow fields, rules based risk scoring, machine learning ready
+            features, and AI generated case summaries to support faster triage and better operational visibility.
           </p>
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {[
-              { title: 'Public + synthetic inputs', body: 'Open 311 style data and synthetic enforcement records — no City systems required for the POC.' },
+              { title: 'Real public 311 data layer', body: 'NYC 311 service request data is normalized into a Brampton compatible enforcement schema, with synthetic records used only for missing internal workflow fields.' },
               { title: 'Transparent scoring', body: 'A rules based risk score with explainable drivers and ML ready feature design.' },
               { title: 'Officer ready outputs', body: 'Case summaries, recommended actions, and briefing notes designed for staff review.' },
             ].map((c) => (
