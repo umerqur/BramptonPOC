@@ -13,6 +13,16 @@ dist-ssr
 *.local
 *.tsbuildinfo
 
+# Local data exports
+# Raw and processed municipal data files are generated locally and should not be committed.
+data/raw/**/*.csv
+data/raw/**/*.xlsx
+data/processed/**/*.csv
+
+# Keep dataset documentation in Git.
+!data/raw/**/README.md
+!data/processed/README.md
+
 # Editor
 .vscode/*
 !.vscode/extensions.json
