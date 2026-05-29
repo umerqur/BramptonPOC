@@ -37,11 +37,15 @@ export default function MethodologyPage() {
 
           <Section id="data" title="2. Data sources">
             <ul className="space-y-2 list-disc pl-5">
-              <li><strong>Public 311 style service request data:</strong> open municipal service request datasets used to model intake volume and categories.</li>
-              <li><strong>Open geospatial data:</strong> ward boundaries, road networks, and parcel level reference data from open data portals.</li>
-              <li><strong>Synthetic enforcement records:</strong> generated case files designed to mimic the structure of real enforcement files without using any private City data.</li>
+              <li><strong>Real public NYC 311 service request data:</strong> actual open municipal 311 service request records used to model real intake volume, categories, and complaint patterns.</li>
+              <li><strong>Normalized municipal service request schema:</strong> the 311 data is cleaned and mapped into a standardized, Brampton compatible enforcement schema so records can be compared and scored consistently.</li>
+              <li><strong>Open geospatial / reference data:</strong> ward boundaries, road networks, and parcel level reference data from open data portals, where available.</li>
+              <li><strong>Synthetic placeholders for non public internal records:</strong> used only where data is not publicly available — patrol logs, ticket history, officer notes, and internal closure workflow.</li>
             </ul>
             <p className="mt-3 text-sm text-ink-muted">No private City data is required for this phase. City provided data can be integrated later under privacy and cybersecurity controls.</p>
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-ink-muted">
+              <span className="font-semibold text-navy-900">Current dataset:</span> public NYC 311 service requests normalized for POC modelling. Not Brampton operational data.
+            </div>
           </Section>
 
           <Section id="features" title="3. Feature design">
@@ -86,7 +90,7 @@ export default function MethodologyPage() {
 
           <Section id="limits" title="7. Known limitations">
             <ul className="space-y-2 list-disc pl-5">
-              <li>Mock and synthetic data may not reflect the distribution or edge cases of real City case load.</li>
+              <li>NYC 311 data reflects real municipal service request patterns, but it is not Brampton enforcement data. Brampton specific calibration requires City provided complaints, tickets, patrol logs, closure outcomes, and case management data.</li>
               <li>Rules based scoring is intentionally simple; production deployment would benefit from ML calibration on labeled outcomes.</li>
               <li>Geospatial clustering uses simplified distance heuristics in the POC.</li>
               <li>The POC does not address multilingual intake; this would be added in a production scope.</li>

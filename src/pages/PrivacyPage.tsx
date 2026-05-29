@@ -2,8 +2,8 @@ import SectionHeading from '../components/SectionHeading'
 
 const principles = [
   {
-    title: 'Public and synthetic data only in POC',
-    body: 'The proof of concept operates entirely on public 311 style data, open geospatial data, and synthetic enforcement records. No private City data is required for this phase.',
+    title: 'Real public 311 data and synthetic internal fields only in POC',
+    body: 'The proof of concept is modelled on real public NYC 311 service request data, normalized into a municipal enforcement schema, with synthetic records used only for non public internal workflow fields. No private City data is required for this phase.',
   },
   {
     title: 'Decision support, not autonomous enforcement',

@@ -5,7 +5,7 @@ const steps = [
   {
     n: '01',
     title: 'Ingest',
-    body: 'Pulls public 311 style service request data, open geospatial data, and synthetic enforcement records into a unified case model.',
+    body: 'Pulls real public NYC 311 service request data and open geospatial / reference data into a unified case model, using synthetic placeholders only for non public internal fields such as patrol logs and ticket history.',
   },
   {
     n: '02',

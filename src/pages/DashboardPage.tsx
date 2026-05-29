@@ -22,7 +22,8 @@ export default function DashboardPage() {
           <div className="section-eyebrow">Demo Dashboard</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Operational overview</h1>
           <p className="mt-2 text-sm text-ink-muted max-w-2xl">
-            Mock data — generated for demonstration purposes only. Figures do not reflect any real City case load.
+            Current dataset: public NYC 311 service requests normalized for POC modelling. Not Brampton operational
+            data. Internal workflow fields shown here are synthetic and figures do not reflect any real City case load.
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-ink-subtle">

@@ -4,7 +4,7 @@ AI assisted triage, case prioritization, and operational intelligence for munici
 
 This repository contains the public-facing proof of concept (POC) website — a Vite + React + TypeScript application styled with Tailwind CSS and routed with React Router. The site is designed to be demo-ready for City procurement conversations and is deployed on Netlify.
 
-> **Positioning.** This system is decision support for authorized municipal staff. It does not make enforcement decisions, issue notices, or act autonomously. The initial POC uses only public 311 style data, open geospatial data, and synthetic enforcement records — no private City data is required.
+> **Positioning.** This system is decision support for authorized municipal staff. It does not make enforcement decisions, issue notices, or act autonomously. The prototype is modelled on real public NYC 311 service request data, normalized into a Brampton compatible municipal enforcement schema, with synthetic records used only for non public internal workflow fields (patrol logs, ticket history, officer notes, closure outcomes). No private City data is required for the initial POC, and the schema is ready for Brampton enforcement data later.
 
 ---
 
@@ -26,9 +26,9 @@ This repository contains the public-facing proof of concept (POC) website — a 
 - **React 18 + TypeScript**
 - **Tailwind CSS** — design system
 - **React Router** — page routing
-- **No backend** in this phase — all data is mocked locally in `src/data/`.
+- **Data pipeline** — a local NYC 311 data cleaning pipeline (`scripts/`) and a Supabase migration scaffold (`supabase/migrations/`).
 
-Supabase and any real data integration are intentionally out of scope for the initial POC.
+Current phase has a local NYC 311 data cleaning pipeline and Supabase migration scaffold. The frontend still uses mock data in `src/data/` until Supabase integration is wired into React.
 
 ---
 
@@ -121,7 +121,7 @@ To deploy:
 
 Full version lives on the in-app `/methodology` page. Short form:
 
-1. **Ingest.** Public 311 style service request data, open geospatial data, and synthetic enforcement records.
+1. **Ingest.** Real public NYC 311 service request data, open geospatial / reference data where available, and synthetic placeholders only for non public internal records (patrol logs, ticket history, officer notes, closure workflow).
 2. **Normalize.** Standardize addresses, categories, and timestamps so complaints across channels can be compared.
 3. **Detect patterns.** Identify repeat complaints, geographic clusters, and category escalation across rolling time windows.
 4. **Score risk.** A transparent rules based score with named drivers, normalized to 0–100 and mapped to Low / Medium / High / Critical. The same feature design is ML ready when labeled outcomes become available.
@@ -138,5 +138,5 @@ Full version lives on the in-app `/methodology` page. Short form:
 
 - This is not replacing officers.
 - This is decision support.
-- This uses public and synthetic data for the initial POC.
-- City provided data can be integrated later under privacy and cybersecurity controls.
+- This is modelled on real public NYC 311 service request data, normalized into a Brampton compatible enforcement schema, with synthetic data only for non public internal fields.
+- The schema is ready for Brampton enforcement data; City provided data can be integrated later under privacy and cybersecurity controls.
