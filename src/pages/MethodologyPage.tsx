@@ -103,6 +103,12 @@ export default function MethodologyPage() {
               cybersecurity controls, calibration of the scoring model against labeled outcome data, multilingual
               intake, and operational integration with existing case management workflows.
             </p>
+            <p className="mt-3">
+              Automated or agentic workflows are intentionally <strong>out of scope</strong> for this POC. They would
+              be considered only as a later phase, once the data model, dashboards, risk scoring, governance, and the
+              human-review process are proven in a Brampton context. The current product leads with explainable
+              decision support and human oversight.
+            </p>
           </Section>
         </article>
       </div>
