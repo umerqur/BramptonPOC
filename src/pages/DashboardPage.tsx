@@ -13,7 +13,7 @@ import {
 const DATA_NOTE =
   'Current dataset: public NYC 311 service requests normalized for POC modelling. Not Brampton operational data.'
 
-type Source = 'supabase' | 'mock'
+type Source = 'supabase' | 'mock' | 'mock-error'
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -38,11 +38,13 @@ export default function DashboardPage() {
           setSource('supabase')
         }
       } catch (err) {
-        // Fall back to bundled mock data if the live query fails.
+        // Supabase is configured but the live query failed — fall back to
+        // bundled mock data, but flag the failure so it is not mistaken for an
+        // unconfigured deployment.
         console.error('Falling back to mock dashboard data:', err)
         if (active) {
           setStats(mockDashboardStats())
-          setSource('mock')
+          setSource('mock-error')
         }
       } finally {
         if (active) setLoading(false)
@@ -190,11 +192,19 @@ function formatCount(value: number | undefined, loading: boolean): string {
 }
 
 function DataSourceBadge({ source, loading }: { source: Source; loading: boolean }) {
-  const isLive = source === 'supabase'
+  const dot =
+    source === 'supabase' ? 'bg-accent-500' : source === 'mock-error' ? 'bg-amber-500' : 'bg-slate-400'
+  const label = loading
+    ? 'Loading…'
+    : source === 'supabase'
+      ? 'Live data: Supabase'
+      : source === 'mock-error'
+        ? 'Sample data (Supabase query failed)'
+        : 'Sample data (Supabase not configured)'
   return (
     <div className="flex items-center gap-2 text-xs text-ink-subtle">
-      <span className={`h-2 w-2 rounded-full ${isLive ? 'bg-accent-500' : 'bg-slate-400'}`} />
-      {loading ? 'Loading…' : isLive ? 'Live data: Supabase' : 'Sample data (Supabase not configured)'}
+      <span className={`h-2 w-2 rounded-full ${dot}`} />
+      {label}
     </div>
   )
 }

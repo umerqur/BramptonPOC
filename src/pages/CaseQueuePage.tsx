@@ -18,7 +18,7 @@ const DATA_NOTE =
   'Current dataset: public NYC 311 service requests normalized for POC modelling. Not Brampton operational data.'
 
 type SortKey = 'risk_score' | 'days_open'
-type Source = 'supabase' | 'mock'
+type Source = 'supabase' | 'mock' | 'mock-error'
 
 export default function CaseQueuePage() {
   const [query, setQuery] = useState('')
@@ -79,7 +79,7 @@ export default function CaseQueuePage() {
         console.error('Falling back to mock case queue data:', err)
         if (active) {
           setRows(filterMockRows(mockRequestRows(), filters))
-          setSource('mock')
+          setSource('mock-error')
         }
       } finally {
         if (active) setLoading(false)
@@ -220,11 +220,19 @@ export default function CaseQueuePage() {
 }
 
 function DataSourceBadge({ source, loading }: { source: Source; loading: boolean }) {
-  const isLive = source === 'supabase'
+  const dot =
+    source === 'supabase' ? 'bg-accent-500' : source === 'mock-error' ? 'bg-amber-500' : 'bg-slate-400'
+  const label = loading
+    ? 'Loading…'
+    : source === 'supabase'
+      ? 'Live data: Supabase'
+      : source === 'mock-error'
+        ? 'Sample data (Supabase query failed)'
+        : 'Sample data (Supabase not configured)'
   return (
     <div className="flex items-center gap-2 text-xs text-ink-subtle">
-      <span className={`h-2 w-2 rounded-full ${isLive ? 'bg-accent-500' : 'bg-slate-400'}`} />
-      {loading ? 'Loading…' : isLive ? 'Live data: Supabase' : 'Sample data (Supabase not configured)'}
+      <span className={`h-2 w-2 rounded-full ${dot}`} />
+      {label}
     </div>
   )
 }

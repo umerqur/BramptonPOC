@@ -135,6 +135,16 @@ The repository includes a `netlify.toml` and a `public/_redirects` file so the a
 
 Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Netlify site's environment variables to enable live data; otherwise the deployed site runs on the sample dataset.
 
+### Live data on Netlify shows "Sample data" — troubleshooting
+
+`VITE_*` variables are **baked into the bundle at build time**, not read at runtime. If the deployed site still shows the sample dataset:
+
+1. **Set both variables** in **Site configuration → Environment variables**, scoped to the **Production** context (and any branch/deploy-preview contexts you use).
+2. **Trigger a fresh deploy** after setting them — values added after the last build do not apply until the next build. Use **Deploys → Trigger deploy → Clear cache and deploy site**.
+3. **Read the data-source badge** on the dashboard / case queue to tell the two failure modes apart:
+   - **"Sample data (Supabase not configured)"** — the variables were missing at build time (revisit steps 1–2).
+   - **"Sample data (Supabase query failed)"** — the variables were present, but the live query failed at runtime. Check that the `municipal_service_requests` table exists, is populated, and that a row-level-security read policy grants the `anon` role `SELECT`.
+
 ---
 
 ## POC methodology summary
