@@ -1,19 +1,60 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import StatCard from '../components/StatCard'
 import RiskBadge from '../components/RiskBadge'
 import SectionHeading from '../components/SectionHeading'
+import { isSupabaseConfigured } from '../lib/supabase'
 import {
-  averageDaysOpen,
-  casesByCategory,
-  highPriorityCases,
-  priorityQueue,
-  recentSummaries,
-  repeatComplaintLocations,
-  totalOpenCases,
-} from '../data/dashboard'
+  getDashboardStats,
+  mockDashboardStats,
+  type DashboardStats,
+} from '../services/municipalServiceRequests'
+
+const DATA_NOTE =
+  'Current dataset: public NYC 311 service requests normalized for POC modelling. Not Brampton operational data.'
+
+type Source = 'supabase' | 'mock'
 
 export default function DashboardPage() {
-  const maxCategoryCount = Math.max(...casesByCategory.map((c) => c.count), 1)
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [source, setSource] = useState<Source>('mock')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    async function load() {
+      if (!isSupabaseConfigured) {
+        if (active) {
+          setStats(mockDashboardStats())
+          setSource('mock')
+          setLoading(false)
+        }
+        return
+      }
+      try {
+        const data = await getDashboardStats()
+        if (active) {
+          setStats(data)
+          setSource('supabase')
+        }
+      } catch (err) {
+        // Fall back to bundled mock data if the live query fails.
+        console.error('Falling back to mock dashboard data:', err)
+        if (active) {
+          setStats(mockDashboardStats())
+          setSource('mock')
+        }
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    load()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const maxCategoryCount = Math.max(...(stats?.categoriesByCount.map((c) => c.count) ?? [1]), 1)
 
   return (
     <div className="container-page py-10">
@@ -22,54 +63,43 @@ export default function DashboardPage() {
           <div className="section-eyebrow">Demo Dashboard</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Operational overview</h1>
           <p className="mt-2 text-sm text-ink-muted max-w-2xl">
-            Current dataset: public NYC 311 service requests normalized for POC modelling. Not Brampton operational
-            data. Internal workflow fields shown here are synthetic and figures do not reflect any real City case load.
+            {DATA_NOTE} Internal workflow fields shown elsewhere are synthetic and figures do not reflect any real City
+            case load.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-ink-subtle">
-          <span className="h-2 w-2 rounded-full bg-accent-500" />
-          Last refreshed: just now
-        </div>
+        <DataSourceBadge source={source} loading={loading} />
       </div>
 
       {/* KPI cards */}
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total open cases" value={totalOpenCases} hint="across all categories" />
-        <StatCard
-          label="High priority cases"
-          value={highPriorityCases}
-          trend={{ direction: 'up', text: '+2 vs last week' }}
-        />
-        <StatCard
-          label="Repeat complaint locations"
-          value={repeatComplaintLocations}
-          hint="3+ complaints, same address"
-        />
-        <StatCard label="Avg days open" value={averageDaysOpen} hint="rolling 30-day window" />
+        <StatCard label="Total records" value={formatCount(stats?.total, loading)} hint="service requests in dataset" />
+        <StatCard label="High risk records" value={formatCount(stats?.highRisk, loading)} hint="High or Critical" />
+        <StatCard label="Open records" value={formatCount(stats?.open, loading)} hint="not yet closed" />
+        <StatCard label="Avg days open" value={formatCount(stats?.avgDaysOpen, loading)} hint="across all records" />
       </div>
 
       {/* Row 1: categories + hotspot map */}
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <div className="card p-6 lg:col-span-1">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-navy-900">Cases by category</h3>
-            <span className="text-xs text-ink-subtle">Open cases</span>
+            <h3 className="text-sm font-semibold text-navy-900">Categories by count</h3>
+            <span className="text-xs text-ink-subtle">Service requests</span>
           </div>
           <ul className="mt-4 space-y-3">
-            {casesByCategory.map((row) => (
+            {(stats?.categoriesByCount ?? []).map((row) => (
               <li key={row.category}>
                 <div className="flex justify-between text-sm">
                   <span className="text-ink">{row.category}</span>
-                  <span className="font-medium text-navy-900">{row.count}</span>
+                  <span className="font-medium text-navy-900 tabular-nums">{row.count.toLocaleString()}</span>
                 </div>
                 <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                  <div
-                    className="h-full bg-navy-700"
-                    style={{ width: `${(row.count / maxCategoryCount) * 100}%` }}
-                  />
+                  <div className="h-full bg-navy-700" style={{ width: `${(row.count / maxCategoryCount) * 100}%` }} />
                 </div>
               </li>
             ))}
+            {!loading && (stats?.categoriesByCount.length ?? 0) === 0 && (
+              <li className="text-sm text-ink-subtle">No category data available.</li>
+            )}
           </ul>
         </div>
 
@@ -93,7 +123,7 @@ export default function DashboardPage() {
       {/* Priority queue */}
       <div className="mt-10">
         <div className="flex items-end justify-between gap-4">
-          <SectionHeading eyebrow="Priority Queue" title="Highest risk open cases" />
+          <SectionHeading eyebrow="Priority Queue" title="Top high risk service requests" />
           <Link to="/cases" className="text-sm font-medium text-navy-700 hover:text-navy-900">
             View full queue →
           </Link>
@@ -104,59 +134,67 @@ export default function DashboardPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-ink-subtle">
                 <tr className="text-left">
-                  <Th>Case ID</Th>
+                  <Th>Request ID</Th>
                   <Th>Category</Th>
-                  <Th>Ward</Th>
+                  <Th>District</Th>
                   <Th>Address</Th>
                   <Th className="text-right">Days open</Th>
-                  <Th className="text-right">Repeat</Th>
                   <Th className="text-right">Risk</Th>
-                  <Th>Priority</Th>
+                  <Th>Level</Th>
                   <Th>Recommended action</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {priorityQueue.map((c) => (
+                {(stats?.topHighRisk ?? []).map((c) => (
                   <tr key={c.id} className="hover:bg-slate-50">
                     <Td>
-                      <Link to={`/cases/${c.id}`} className="font-medium text-navy-900 hover:underline">{c.id}</Link>
+                      <Link to={`/cases/${encodeURIComponent(c.id)}`} className="font-medium text-navy-900 hover:underline">
+                        {c.id}
+                      </Link>
                     </Td>
                     <Td>{c.category}</Td>
-                    <Td>{c.ward}</Td>
+                    <Td>{c.district}</Td>
                     <Td className="text-ink-muted">{c.address}</Td>
                     <Td className="text-right tabular-nums">{c.daysOpen}</Td>
-                    <Td className="text-right tabular-nums">{c.repeatComplaints}</Td>
                     <Td className="text-right tabular-nums font-medium">{c.riskScore}</Td>
                     <Td><RiskBadge risk={c.risk} /></Td>
                     <Td className="text-ink-muted">{c.recommendedAction}</Td>
                   </tr>
                 ))}
+                {loading && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-10 text-center text-ink-subtle text-sm">
+                      Loading service requests…
+                    </td>
+                  </tr>
+                )}
+                {!loading && (stats?.topHighRisk.length ?? 0) === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-10 text-center text-ink-subtle text-sm">
+                      No service requests available.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
+    </div>
+  )
+}
 
-      {/* Recent AI summaries */}
-      <div className="mt-10">
-        <SectionHeading eyebrow="AI Summaries" title="Recent AI generated case summaries" />
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {recentSummaries.map((s) => (
-            <div key={s.id} className="card p-5 card-hover">
-              <div className="flex items-center justify-between">
-                <Link to={`/cases/${s.id}`} className="text-sm font-semibold text-navy-900 hover:underline">{s.id}</Link>
-                <RiskBadge risk={s.risk} />
-              </div>
-              <div className="mt-1 text-xs text-ink-subtle">{s.category} · {s.ward}</div>
-              <p className="mt-3 text-sm text-ink leading-relaxed">{s.summary}</p>
-              <div className="mt-4 flex items-center gap-2 text-[11px] text-ink-subtle">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-accent-500" />
-                AI generated · reviewed by staff before action
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+function formatCount(value: number | undefined, loading: boolean): string {
+  if (loading || value === undefined) return '—'
+  return value.toLocaleString()
+}
+
+function DataSourceBadge({ source, loading }: { source: Source; loading: boolean }) {
+  const isLive = source === 'supabase'
+  return (
+    <div className="flex items-center gap-2 text-xs text-ink-subtle">
+      <span className={`h-2 w-2 rounded-full ${isLive ? 'bg-accent-500' : 'bg-slate-400'}`} />
+      {loading ? 'Loading…' : isLive ? 'Live data: Supabase' : 'Sample data (Supabase not configured)'}
     </div>
   )
 }
