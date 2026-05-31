@@ -29,6 +29,18 @@ export default function Header() {
           >
             Methodology
           </NavLink>
+          <NavLink
+            to="/login"
+            className={({ isActive }) =>
+              `px-3 py-2 rounded-md text-sm font-medium transition ${
+                isActive
+                  ? 'text-navy-900 bg-slate-100'
+                  : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
+              }`
+            }
+          >
+            Login
+          </NavLink>
           <Link to="/dashboard" className="btn-primary text-sm py-2 px-4">
             Demo Dashboard
           </Link>
@@ -58,6 +70,17 @@ export default function Header() {
               }
             >
               Methodology
+            </NavLink>
+            <NavLink
+              to="/login"
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2 rounded-md text-sm font-medium ${
+                  isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted'
+                }`
+              }
+            >
+              Login
             </NavLink>
             <Link to="/dashboard" onClick={() => setOpen(false)} className="btn-primary mt-2">
               View Demo Dashboard

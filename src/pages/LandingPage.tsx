@@ -13,73 +13,53 @@ const aiCapabilities = [
 export default function LandingPage() {
   return (
     <div>
-      {/* Hero — CTA first, image led */}
+      {/* Hero — CTA first, blended image background */}
       <section className="relative overflow-hidden bg-navy-900 text-white">
-        <div
-          className="absolute inset-0 opacity-[0.07]"
-          style={{
-            backgroundImage:
-              'radial-gradient(circle at 20% 20%, white 1px, transparent 1px), radial-gradient(circle at 80% 60%, white 1px, transparent 1px)',
-            backgroundSize: '32px 32px, 48px 48px',
-          }}
-        />
+        {/* Image as a right-side background layer on desktop, blended into the
+            navy via a left-to-right gradient. Hidden on mobile (shown below). */}
+        <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[55%] lg:block">
+          <img
+            src="/images/brampton-poc-hero.png"
+            alt=""
+            aria-hidden="true"
+            className="h-full w-full object-cover"
+          />
+          {/* Left-to-right navy gradient so headline text stays readable. */}
+          <div className="absolute inset-0 bg-gradient-to-r from-navy-900 via-navy-900/80 to-navy-900/10" />
+        </div>
+
         <div className="container-page relative py-20 lg:py-28">
-          <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-12">
-            {/* Copy */}
-            <div className="max-w-xl">
-              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white ring-1 ring-inset ring-white/20">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
-                City of Brampton AI POC
-              </div>
-              <h1 className="mt-5 text-4xl sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05] font-semibold tracking-tight">
-                Help enforcement teams see what needs attention first.
-              </h1>
-              <p className="mt-5 text-lg text-navy-100">
-                AI assisted triage for repeat complaints, high risk service requests, stale files, and staff ready case summaries.
-              </p>
+          <div className="max-w-xl">
+            <h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05] font-semibold tracking-tight">
+              Help enforcement teams see what needs attention first.
+            </h1>
+            <p className="mt-5 text-lg text-navy-100">
+              AI assisted triage for repeat complaints, stale files, and high risk service requests.
+            </p>
 
-              <div className="mt-8 flex flex-col sm:flex-row gap-3">
-                <Link to="/dashboard" className="btn-accent">
-                  View Demo Dashboard
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
-                </Link>
-                <Link to="/methodology" className="btn-secondary bg-white/5 text-white border-white/20 hover:bg-white/10 hover:border-white/40">
-                  See Methodology
-                </Link>
-              </div>
-
-              {/* Trust chips */}
-              <div className="mt-6 flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-navy-100">
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
-                  Decision support only
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-navy-100">
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
-                  Human review required
-                </span>
-              </div>
-
-              <p className="mt-6 text-sm text-navy-200">
-                Built with public 311 style data for the POC. No private City data is required at this stage.
-              </p>
+            <div className="mt-8 flex flex-col sm:flex-row gap-3">
+              <Link to="/dashboard" className="btn-accent">
+                View Demo Dashboard
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              </Link>
+              <Link to="/methodology" className="btn-secondary bg-white/5 text-white border-white/20 hover:bg-white/10 hover:border-white/40">
+                See Methodology
+              </Link>
             </div>
 
-            {/* Hero image */}
-            <div className="relative lg:pl-2">
-              <div className="relative overflow-hidden rounded-2xl border border-white/10 shadow-2xl ring-1 ring-inset ring-white/5">
-                <img
-                  src="/images/brampton-poc-hero.png"
-                  alt="Municipal service request review"
-                  className="aspect-[16/10] h-full w-full object-cover"
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-navy-950/40 via-transparent to-transparent" />
-                <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-navy-950/70 px-2.5 py-1 text-[10px] font-medium text-navy-100 ring-1 ring-inset ring-white/10 backdrop-blur-sm">
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
-                  Municipal service request review
-                </span>
-              </div>
-            </div>
+            <p className="mt-5 text-sm text-navy-200">
+              Built with public 311 style data for the POC. No private City data required.
+            </p>
+            <p className="mt-2 text-sm text-navy-300">
+              Decision support only. Human review required.
+            </p>
+
+            {/* Mobile image: a wide blended visual below the CTA, not a card. */}
+            <img
+              src="/images/brampton-poc-hero.png"
+              alt="Municipal enforcement operations"
+              className="mt-10 h-56 w-full rounded-2xl object-cover lg:hidden"
+            />
           </div>
         </div>
       </section>

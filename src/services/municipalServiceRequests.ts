@@ -194,24 +194,55 @@ function buildCountQuery() {
 }
 
 /**
- * Aggregate statistics for the dashboard. Counts are computed with cheap
- * `head` count queries (no row transfer); category counts and average days
- * open use PostgREST aggregate selects.
+ * Aggregate statistics for the dashboard.
+ *
+ * Resilience strategy (so a single capability gap doesn't drop the whole
+ * dashboard to mock data):
+ *   1. Foundational read — a cheap exact total count plus a bounded sample
+ *      via plain `select`. These are the simplest possible queries; if they
+ *      fail the table is genuinely unreadable (missing table or blocking RLS)
+ *      and the page falls back to mock data.
+ *   2. Exact KPI counts (high-risk, open) via cheap `head` count queries.
+ *      These never use aggregate functions, so they work regardless of
+ *      project settings; if one does fail we estimate from the sample rather
+ *      than discarding the real data we already have.
+ *   3. Category breakdown + average days-open via PostgREST aggregate
+ *      functions, which some projects disable. On failure we derive both from
+ *      the sample fetched in step 1.
  */
 export async function getDashboardStats(): Promise<DashboardStats> {
   const client = requireClient()
 
-  // Exact KPI counts via cheap head queries — these never use aggregate
-  // functions, so they work regardless of project settings.
-  const [total, highRisk, open, topHighRisk] = await Promise.all([
-    countWhere(),
-    countWhere((q) => q.in('risk_level', HIGH_RISK_LEVELS)),
-    countWhere((q) => q.eq('is_closed', false)),
-    getHighRiskRequests(6),
+  // Step 1 — foundational read. A failure here is fatal (handled by caller).
+  const [totalRes, sampleRes] = await Promise.all([
+    client.from(TABLE).select('*', { count: 'exact', head: true }),
+    client.from(TABLE).select('category, days_open, risk_level, is_closed').limit(1000),
+  ])
+  if (totalRes.error) throw totalRes.error
+  if (sampleRes.error) throw sampleRes.error
+
+  const total = totalRes.count ?? 0
+  const sample = (sampleRes.data ?? []) as Array<
+    Pick<MunicipalServiceRequestRow, 'category' | 'days_open' | 'risk_level' | 'is_closed'>
+  >
+
+  // Step 2 — exact KPI counts and the priority queue. Each degrades on its own
+  // instead of taking down the whole dashboard.
+  const [highRisk, open, topHighRisk] = await Promise.all([
+    countWhere((q) => q.in('risk_level', HIGH_RISK_LEVELS)).catch(() =>
+      sample.filter((r) => HIGH_RISK_LEVELS.includes(normalizeRisk(r.risk_level))).length,
+    ),
+    countWhere((q) => q.eq('is_closed', false)).catch(() =>
+      sample.filter((r) => r.is_closed === false).length,
+    ),
+    getHighRiskRequests(6).catch((err) => {
+      console.warn('Priority queue query failed, omitting:', err)
+      return [] as RequestRow[]
+    }),
   ])
 
-  // Category breakdown and average use PostgREST aggregate functions, which
-  // some projects disable. Fall back to a sample-based computation if so.
+  // Step 3 — category breakdown and average. Try true DB aggregates first,
+  // then fall back to the in-memory sample.
   let categoriesByCount: CategoryCount[]
   let avgDaysOpen: number
   try {
@@ -221,24 +252,21 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     ])
   } catch (err) {
     console.warn('Aggregate queries unavailable, using sampled estimates:', err)
-    const sample = await getSampledAggregates(client)
-    categoriesByCount = sample.categoriesByCount
-    avgDaysOpen = sample.avgDaysOpen
+    const sampled = sampledAggregates(sample)
+    categoriesByCount = sampled.categoriesByCount
+    avgDaysOpen = sampled.avgDaysOpen
   }
 
   return { total, highRisk, open, avgDaysOpen, categoriesByCount, topHighRisk }
 }
 
 /**
- * Category counts and average days-open derived from a bounded sample of rows.
- * Used as a fallback when PostgREST aggregate functions are disabled.
+ * Category counts and average days-open derived from an already-fetched sample
+ * of rows. Used as a fallback when PostgREST aggregate functions are disabled.
  */
-async function getSampledAggregates(
-  client: NonNullable<typeof supabase>,
-): Promise<{ categoriesByCount: CategoryCount[]; avgDaysOpen: number }> {
-  const { data, error } = await client.from(TABLE).select('category, days_open').limit(1000)
-  if (error) throw error
-  const rows = (data ?? []) as Array<Pick<MunicipalServiceRequestRow, 'category' | 'days_open'>>
+function sampledAggregates(
+  rows: Array<Pick<MunicipalServiceRequestRow, 'category' | 'days_open'>>,
+): { categoriesByCount: CategoryCount[]; avgDaysOpen: number } {
   const counts = new Map<string, number>()
   let daysSum = 0
   let daysCount = 0
