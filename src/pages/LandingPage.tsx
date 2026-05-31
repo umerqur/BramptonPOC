@@ -14,22 +14,25 @@ export default function LandingPage() {
   return (
     <div>
       {/* Hero — CTA first, blended image background */}
-      <section className="relative overflow-hidden bg-navy-900 text-white">
+      <section className="relative overflow-hidden bg-navy-950 text-white">
         {/* Image as a right-side background layer on desktop, blended into the
             navy via a left-to-right gradient. Hidden on mobile (shown below). */}
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[55%] lg:block">
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[62%] lg:block">
           <img
             src="/images/brampton-poc-hero.png"
             alt=""
             aria-hidden="true"
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover opacity-85 brightness-110 contrast-105"
           />
-          {/* Left-to-right navy gradient so headline text stays readable. */}
-          <div className="absolute inset-0 bg-gradient-to-r from-navy-900 via-navy-900/80 to-navy-900/10" />
+          {/* Strong navy gradient on the left so the headline stays readable,
+              fading to mostly clear on the right to reveal the image. */}
+          <div className="absolute inset-0 bg-gradient-to-r from-navy-950 via-navy-950/70 to-navy-950/15" />
+          <div className="absolute inset-0 bg-gradient-to-t from-navy-950/45 via-transparent to-navy-950/20" />
         </div>
 
-        {/* Full dark overlay to force headline text above the image. */}
-        <div className="absolute inset-0 z-10 bg-gradient-to-r from-navy-950 via-navy-900/95 to-navy-900/55" />
+        {/* Left-anchored overlay to keep headline text readable, fading out
+            on the right so the image remains visible. */}
+        <div className="absolute inset-0 z-10 bg-gradient-to-r from-navy-950 via-navy-950/88 to-navy-950/20" />
 
         <div className="container-page relative z-20 py-20 lg:py-28">
           <div className="relative z-20 max-w-xl">
