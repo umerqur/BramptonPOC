@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import Logo from '../components/Logo'
 import { supabase } from '../lib/supabase'
+import { getAuthRedirectUrl } from '../lib/appUrl'
 import { isAllowedEmail, RESTRICTED_MESSAGE, useAuth } from '../lib/auth'
 
 type Status =
@@ -40,7 +41,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email: value,
       options: {
-        emailRedirectTo: `${window.location.origin}/app/dashboard`,
+        emailRedirectTo: getAuthRedirectUrl(),
         shouldCreateUser: true,
       },
     })
