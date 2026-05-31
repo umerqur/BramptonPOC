@@ -7,7 +7,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-[calc(100vh-8rem)] grid lg:grid-cols-2">
-      <div className="hidden lg:flex relative bg-navy-900 text-white p-12">
+      <div className="hidden lg:flex relative bg-navy-900 text-white items-center justify-center px-8 py-12">
         <div
           className="absolute inset-0 opacity-[0.08]"
           style={{
@@ -16,9 +16,9 @@ export default function LoginPage() {
             backgroundSize: '34px 34px, 50px 50px',
           }}
         />
-        <div className="relative max-w-md self-center">
+        <div className="relative w-full max-w-md">
           <Logo className="h-9 w-9" />
-          <h2 className="mt-6 text-2xl font-semibold">Proactive Enforcement Intelligence</h2>
+          <h2 className="mt-6 text-2xl font-semibold text-white">Proactive Enforcement Intelligence</h2>
           <p className="mt-3 text-navy-100">
             Sign in to review AI assisted triage recommendations, case briefings, and operational dashboards.
           </p>
@@ -30,13 +30,13 @@ export default function LoginPage() {
               </li>
             ))}
           </ul>
-          <p className="mt-10 text-xs text-navy-300">
+          <p className="mt-10 text-xs text-white/70">
             Login screen shown for demonstration purposes only. No credentials are submitted or stored.
           </p>
         </div>
       </div>
 
-      <div className="flex items-center justify-center p-6 sm:p-12">
+      <div className="flex items-center justify-center px-6 py-12 sm:px-8">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-2 mb-6">
             <Logo className="h-7 w-7" />
