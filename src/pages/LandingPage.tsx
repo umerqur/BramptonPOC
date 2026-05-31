@@ -17,7 +17,7 @@ export default function LandingPage() {
       <section className="relative overflow-hidden bg-navy-900 text-white">
         {/* Image as a right-side background layer on desktop, blended into the
             navy via a left-to-right gradient. Hidden on mobile (shown below). */}
-        <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[55%] lg:block">
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[55%] lg:block">
           <img
             src="/images/brampton-poc-hero.png"
             alt=""
@@ -28,12 +28,15 @@ export default function LandingPage() {
           <div className="absolute inset-0 bg-gradient-to-r from-navy-900 via-navy-900/80 to-navy-900/10" />
         </div>
 
-        <div className="container-page relative py-20 lg:py-28">
-          <div className="max-w-xl">
-            <h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05] font-semibold tracking-tight">
+        {/* Full dark overlay to force headline text above the image. */}
+        <div className="absolute inset-0 z-10 bg-gradient-to-r from-navy-950 via-navy-900/95 to-navy-900/55" />
+
+        <div className="container-page relative z-20 py-20 lg:py-28">
+          <div className="relative z-20 max-w-xl">
+            <h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05] font-semibold tracking-tight text-white drop-shadow-sm">
               Help enforcement teams see what needs attention first.
             </h1>
-            <p className="mt-5 text-lg text-navy-100">
+            <p className="mt-5 text-lg text-white/90">
               AI assisted triage for repeat complaints, stale files, and high risk service requests.
             </p>
 
@@ -47,10 +50,10 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            <p className="mt-5 text-sm text-navy-200">
+            <p className="mt-5 text-sm text-white/75">
               Built with public 311 style data for the POC. No private City data required.
             </p>
-            <p className="mt-2 text-sm text-navy-300">
+            <p className="mt-2 text-sm text-white/65">
               Decision support only. Human review required.
             </p>
 
