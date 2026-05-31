@@ -17,22 +17,19 @@ export default function LandingPage() {
       <section className="relative overflow-hidden bg-navy-950 text-white">
         {/* Image as a right-side background layer on desktop, blended into the
             navy via a left-to-right gradient. Hidden on mobile (shown below). */}
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[62%] lg:block">
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[66%] lg:block">
           <img
             src="/images/brampton-poc-hero.png"
             alt=""
             aria-hidden="true"
-            className="h-full w-full object-cover opacity-85 brightness-110 contrast-105"
+            className="h-full w-full object-cover opacity-100 brightness-125 contrast-110 saturate-110"
           />
-          {/* Strong navy gradient on the left so the headline stays readable,
-              fading to mostly clear on the right to reveal the image. */}
-          <div className="absolute inset-0 bg-gradient-to-r from-navy-950 via-navy-950/70 to-navy-950/15" />
-          <div className="absolute inset-0 bg-gradient-to-t from-navy-950/45 via-transparent to-navy-950/20" />
         </div>
 
         {/* Left-anchored overlay to keep headline text readable, fading out
             on the right so the image remains visible. */}
-        <div className="absolute inset-0 z-10 bg-gradient-to-r from-navy-950 via-navy-950/88 to-navy-950/20" />
+        <div className="absolute inset-0 z-10 bg-gradient-to-r from-navy-950 from-[0%] via-navy-950/92 via-[43%] to-navy-950/5 to-[72%]" />
+        <div className="absolute inset-0 z-10 bg-gradient-to-t from-navy-950/25 via-transparent to-transparent" />
 
         <div className="container-page relative z-20 py-20 lg:py-28">
           <div className="relative z-20 max-w-xl">
