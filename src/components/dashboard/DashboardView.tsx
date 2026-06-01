@@ -2,7 +2,8 @@ import { Link } from 'react-router-dom'
 import StatCard from '../StatCard'
 import RiskBadge from '../RiskBadge'
 import SectionHeading from '../SectionHeading'
-import type { DashboardStats } from '../../services/municipalServiceRequests'
+import AdvisoryNotice from '../AdvisoryNotice'
+import type { DashboardStats, Hotspot } from '../../services/municipalServiceRequests'
 
 const DATA_NOTE =
   'Current dataset: public NYC 311 service requests normalized for POC modelling. Not Brampton operational data.'
@@ -38,12 +39,34 @@ export default function DashboardView({ stats, loading, eyebrow, casesPath, stat
         {statusSlot}
       </div>
 
+      <div className="mt-6">
+        <AdvisoryNotice />
+      </div>
+
       {/* KPI cards */}
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total records" value={formatCount(stats?.total, loading)} hint="service requests in dataset" />
-        <StatCard label="High risk records" value={formatCount(stats?.highRisk, loading)} hint="High or Critical" />
-        <StatCard label="Open records" value={formatCount(stats?.open, loading)} hint="not yet closed" />
-        <StatCard label="Avg days open" value={formatCount(stats?.avgDaysOpen, loading)} hint="across all records" />
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatCard label="Total cases" value={formatCount(stats?.total, loading)} hint="service requests in dataset" />
+        <StatCard label="Unresolved cases" value={formatCount(stats?.open, loading)} hint="not yet closed" />
+        <StatCard
+          label="High / critical risk"
+          value={formatCount(stats?.highRisk, loading)}
+          hint="risk level High or Critical"
+        />
+        <StatCard
+          label="High ML pattern signal"
+          value={formatCount(stats?.highSignal, loading)}
+          hint="advisory pattern detection"
+        />
+        <StatCard
+          label="Moderate ML pattern signal"
+          value={formatCount(stats?.moderateSignal, loading)}
+          hint="advisory pattern detection"
+        />
+        <StatCard
+          label="Hotspot clusters"
+          value={formatCount(stats?.hotspotClusters, loading)}
+          hint="distinct ML hotspot clusters"
+        />
       </div>
 
       {/* Row 1: categories + hotspot map */}
@@ -73,17 +96,22 @@ export default function DashboardView({ stats, loading, eyebrow, casesPath, stat
 
         <div className="card p-6 lg:col-span-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-navy-900">Hotspots</h3>
-            <span className="text-xs text-ink-subtle">Mock geospatial visualization</span>
+            <h3 className="text-sm font-semibold text-navy-900">ML hotspot clusters</h3>
+            <span className="text-xs text-ink-subtle">
+              {loading ? 'Loading…' : `${(stats?.hotspots.length ?? 0).toLocaleString()} clusters plotted`}
+            </span>
           </div>
           <div className="mt-4 relative h-64 sm:h-80 rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
-            <MapPlaceholder />
+            <HotspotMap hotspots={stats?.hotspots ?? []} loading={loading} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-subtle">
-            <LegendDot color="bg-red-500" label="Critical cluster" />
-            <LegendDot color="bg-orange-500" label="High activity" />
-            <LegendDot color="bg-amber-400" label="Medium activity" />
-            <LegendDot color="bg-slate-400" label="Background" />
+            <LegendDot color="bg-red-500" label="High hotspot score" />
+            <LegendDot color="bg-orange-500" label="Medium score" />
+            <LegendDot color="bg-amber-400" label="Lower score" />
+            <span>Marker size ∝ cluster size</span>
+          </div>
+          <div className="mt-3">
+            <AdvisoryNotice variant="inline" />
           </div>
         </div>
       </div>
@@ -174,44 +202,76 @@ function LegendDot({ color, label }: { color: string; label: string }) {
   )
 }
 
-function MapPlaceholder() {
+/** Color for a hotspot marker based on its (normalized) ML hotspot score. */
+function scoreColor(score: number, maxScore: number): string {
+  const ratio = maxScore > 0 ? score / maxScore : 0
+  if (ratio >= 0.66) return '#dc2626' // red — high
+  if (ratio >= 0.33) return '#ea580c' // orange — medium
+  return '#d97706' // amber — lower
+}
+
+/**
+ * Data-driven hotspot scatter. Projects each cluster's latitude/longitude into
+ * the SVG viewBox using the bounding box of the supplied points, sizes markers
+ * by ML hotspot cluster size, and colors them by ML hotspot score. No external
+ * mapping dependency is used.
+ */
+function HotspotMap({ hotspots, loading }: { hotspots: Hotspot[]; loading: boolean }) {
+  const W = 600
+  const H = 300
+  const PAD = 24
+
+  if (loading) {
+    return <div className="flex h-full items-center justify-center text-sm text-ink-subtle">Loading hotspots…</div>
+  }
+  if (hotspots.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-ink-subtle">
+        No hotspot clusters available.
+      </div>
+    )
+  }
+
+  const lats = hotspots.map((h) => h.lat)
+  const lngs = hotspots.map((h) => h.lng)
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+  const spanLat = maxLat - minLat || 1
+  const spanLng = maxLng - minLng || 1
+  const maxScore = Math.max(...hotspots.map((h) => h.score), 0)
+  const maxSize = Math.max(...hotspots.map((h) => h.size), 1)
+
+  // Longitude → x, latitude → y (north at top, so invert lat).
+  const projX = (lng: number) => PAD + ((lng - minLng) / spanLng) * (W - 2 * PAD)
+  const projY = (lat: number) => PAD + (1 - (lat - minLat) / spanLat) * (H - 2 * PAD)
+
   return (
-    <svg viewBox="0 0 600 300" className="w-full h-full">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full">
       <defs>
         <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
           <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#e2e8f0" strokeWidth="1" />
         </pattern>
-        <radialGradient id="hot" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#ef4444" stopOpacity="0.5" />
-          <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="warm" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#f97316" stopOpacity="0.45" />
-          <stop offset="100%" stopColor="#f97316" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="med" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
-        </radialGradient>
       </defs>
-      <rect width="600" height="300" fill="url(#grid)" />
-      {/* mock roads */}
-      <path d="M0 110 L600 100" stroke="#cbd5e1" strokeWidth="3" />
-      <path d="M0 210 L600 220" stroke="#cbd5e1" strokeWidth="3" />
-      <path d="M180 0 L190 300" stroke="#cbd5e1" strokeWidth="3" />
-      <path d="M420 0 L420 300" stroke="#cbd5e1" strokeWidth="3" />
-      {/* heat blobs */}
-      <circle cx="190" cy="110" r="80" fill="url(#hot)" />
-      <circle cx="430" cy="220" r="70" fill="url(#warm)" />
-      <circle cx="320" cy="160" r="55" fill="url(#med)" />
-      {/* points */}
-      <circle cx="190" cy="110" r="4" fill="#dc2626" />
-      <circle cx="195" cy="115" r="3" fill="#dc2626" />
-      <circle cx="183" cy="103" r="3" fill="#dc2626" />
-      <circle cx="430" cy="220" r="3.5" fill="#ea580c" />
-      <circle cx="438" cy="226" r="3" fill="#ea580c" />
-      <circle cx="320" cy="160" r="3" fill="#d97706" />
-      <text x="14" y="20" fontSize="10" fill="#64748b">Mock map · placeholder for geospatial layer</text>
+      <rect width={W} height={H} fill="url(#grid)" />
+      {hotspots.map((h) => {
+        const x = projX(h.lng)
+        const y = projY(h.lat)
+        const color = scoreColor(h.score, maxScore)
+        const r = 4 + (h.size / maxSize) * 14
+        return (
+          <g key={h.clusterId}>
+            <circle cx={x} cy={y} r={r} fill={color} fillOpacity={0.18} />
+            <circle cx={x} cy={y} r={3} fill={color}>
+              <title>{`Cluster ${h.clusterId} · ${h.hotspotLabel}\nSize ${h.size} · score ${h.score}\n${h.patternLabel}`}</title>
+            </circle>
+          </g>
+        )
+      })}
+      <text x="14" y="20" fontSize="10" fill="#64748b">
+        ML hotspot clusters · lat/lng projection
+      </text>
     </svg>
   )
 }
