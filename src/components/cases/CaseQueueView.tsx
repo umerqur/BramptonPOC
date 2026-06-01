@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import RiskBadge from '../RiskBadge'
+import AdvisoryNotice from '../AdvisoryNotice'
 import { RISK_LEVELS, type FilterOptions, type RequestRow } from '../../services/municipalServiceRequests'
 
 const DATA_NOTE =
@@ -58,6 +59,10 @@ export default function CaseQueueView({
           </p>
         </div>
         {statusSlot}
+      </div>
+
+      <div className="mt-6">
+        <AdvisoryNotice />
       </div>
 
       <div className="mt-6 card p-4">
@@ -120,14 +125,17 @@ export default function CaseQueueView({
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-ink-subtle">
               <tr className="text-left">
-                <Th>Request ID</Th>
+                <Th>Source ID</Th>
                 <Th>Category</Th>
                 <Th>District</Th>
-                <Th>Address</Th>
+                <Th>Status</Th>
                 <Th className="text-right">Days open</Th>
                 <Th className="text-right">Risk score</Th>
-                <Th>Level</Th>
-                <Th>Recommended action</Th>
+                <Th>Risk level</Th>
+                <Th className="text-right">ML pattern prob.</Th>
+                <Th>ML pattern label</Th>
+                <Th className="text-right">Hotspot score</Th>
+                <Th>Hotspot label</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -140,23 +148,26 @@ export default function CaseQueueView({
                   </Td>
                   <Td>{c.category}</Td>
                   <Td>{c.district}</Td>
-                  <Td className="text-ink-muted">{c.address}</Td>
+                  <Td className="text-ink-muted">{c.status}</Td>
                   <Td className="text-right tabular-nums">{c.daysOpen}</Td>
                   <Td className="text-right tabular-nums font-medium">{c.riskScore}</Td>
                   <Td><RiskBadge risk={c.risk} /></Td>
-                  <Td className="text-ink-muted">{c.recommendedAction}</Td>
+                  <Td className="text-right tabular-nums">{formatProb(c.mlProbability)}</Td>
+                  <Td className="text-ink-muted">{c.mlPatternLabel}</Td>
+                  <Td className="text-right tabular-nums">{formatScore(c.mlHotspotScore)}</Td>
+                  <Td className="text-ink-muted">{c.mlHotspotLabel}</Td>
                 </tr>
               ))}
               {loading && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-ink-subtle text-sm">
+                  <td colSpan={11} className="px-4 py-10 text-center text-ink-subtle text-sm">
                     Loading service requests…
                   </td>
                 </tr>
               )}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-ink-subtle text-sm">
+                  <td colSpan={11} className="px-4 py-10 text-center text-ink-subtle text-sm">
                     No service requests match the current filters.
                   </td>
                 </tr>
@@ -170,8 +181,20 @@ export default function CaseQueueView({
 }
 
 function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <th className={`px-4 py-3 text-xs font-semibold uppercase tracking-wider ${className}`}>{children}</th>
+  return <th className={`px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${className}`}>{children}</th>
 }
 function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <td className={`px-4 py-3 ${className}`}>{children}</td>
+  return <td className={`px-4 py-3 whitespace-nowrap ${className}`}>{children}</td>
+}
+
+/** Format an ML probability (0–1) as a percentage, or a dash when absent. */
+function formatProb(value: number | null): string {
+  if (value == null) return '—'
+  return `${Math.round(value * 100)}%`
+}
+
+/** Format an ML hotspot score to two decimals, or a dash when absent. */
+function formatScore(value: number | null): string {
+  if (value == null) return '—'
+  return value.toFixed(2)
 }

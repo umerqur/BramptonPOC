@@ -2,11 +2,23 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
 import type { Risk } from '../data/types'
 
-export const TABLE = 'municipal_service_requests'
+// Primary data source: the ML-enriched view of municipal service requests.
+// This table carries the base service-request columns plus advisory ML
+// pattern-detection and hotspot fields produced by the local PyTorch pipeline.
+export const TABLE = 'municipal_service_requests_ml_enriched'
 
 /**
- * Shape of a row in the Supabase `municipal_service_requests` table.
- * Mirrors supabase/migrations/001_create_municipal_service_requests.sql.
+ * Standard advisory disclaimer for all ML-derived outputs. Surfaced in the UI
+ * wherever an ML signal is shown.
+ */
+export const ML_ADVISORY =
+  'ML outputs are advisory pattern detection signals only. They are not enforcement decisions. Final decisions remain with authorized municipal staff.'
+
+/**
+ * Shape of a row in the Supabase `municipal_service_requests_ml_enriched`
+ * table. The base columns mirror
+ * supabase/migrations/001_create_municipal_service_requests.sql; the `ml_*`
+ * columns are added by the ML enrichment pipeline.
  */
 export type MunicipalServiceRequestRow = {
   id: string
@@ -39,6 +51,18 @@ export type MunicipalServiceRequestRow = {
   risk_level: string | null
   recommended_action: string | null
   risk_drivers: string | null
+  // --- ML enrichment fields (advisory pattern detection only) ---
+  ml_violation_probability: number | null
+  ml_violation_pattern_class: number | null
+  ml_violation_pattern_label: string | null
+  ml_model_name: string | null
+  ml_model_version: string | null
+  ml_decision_threshold: number | null
+  ml_output_type: string | null
+  ml_hotspot_cluster_id: number | null
+  ml_hotspot_cluster_size: number | null
+  ml_hotspot_score: number | null
+  ml_hotspot_label: string | null
 }
 
 /**
@@ -56,6 +80,13 @@ export type RequestRow = {
   risk: Risk
   recommendedAction: string
   status: string
+  // --- advisory ML fields surfaced in the case queue ---
+  mlProbability: number | null
+  mlPatternClass: number | null
+  mlPatternLabel: string
+  mlHotspotScore: number | null
+  mlHotspotLabel: string
+  mlHotspotClusterId: number | null
 }
 
 export type CategoryCount = {
@@ -63,13 +94,31 @@ export type CategoryCount = {
   count: number
 }
 
+/** A single hotspot cluster marker for the geospatial view. */
+export type Hotspot = {
+  clusterId: number
+  size: number
+  score: number
+  patternLabel: string
+  hotspotLabel: string
+  lat: number
+  lng: number
+}
+
 export type DashboardStats = {
   total: number
   highRisk: number
   open: number
   avgDaysOpen: number
+  /** Cases whose ML pattern label is a high-signal tier. */
+  highSignal: number
+  /** Cases whose ML pattern label is a moderate-signal tier. */
+  moderateSignal: number
+  /** Distinct ML hotspot clusters. */
+  hotspotClusters: number
   categoriesByCount: CategoryCount[]
   topHighRisk: RequestRow[]
+  hotspots: Hotspot[]
 }
 
 export type RequestFilters = {
@@ -91,7 +140,7 @@ const HIGH_RISK_LEVELS = ['High', 'Critical']
 
 // Columns selected for table/list views. Keeps payloads small over 49k rows.
 const LIST_COLUMNS =
-  'source_id, category, district, address_label, street_name, status, days_open, risk_score, risk_level, recommended_action'
+  'source_id, category, district, address_label, street_name, status, days_open, risk_score, risk_level, recommended_action, ml_violation_probability, ml_violation_pattern_class, ml_violation_pattern_label, ml_hotspot_score, ml_hotspot_label, ml_hotspot_cluster_id'
 
 /** Coerce an arbitrary risk_level string into the typed Risk union. */
 export function normalizeRisk(value: string | null | undefined): Risk {
@@ -114,6 +163,12 @@ function mapRow(row: Partial<MunicipalServiceRequestRow>): RequestRow {
     risk: normalizeRisk(row.risk_level),
     recommendedAction: row.recommended_action || 'Standard processing',
     status: row.status || 'Unknown',
+    mlProbability: row.ml_violation_probability ?? null,
+    mlPatternClass: row.ml_violation_pattern_class ?? null,
+    mlPatternLabel: row.ml_violation_pattern_label || '—',
+    mlHotspotScore: row.ml_hotspot_score ?? null,
+    mlHotspotLabel: row.ml_hotspot_label || '—',
+    mlHotspotClusterId: row.ml_hotspot_cluster_id ?? null,
   }
 }
 
@@ -216,30 +271,53 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   // Step 1 — foundational read. A failure here is fatal (handled by caller).
   const [totalRes, sampleRes] = await Promise.all([
     client.from(TABLE).select('*', { count: 'exact', head: true }),
-    client.from(TABLE).select('category, days_open, risk_level, is_closed').limit(1000),
+    client
+      .from(TABLE)
+      .select('category, days_open, risk_level, is_closed, ml_violation_pattern_label')
+      .limit(1000),
   ])
   if (totalRes.error) throw totalRes.error
   if (sampleRes.error) throw sampleRes.error
 
   const total = totalRes.count ?? 0
   const sample = (sampleRes.data ?? []) as Array<
-    Pick<MunicipalServiceRequestRow, 'category' | 'days_open' | 'risk_level' | 'is_closed'>
+    Pick<
+      MunicipalServiceRequestRow,
+      'category' | 'days_open' | 'risk_level' | 'is_closed' | 'ml_violation_pattern_label'
+    >
   >
 
   // Step 2 — exact KPI counts and the priority queue. Each degrades on its own
   // instead of taking down the whole dashboard.
-  const [highRisk, open, topHighRisk] = await Promise.all([
-    countWhere((q) => q.in('risk_level', HIGH_RISK_LEVELS)).catch(() =>
-      sample.filter((r) => HIGH_RISK_LEVELS.includes(normalizeRisk(r.risk_level))).length,
-    ),
-    countWhere((q) => q.eq('is_closed', false)).catch(() =>
-      sample.filter((r) => r.is_closed === false).length,
-    ),
-    getHighRiskRequests(6).catch((err) => {
-      console.warn('Priority queue query failed, omitting:', err)
-      return [] as RequestRow[]
-    }),
-  ])
+  const [highRisk, open, highSignal, moderateSignal, hotspotClusters, hotspots, topHighRisk] =
+    await Promise.all([
+      countWhere((q) => q.in('risk_level', HIGH_RISK_LEVELS)).catch(() =>
+        sample.filter((r) => HIGH_RISK_LEVELS.includes(normalizeRisk(r.risk_level))).length,
+      ),
+      countWhere((q) => q.eq('is_closed', false)).catch(() =>
+        sample.filter((r) => r.is_closed === false).length,
+      ),
+      // Signal tiers map to the ML pattern label (high / moderate / low). If the
+      // enrichment uses a different labelling scheme, adjust SIGNAL_MATCH below.
+      countWhere((q) => q.ilike('ml_violation_pattern_label', SIGNAL_MATCH.high)).catch(
+        () => sample.filter((r) => isSignal(r.ml_violation_pattern_label, 'high')).length,
+      ),
+      countWhere((q) => q.ilike('ml_violation_pattern_label', SIGNAL_MATCH.moderate)).catch(
+        () => sample.filter((r) => isSignal(r.ml_violation_pattern_label, 'moderate')).length,
+      ),
+      getHotspotClusterCount(client).catch((err) => {
+        console.warn('Hotspot cluster count failed, omitting:', err)
+        return 0
+      }),
+      getHotspots(client).catch((err) => {
+        console.warn('Hotspot query failed, omitting:', err)
+        return [] as Hotspot[]
+      }),
+      getHighRiskRequests(6).catch((err) => {
+        console.warn('Priority queue query failed, omitting:', err)
+        return [] as RequestRow[]
+      }),
+    ])
 
   // Step 3 — category breakdown and average. Try true DB aggregates first,
   // then fall back to the in-memory sample.
@@ -257,7 +335,82 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     avgDaysOpen = sampled.avgDaysOpen
   }
 
-  return { total, highRisk, open, avgDaysOpen, categoriesByCount, topHighRisk }
+  return {
+    total,
+    highRisk,
+    open,
+    avgDaysOpen,
+    highSignal,
+    moderateSignal,
+    hotspotClusters,
+    categoriesByCount,
+    topHighRisk,
+    hotspots,
+  }
+}
+
+// ML pattern-signal tier matching. Signal tiers are read from
+// `ml_violation_pattern_label` (case-insensitive substring). Centralized here
+// so the labelling scheme can be adjusted in one place.
+const SIGNAL_MATCH = { high: '%high%', moderate: '%moderate%', low: '%low%' } as const
+
+function isSignal(label: string | null | undefined, tier: 'high' | 'moderate' | 'low'): boolean {
+  return String(label ?? '').toLowerCase().includes(tier)
+}
+
+/**
+ * Count of distinct ML hotspot clusters. Uses a PostgREST group-by aggregate
+ * (one row per cluster id) so the payload stays bounded (~hundreds of rows)
+ * rather than scanning all 49k records.
+ */
+async function getHotspotClusterCount(client: NonNullable<typeof supabase>): Promise<number> {
+  const { data, error } = await client.from(TABLE).select('ml_hotspot_cluster_id, n:source_id.count()')
+  if (error) throw error
+  return ((data ?? []) as Array<{ ml_hotspot_cluster_id: number | null }>).filter(
+    (r) => r.ml_hotspot_cluster_id != null,
+  ).length
+}
+
+/**
+ * One representative marker per hotspot cluster for the geospatial view.
+ * Fetches the highest-scoring rows that belong to a cluster and have
+ * coordinates, then keeps the first row seen per cluster id.
+ */
+export async function getHotspots(
+  client: NonNullable<typeof supabase>,
+  limit = 250,
+): Promise<Hotspot[]> {
+  const { data, error } = await client
+    .from(TABLE)
+    .select(
+      'ml_hotspot_cluster_id, ml_hotspot_cluster_size, ml_hotspot_score, ml_hotspot_label, ml_violation_pattern_label, latitude, longitude',
+    )
+    .not('ml_hotspot_cluster_id', 'is', null)
+    .not('latitude', 'is', null)
+    .not('longitude', 'is', null)
+    .order('ml_hotspot_score', { ascending: false, nullsFirst: false })
+    .limit(2000)
+  if (error) throw error
+
+  const seen = new Set<number>()
+  const out: Hotspot[] = []
+  for (const r of (data ?? []) as Array<Partial<MunicipalServiceRequestRow>>) {
+    const clusterId = r.ml_hotspot_cluster_id
+    if (clusterId == null || seen.has(clusterId)) continue
+    if (r.latitude == null || r.longitude == null) continue
+    seen.add(clusterId)
+    out.push({
+      clusterId,
+      size: r.ml_hotspot_cluster_size ?? 0,
+      score: r.ml_hotspot_score ?? 0,
+      patternLabel: r.ml_violation_pattern_label || '—',
+      hotspotLabel: r.ml_hotspot_label || '—',
+      lat: r.latitude,
+      lng: r.longitude,
+    })
+    if (out.length >= limit) break
+  }
+  return out
 }
 
 /**
@@ -328,6 +481,32 @@ export async function getFilterOptions(): Promise<FilterOptions> {
 // fails, so the POC still renders without a live backend. Do not remove.
 // ---------------------------------------------------------------------------
 
+/**
+ * Synthesize advisory ML fields from a mock case so the fallback UI mirrors the
+ * live ML-enriched shape. These are derived from the existing mock signals
+ * (risk + repeat complaints), not real model output.
+ */
+function mockMlFields(c: (typeof cases)[number]): {
+  mlProbability: number
+  mlPatternClass: number
+  mlPatternLabel: string
+  mlHotspotScore: number | null
+  mlHotspotLabel: string
+  mlHotspotClusterId: number | null
+} {
+  const mlProbability = Math.min(1, Math.max(0, Math.round((c.riskScore / 100) * 100) / 100))
+  const tier = c.risk === 'Critical' || c.risk === 'High' ? 'High' : c.risk === 'Medium' ? 'Moderate' : 'Low'
+  const clustered = c.repeatComplaints >= 3
+  return {
+    mlProbability,
+    mlPatternClass: tier === 'High' ? 2 : tier === 'Moderate' ? 1 : 0,
+    mlPatternLabel: `${tier} pattern signal`,
+    mlHotspotScore: clustered ? Math.round(mlProbability * 100) / 100 : null,
+    mlHotspotLabel: clustered ? 'Active cluster' : c.repeatComplaints >= 2 ? 'Emerging cluster' : 'No cluster',
+    mlHotspotClusterId: clustered ? 400 + (Number(c.id.replace(/\D/g, '')) % 13) : null,
+  }
+}
+
 export function mockRequestRows(): RequestRow[] {
   return cases
     .slice()
@@ -342,6 +521,7 @@ export function mockRequestRows(): RequestRow[] {
       risk: c.risk,
       recommendedAction: c.recommendedAction,
       status: c.status,
+      ...mockMlFields(c),
     }))
 }
 
@@ -358,15 +538,38 @@ export function mockDashboardStats(): DashboardStats {
   const rows = mockRequestRows()
   const counts = new Map<string, number>()
   for (const r of rows) counts.set(r.category, (counts.get(r.category) ?? 0) + 1)
+
+  // Build hotspot markers from clustered mock rows with deterministic pseudo
+  // coordinates around a Brampton-area bounding box.
+  const clusterSeen = new Set<number>()
+  const hotspots: Hotspot[] = []
+  rows.forEach((r, i) => {
+    if (r.mlHotspotClusterId == null || clusterSeen.has(r.mlHotspotClusterId)) return
+    clusterSeen.add(r.mlHotspotClusterId)
+    hotspots.push({
+      clusterId: r.mlHotspotClusterId,
+      size: Math.max(2, r.riskScore % 9),
+      score: r.mlHotspotScore ?? 0,
+      patternLabel: r.mlPatternLabel,
+      hotspotLabel: r.mlHotspotLabel,
+      lat: 43.68 + ((i * 7) % 20) / 100,
+      lng: -79.78 + ((i * 11) % 24) / 100,
+    })
+  })
+
   return {
     total: rows.length,
     highRisk: rows.filter((r) => r.risk === 'High' || r.risk === 'Critical').length,
     open: rows.filter((r) => r.status !== 'Closed').length,
     avgDaysOpen: Math.round(rows.reduce((s, r) => s + r.daysOpen, 0) / Math.max(rows.length, 1)),
+    highSignal: rows.filter((r) => isSignal(r.mlPatternLabel, 'high')).length,
+    moderateSignal: rows.filter((r) => isSignal(r.mlPatternLabel, 'moderate')).length,
+    hotspotClusters: clusterSeen.size,
     categoriesByCount: Array.from(counts.entries())
       .map(([category, count]) => ({ category, count }))
       .sort((a, b) => b.count - a.count),
     topHighRisk: rows.slice(0, 6),
+    hotspots,
   }
 }
 

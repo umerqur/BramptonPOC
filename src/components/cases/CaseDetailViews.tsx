@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import RiskBadge from '../RiskBadge'
+import AdvisoryNotice from '../AdvisoryNotice'
 import type { findCase } from '../../data/mockCases'
 import { normalizeRisk, type MunicipalServiceRequestRow } from '../../services/municipalServiceRequests'
 
@@ -52,6 +53,10 @@ export function RequestDetailView({ row, casesPath }: { row: MunicipalServiceReq
         POC — decision support only.
       </div>
 
+      <div className="mt-4">
+        <AdvisoryNotice />
+      </div>
+
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           <Card title="Request detail">
@@ -90,11 +95,38 @@ export function RequestDetailView({ row, casesPath }: { row: MunicipalServiceReq
               )}
             </ul>
           </Card>
+
+          <Card title="ML pattern signal" advisory>
+            <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+              <div>
+                <div className="text-xs text-ink-subtle">Violation pattern probability</div>
+                <div className="text-2xl font-semibold text-navy-900 tabular-nums">
+                  {formatProb(row.ml_violation_probability)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-subtle">Pattern label</div>
+                <div className="mt-1 text-base font-medium text-navy-900">
+                  {row.ml_violation_pattern_label || '—'}
+                </div>
+              </div>
+            </div>
+            <dl className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <Field label="Pattern class" value={row.ml_violation_pattern_class} />
+              <Field label="Decision threshold" value={formatScore(row.ml_decision_threshold)} />
+              <Field label="Model" value={row.ml_model_name} />
+              <Field label="Model version" value={row.ml_model_version} />
+              <Field label="Output type" value={row.ml_output_type} />
+            </dl>
+            <div className="mt-4">
+              <AdvisoryNotice variant="inline" />
+            </div>
+          </Card>
         </div>
 
         <div className="space-y-6">
           <Card title="Recommended action">
-            <div className="text-sm text-ink-muted">Model recommendation, pending staff review</div>
+            <div className="text-sm text-ink-muted">Advisory recommendation, pending staff review</div>
             <div className="mt-2 text-base font-semibold text-navy-900">
               {row.recommended_action || 'Standard processing'}
             </div>
@@ -102,6 +134,19 @@ export function RequestDetailView({ row, casesPath }: { row: MunicipalServiceReq
               <Metric label="Days open" value={row.days_open ?? '—'} />
               <Metric label="Status" value={row.is_closed ? 'Closed' : 'Open'} />
             </div>
+          </Card>
+
+          <Card title="ML hotspot cluster" advisory>
+            {row.ml_hotspot_cluster_id == null ? (
+              <div className="text-sm text-ink-subtle">Not assigned to a hotspot cluster.</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 text-xs text-ink-subtle">
+                <Metric label="Cluster ID" value={row.ml_hotspot_cluster_id} />
+                <Metric label="Cluster size" value={row.ml_hotspot_cluster_size ?? '—'} />
+                <Metric label="Hotspot score" value={formatScore(row.ml_hotspot_score)} />
+                <Metric label="Hotspot label" value={row.ml_hotspot_label || '—'} />
+              </div>
+            )}
           </Card>
 
           <Card title="Record">
@@ -149,6 +194,10 @@ export function MockCaseDetailView({ c, casesPath }: { c: MockCase; casesPath: s
 
       <div className="mt-3 text-[11px] text-ink-subtle">
         Buttons disabled in POC — decision support only. Final action remains with authorized municipal staff.
+      </div>
+
+      <div className="mt-4">
+        <AdvisoryNotice />
       </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
@@ -258,11 +307,13 @@ function Card({
   title,
   hint,
   aiGenerated,
+  advisory,
   children,
 }: {
   title: string
   hint?: string
   aiGenerated?: boolean
+  advisory?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -276,12 +327,30 @@ function Card({
               AI generated
             </span>
           )}
+          {advisory && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-amber-800 ring-1 ring-inset ring-amber-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              Advisory signal
+            </span>
+          )}
           {hint && <span>{hint}</span>}
         </div>
       </div>
       <div className="mt-4">{children}</div>
     </div>
   )
+}
+
+/** Format an ML probability (0–1) as a percentage, or a dash when absent. */
+function formatProb(value: number | null): string {
+  if (value == null) return '—'
+  return `${Math.round(value * 100)}%`
+}
+
+/** Format an ML score / threshold to two decimals, or a dash when absent. */
+function formatScore(value: number | null): string {
+  if (value == null) return '—'
+  return value.toFixed(2)
 }
 
 function Metric({ label, value }: { label: string; value: React.ReactNode }) {
