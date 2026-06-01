@@ -10,6 +10,7 @@ export const ALLOWED_EMAILS = [
   'umer.qureshi@gmail.com',
   'zeddotes@gmail.com',
   'hasham.qureshi@gmail.com',
+  'liboluo@hotmail.com',
 ] as const
 
 export const RESTRICTED_MESSAGE = 'Access is restricted to authorized project users.'
