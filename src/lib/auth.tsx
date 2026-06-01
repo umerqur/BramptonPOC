@@ -6,7 +6,11 @@ import { supabase, isSupabaseConfigured } from './supabase'
  * Allowlist of users permitted to access the authenticated `/app` area.
  * There is no public signup — magic links are only sent to these addresses.
  */
-export const ALLOWED_EMAILS = ['umer.qureshi@gmail.com'] as const
+export const ALLOWED_EMAILS = [
+  'umer.qureshi@gmail.com',
+  'zeddotes@gmail.com',
+  'hasham.qureshi@gmail.com',
+] as const
 
 export const RESTRICTED_MESSAGE = 'Access is restricted to authorized project users.'
 
