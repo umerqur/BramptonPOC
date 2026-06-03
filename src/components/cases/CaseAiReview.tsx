@@ -16,6 +16,10 @@ import {
  * component only posts the selected case fields and renders the structured
  * result. This is decision support only — it does not replace the existing rule
  * based POC triage and does not make any final enforcement decision.
+ *
+ * `compact` tightens spacing so the full result fits inside the narrow staff
+ * command panel (the queue preview), where it must stay visible without the user
+ * scrolling to the bottom of a long page.
  */
 export default function CaseAiReview({
   input,
@@ -56,12 +60,10 @@ export default function CaseAiReview({
   }
 
   return (
-    <div className={`card ${compact ? 'p-5' : 'p-6'}`}>
+    <div className={`card ring-1 ring-inset ring-accent-100 ${compact ? 'p-4' : 'p-6'}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className={`font-semibold text-navy-900 ${compact ? 'text-sm' : 'text-sm'}`}>
-            AI assisted staff review
-          </h3>
+          <h3 className="text-sm font-semibold text-navy-900">AI assisted staff review</h3>
           <p className="mt-0.5 text-[11px] text-ink-subtle">Generated from selected case only.</p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
@@ -80,7 +82,7 @@ export default function CaseAiReview({
         type="button"
         onClick={handleGenerate}
         disabled={loading}
-        className="btn-primary mt-4 disabled:opacity-50"
+        className="btn-primary mt-4 w-full disabled:opacity-50"
       >
         {loading ? 'Generating AI review…' : result ? 'Regenerate AI review' : 'Generate AI review'}
       </button>
@@ -92,14 +94,25 @@ export default function CaseAiReview({
       )}
 
       {result && (
-        <div className="mt-5 space-y-4">
+        <div className={compact ? 'mt-4 space-y-3' : 'mt-5 space-y-4'}>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-md bg-accent-50 px-2 py-0.5 text-[11px] font-medium text-accent-800 ring-1 ring-inset ring-accent-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-500" />
+              Generated
+            </span>
+            <span className="text-[11px] text-ink-subtle">Review and decide — this does not replace human judgement.</span>
+          </div>
           <ReviewField label="Staff summary" value={result.staff_summary} />
           <ReviewField label="Recommended next action" value={result.recommended_next_action} />
           <ReviewField label="Missing information" value={result.missing_information} />
           <ReviewField label="Priority rationale" value={result.priority_rationale} />
           <div>
             <div className="text-[10px] uppercase tracking-wider text-ink-subtle">Resident response draft</div>
-            <pre className="mt-1 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 font-sans text-sm leading-relaxed text-ink">
+            <pre
+              className={`mt-1 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 font-sans text-sm leading-relaxed text-ink ${
+                compact ? 'max-h-56 overflow-y-auto' : ''
+              }`}
+            >
               {result.resident_response_draft || '—'}
             </pre>
             <p className="mt-1 text-[11px] text-ink-subtle">Staff must review and edit before sending to a resident.</p>

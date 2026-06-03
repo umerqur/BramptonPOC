@@ -52,15 +52,25 @@ export function CaseQueueSplit({
                   selected={c.id === selectedId}
                   onSelect={() => setSelectedId(c.id)}
                 />
+                {/* Mobile: the staff command panel (incl. AI review) appears
+                    directly under the selected card — no horizontal scroll and
+                    no hidden result. The desktop sticky panel is hidden here. */}
+                {c.id === selectedId && (
+                  <div className="mt-3 lg:hidden">
+                    <PreviewPanel row={c} casesPath={casesPath} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      {/* Right: selected case preview (desktop only) */}
+      {/* Right: selected case — sticky staff command panel (desktop only). The
+          panel scrolls internally if it grows past the viewport so the AI
+          review result stays reachable without scrolling the whole page. */}
       <aside className="hidden lg:col-span-5 lg:block">
-        <div className="sticky top-24">
+        <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-1">
           <PreviewPanel row={selected} casesPath={casesPath} />
         </div>
       </aside>
@@ -134,7 +144,13 @@ export function QueueCard({
   )
 }
 
-/** Selected-case preview panel for the desktop two-column layout. */
+/**
+ * Selected-case staff command panel. This is the primary place the AI review is
+ * surfaced: case context up top, the rule based triage, then the on-demand AI
+ * assisted staff review, and finally the link to the full record. The AI review
+ * result renders inside this visible panel, so staff never have to scroll a long
+ * page to find it.
+ */
 export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; casesPath: string }) {
   if (!row) {
     return (
@@ -145,56 +161,62 @@ export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; cas
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Case context */}
       <div className="card overflow-hidden">
-      <div className="border-b border-slate-100 px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs font-medium uppercase tracking-wide text-ink-subtle">Case preview</div>
-            <div className="mt-0.5 text-lg font-semibold text-navy-900">{row.id}</div>
-            <div className="text-sm text-ink">{row.complaintType}</div>
+        <div className="border-b border-slate-100 px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-medium uppercase tracking-wide text-ink-subtle">Case preview</div>
+              <div className="mt-0.5 text-lg font-semibold text-navy-900">{row.id}</div>
+              <div className="text-sm text-ink">{row.complaintType}</div>
+            </div>
+            <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDate(row.submittedAt)}</span>
           </div>
-          <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDate(row.submittedAt)}</span>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <StatusBadge status={row.status} />
+            <WorkflowStageBadge stage={row.workflowStage} />
+            <PriorityBadge priority={row.priority} />
+          </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <StatusBadge status={row.status} />
-          <WorkflowStageBadge stage={row.workflowStage} />
-          <PriorityBadge priority={row.priority} />
+
+        <div className="px-5 py-4">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+            <Field label="Department" value={row.assignedDepartment} />
+            <Field label="Ward or area" value={row.wardOrArea} />
+            <Field label="Submitted" value={formatDate(row.submittedAt)} />
+          </dl>
+
+          {row.description && (
+            <Block label="Description">
+              <p className="text-sm text-ink-muted">{row.description}</p>
+            </Block>
+          )}
+
+          {/* Existing rule based triage (distinct from the Claude AI review below). */}
+          <Block label="Rule based AI category">
+            <p className="text-sm text-ink-muted">{row.aiCategory}</p>
+          </Block>
+
+          <Block label="Rule based AI summary">
+            <p className="text-sm text-ink-muted">{row.aiSummary}</p>
+          </Block>
+
+          {row.recommendedAction && (
+            <Block label="Rule based recommended action">
+              <p className="text-sm text-ink-muted">{row.recommendedAction}</p>
+            </Block>
+          )}
         </div>
       </div>
 
-      <div className="px-5 py-4">
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-          <Field label="Department" value={row.assignedDepartment} />
-          <Field label="Ward or area" value={row.wardOrArea} />
-          <Field label="AI category" value={row.aiCategory} />
-          <Field label="Submitted" value={formatDate(row.submittedAt)} />
-        </dl>
-
-        {row.description && (
-          <Block label="Description">
-            <p className="text-sm text-ink-muted">{row.description}</p>
-          </Block>
-        )}
-
-        <Block label="AI summary">
-          <p className="text-sm text-ink-muted">{row.aiSummary}</p>
-        </Block>
-
-        {row.recommendedAction && (
-          <Block label="AI recommended action">
-            <p className="text-sm text-ink-muted">{row.recommendedAction}</p>
-          </Block>
-        )}
-
-        <Link to={`${casesPath}/${encodeURIComponent(row.id)}`} className="btn-primary mt-5 w-full">
-          Open full case detail
-        </Link>
-      </div>
-      </div>
-
-      {/* AI assisted staff review for the selected case only — on staff click */}
+      {/* AI assisted staff review for the selected case only — on staff click.
+          Keyed to the case so it resets when the selection changes. */}
       <CaseAiReview key={row.id} input={caseAiReviewInputFromRow(row)} compact />
+
+      <Link to={`${casesPath}/${encodeURIComponent(row.id)}`} className="btn-secondary w-full">
+        Open full case detail
+      </Link>
     </div>
   )
 }
