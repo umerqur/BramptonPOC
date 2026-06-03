@@ -13,55 +13,59 @@ const aiCapabilities = [
 export default function LandingPage() {
   return (
     <div>
-      {/* Hero */}
-      <section className="relative overflow-hidden bg-navy-900 text-white">
-        <div
-          className="absolute inset-0 opacity-[0.07]"
-          style={{
-            backgroundImage:
-              'radial-gradient(circle at 20% 20%, white 1px, transparent 1px), radial-gradient(circle at 80% 60%, white 1px, transparent 1px)',
-            backgroundSize: '32px 32px, 48px 48px',
-          }}
-        />
-        <div className="container-page relative py-20 lg:py-28">
-          <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white ring-1 ring-inset ring-white/20">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
-              Municipal AI Proof of Concept
-            </div>
-            <h1 className="mt-5 text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight">
-              Proactive Enforcement Intelligence for Municipal Operations
-            </h1>
-            <p className="mt-5 text-lg text-navy-100 max-w-2xl">
-              AI assisted triage, case prioritization, and operational intelligence for municipal enforcement teams.
-            </p>
-            <div className="mt-8 space-y-4 text-sm sm:text-base text-navy-100 max-w-2xl">
-              <p>
-                A proof of concept system that helps municipal enforcement teams identify repeat complaint patterns,
-                prioritize inspection queues, summarize case history, and prepare officer ready case briefings.
-              </p>
-              <p>
-                Built around real public 311 service request data, normalized into a municipal enforcement schema,
-                with synthetic fields used only where internal patrol, ticket, or closure data is not publicly
-                available. No private City data is required for the initial POC.
-              </p>
-            </div>
+      {/* Hero — CTA first, blended image background */}
+      <section className="relative overflow-hidden bg-navy-950 text-white">
+        {/* Image as a right-side background layer on desktop, blended into the
+            navy via a left-to-right gradient. Hidden on mobile (shown below). */}
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-0 hidden w-[62%] lg:block">
+          <img
+            src="/images/brampton-poc-hero.png"
+            alt=""
+            aria-hidden="true"
+            className="h-full w-full object-cover opacity-85 brightness-110 contrast-105"
+          />
+          {/* Strong navy gradient on the left so the headline stays readable,
+              fading to mostly clear on the right to reveal the image. */}
+          <div className="absolute inset-0 bg-gradient-to-r from-navy-950 via-navy-950/70 to-navy-950/15" />
+          <div className="absolute inset-0 bg-gradient-to-t from-navy-950/45 via-transparent to-navy-950/20" />
+        </div>
 
-            <div className="mt-10 flex flex-col sm:flex-row gap-3">
+        {/* Left-anchored overlay to keep headline text readable, fading out
+            on the right so the image remains visible. */}
+        <div className="absolute inset-0 z-10 bg-gradient-to-r from-navy-950 via-navy-950/88 to-navy-950/20" />
+
+        <div className="container-page relative z-20 py-20 lg:py-28">
+          <div className="relative z-20 max-w-xl">
+            <h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05] font-semibold tracking-tight text-white drop-shadow-sm">
+              Help enforcement teams see what needs attention first.
+            </h1>
+            <p className="mt-5 text-lg text-white/90">
+              AI assisted triage for repeat complaints, stale files, and high risk service requests.
+            </p>
+
+            <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <Link to="/dashboard" className="btn-accent">
                 View Demo Dashboard
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
               </Link>
               <Link to="/methodology" className="btn-secondary bg-white/5 text-white border-white/20 hover:bg-white/10 hover:border-white/40">
-                Read POC Methodology
+                See Methodology
               </Link>
             </div>
 
-            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-navy-200">
-              <span className="inline-flex items-center gap-1.5"><Dot /> Real public 311 data + synthetic internal fields</span>
-              <span className="inline-flex items-center gap-1.5"><Dot /> Decision support, not automated enforcement</span>
-              <span className="inline-flex items-center gap-1.5"><Dot /> Human in the loop by design</span>
-            </div>
+            <p className="mt-5 text-sm text-white/75">
+              Built with public 311 style data for the POC. No private City data required.
+            </p>
+            <p className="mt-2 text-sm text-white/65">
+              Decision support only. Human review required.
+            </p>
+
+            {/* Mobile image: a wide blended visual below the CTA, not a card. */}
+            <img
+              src="/images/brampton-poc-hero.png"
+              alt="Municipal enforcement operations"
+              className="mt-10 h-56 w-full rounded-2xl object-cover lg:hidden"
+            />
           </div>
         </div>
       </section>
@@ -70,9 +74,9 @@ export default function LandingPage() {
       <section className="container-page py-16 lg:py-20">
         <SectionHeading eyebrow="01 — Problem" title="High complaint volume, limited time to triage" />
         <p className="mt-4 max-w-3xl text-ink-muted">
-          Municipal enforcement teams receive large volumes of complaints across property standards, parking, noise,
-          waste, zoning, licensing, and other bylaw categories. Reviewing repeat complaints, identifying hotspots, and
-          preparing case packages can be manual and time consuming.
+          Municipal complaint teams receive large volumes of complaints across property standards, parking, noise,
+          waste, zoning, licensing, and other bylaw categories. Validating, triaging, assigning, and closing repeat
+          complaints can be manual and time consuming.
         </p>
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -104,7 +108,7 @@ export default function LandingPage() {
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {[
-              { title: 'Real public 311 data layer', body: 'NYC 311 service request data is normalized into a Brampton compatible enforcement schema, with synthetic records used only for missing internal workflow fields.' },
+              { title: 'Real public 311 data layer', body: 'Toronto 311 public benchmark complaint data is normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for missing internal workflow fields. Brampton GeoHub ward boundaries provide real local context.' },
               { title: 'Transparent scoring', body: 'A rules based risk score with explainable drivers and ML ready feature design.' },
               { title: 'Officer ready outputs', body: 'Case summaries, recommended actions, and briefing notes designed for staff review.' },
             ].map((c) => (
@@ -174,8 +178,4 @@ export default function LandingPage() {
       </section>
     </div>
   )
-}
-
-function Dot() {
-  return <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
 }

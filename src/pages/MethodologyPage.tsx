@@ -37,14 +37,14 @@ export default function MethodologyPage() {
 
           <Section id="data" title="2. Data sources">
             <ul className="space-y-2 list-disc pl-5">
-              <li><strong>Real public NYC 311 service request data:</strong> actual open municipal 311 service request records used to model real intake volume, categories, and complaint patterns.</li>
-              <li><strong>Normalized municipal service request schema:</strong> the 311 data is cleaned and mapped into a standardized, Brampton compatible enforcement schema so records can be compared and scored consistently.</li>
-              <li><strong>Open geospatial / reference data:</strong> ward boundaries, road networks, and parcel level reference data from open data portals, where available.</li>
+              <li><strong>Toronto 311 public benchmark complaint data:</strong> actual open municipal 311 complaint records used to demonstrate the complaint workflow — real intake volume, categories, and complaint patterns.</li>
+              <li><strong>Normalized municipal complaint schema:</strong> the 311 data is cleaned and mapped into a standardized, Brampton compatible complaint workflow schema so records can be compared and processed consistently.</li>
+              <li><strong>Brampton GeoHub ward boundaries:</strong> real Brampton ward and electoral area boundary data providing local geographic context. Benchmark complaints are not geographically joined to Brampton wards yet.</li>
               <li><strong>Synthetic placeholders for non public internal records:</strong> used only where data is not publicly available — patrol logs, ticket history, officer notes, and internal closure workflow.</li>
             </ul>
             <p className="mt-3 text-sm text-ink-muted">No private City data is required for this phase. City provided data can be integrated later under privacy and cybersecurity controls.</p>
             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-ink-muted">
-              <span className="font-semibold text-navy-900">Current dataset:</span> public NYC 311 service requests normalized for POC modelling. Not Brampton operational data.
+              <span className="font-semibold text-navy-900">Current dataset:</span> Toronto 311 public benchmark complaints used to demonstrate the complaint workflow. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data.
             </div>
           </Section>
 
@@ -90,7 +90,7 @@ export default function MethodologyPage() {
 
           <Section id="limits" title="7. Known limitations">
             <ul className="space-y-2 list-disc pl-5">
-              <li>NYC 311 data reflects real municipal service request patterns, but it is not Brampton enforcement data. Brampton specific calibration requires City provided complaints, tickets, patrol logs, closure outcomes, and case management data.</li>
+              <li>Toronto 311 benchmark data reflects real municipal complaint patterns, but it is not Brampton operational complaint data. Brampton specific calibration requires City provided complaints, tickets, patrol logs, closure outcomes, and case management data.</li>
               <li>Rules based scoring is intentionally simple; production deployment would benefit from ML calibration on labeled outcomes.</li>
               <li>Geospatial clustering uses simplified distance heuristics in the POC.</li>
               <li>The POC does not address multilingual intake; this would be added in a production scope.</li>
@@ -102,6 +102,12 @@ export default function MethodologyPage() {
               Next phase work would focus on: secure integration with City systems under appropriate privacy and
               cybersecurity controls, calibration of the scoring model against labeled outcome data, multilingual
               intake, and operational integration with existing case management workflows.
+            </p>
+            <p className="mt-3">
+              Automated or agentic workflows are intentionally <strong>out of scope</strong> for this POC. They would
+              be considered only as a later phase, once the data model, dashboards, risk scoring, governance, and the
+              human-review process are proven in a Brampton context. The current product leads with explainable
+              decision support and human oversight.
             </p>
           </Section>
         </article>

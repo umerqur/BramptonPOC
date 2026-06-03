@@ -2,14 +2,6 @@ import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import Logo from './Logo'
 
-const nav = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/how-it-works', label: 'How It Works' },
-  { to: '/dashboard', label: 'Demo Dashboard' },
-  { to: '/privacy', label: 'Privacy' },
-  { to: '/methodology', label: 'Methodology' },
-]
-
 export default function Header() {
   const [open, setOpen] = useState(false)
 
@@ -24,25 +16,33 @@ export default function Header() {
           </div>
         </Link>
 
-        <nav className="hidden lg:flex items-center gap-1">
-          {nav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `px-3 py-2 rounded-md text-sm font-medium transition ${
-                  isActive
-                    ? 'text-navy-900 bg-slate-100'
-                    : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-          <Link to="/login" className="ml-2 btn-primary text-sm py-2 px-4">
+        <nav className="hidden lg:flex items-center gap-2">
+          <NavLink
+            to="/methodology"
+            className={({ isActive }) =>
+              `px-3 py-2 rounded-md text-sm font-medium transition ${
+                isActive
+                  ? 'text-navy-900 bg-slate-100'
+                  : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
+              }`
+            }
+          >
+            Methodology
+          </NavLink>
+          <NavLink
+            to="/login"
+            className={({ isActive }) =>
+              `px-3 py-2 rounded-md text-sm font-medium transition ${
+                isActive
+                  ? 'text-navy-900 bg-slate-100'
+                  : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
+              }`
+            }
+          >
             Login
+          </NavLink>
+          <Link to="/dashboard" className="btn-primary text-sm py-2 px-4">
+            Workflow Demo
           </Link>
         </nav>
 
@@ -60,23 +60,30 @@ export default function Header() {
       {open && (
         <div className="lg:hidden border-t border-slate-200 bg-white">
           <div className="container-page py-3 flex flex-col gap-1">
-            {nav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                onClick={() => setOpen(false)}
-                className={({ isActive }) =>
-                  `px-3 py-2 rounded-md text-sm font-medium ${
-                    isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted'
-                  }`
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
-            <Link to="/login" onClick={() => setOpen(false)} className="btn-primary mt-2">
+            <NavLink
+              to="/methodology"
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2 rounded-md text-sm font-medium ${
+                  isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted'
+                }`
+              }
+            >
+              Methodology
+            </NavLink>
+            <NavLink
+              to="/login"
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2 rounded-md text-sm font-medium ${
+                  isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted'
+                }`
+              }
+            >
               Login
+            </NavLink>
+            <Link to="/dashboard" onClick={() => setOpen(false)} className="btn-primary mt-2">
+              View Workflow Demo
             </Link>
           </div>
         </div>
