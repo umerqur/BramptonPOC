@@ -278,13 +278,20 @@ function WardBoundaryPanel({
 }
 
 const SCENARIO_DISCLAIMER =
-  'Synthetic Brampton ward workload scenario. Not Brampton operational complaint data. This layer is illustrative only — it demonstrates what a ward-level workload heatmap will look like once Brampton provides operational complaint data. Toronto 311 benchmark records are never plotted onto Brampton wards.'
+  'Synthetic Brampton ward workload scenario. Based on invented scenario values for demo visualization only. Not real Brampton complaint data and not a risk prediction. Wards are shaded by complaint volume to show workload intensity — higher complaint volume means higher workload intensity. This previews what a ward-level workload view will look like once Brampton provides operational complaint data. Toronto 311 benchmark records are never plotted onto Brampton wards.'
 
-/** Heat color from low (green) → high (red) for a normalized value t in [0,1]. */
+/** Workload-intensity color from low (green) → high (red) for a normalized value t in [0,1]. */
 function heatColor(t: number): string {
   const clamped = Math.max(0, Math.min(1, t))
   const hue = 140 - clamped * 128 // 140 green → 12 red, through amber
   return `hsl(${hue.toFixed(0)}, 78%, 52%)`
+}
+
+/** Workload-intensity tier label for a normalized value t in [0,1]. */
+function workloadTier(t: number): string {
+  if (t < 1 / 3) return 'Low workload'
+  if (t < 2 / 3) return 'Medium workload'
+  return 'High workload'
 }
 
 /**
@@ -349,7 +356,7 @@ function WardScenarioOverlay({
             <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
             Synthetic scenario overlay
           </span>
-          <span className="text-sm font-semibold text-navy-900">Ward workload heatmap (preview)</span>
+          <span className="text-sm font-semibold text-navy-900">Ward workload intensity (preview)</span>
         </div>
         <span className="text-xs text-ink-subtle">Shaded by complaint volume</span>
       </div>
@@ -386,9 +393,10 @@ function WardScenarioOverlay({
                       strokeLinejoin="round"
                     >
                       <title>
-                        {shape.label} — SYNTHETIC scenario (not operational data)
+                        {shape.label} — SYNTHETIC scenario (not operational data, not a risk prediction)
                         {s
-                          ? `\nComplaint volume: ${num(s.complaint_volume)}` +
+                          ? `\nWorkload intensity: ${workloadTier(norm(s.complaint_volume))}` +
+                            `\nComplaint volume: ${num(s.complaint_volume)}` +
                             `\nOpen cases: ${num(s.open_cases)}` +
                             `\nIn progress: ${num(s.in_progress_cases)}` +
                             `\nClosed: ${num(s.closed_cases)}` +
@@ -417,21 +425,25 @@ function WardScenarioOverlay({
                 ))}
               </svg>
 
-              {/* Legend */}
+              {/* Legend — workload intensity */}
               <figcaption className="relative mt-3">
-                <div className="flex items-center gap-3 text-[11px] text-ink-subtle">
-                  <span>Lower volume</span>
-                  <span
-                    className="h-2 flex-1 rounded-full"
-                    style={{
-                      background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
-                    }}
-                  />
-                  <span>Higher volume</span>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                  Workload intensity
                 </div>
-                <div className="mt-1 flex justify-between text-[10px] text-ink-subtle tabular-nums">
-                  <span>{num(min)}</span>
-                  <span>{num(max)}</span>
+                <div
+                  className="mt-1 h-2 rounded-full"
+                  style={{
+                    background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
+                  }}
+                />
+                <div className="mt-1 flex justify-between text-[11px] text-ink-subtle">
+                  <span>Low workload</span>
+                  <span>Medium workload</span>
+                  <span>High workload</span>
+                </div>
+                <div className="mt-0.5 flex justify-between text-[10px] text-ink-subtle tabular-nums">
+                  <span>{num(min)} complaints</span>
+                  <span>{num(max)} complaints</span>
                 </div>
               </figcaption>
             </figure>
@@ -447,13 +459,16 @@ function WardScenarioOverlay({
           <div className="grid gap-3 sm:grid-cols-2">
             {sortedScenarios.map((s) => (
               <div key={s.id} className="rounded-lg border border-slate-200 p-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-navy-900">{s.ward}</span>
-                  <span
-                    aria-hidden
-                    className="inline-block h-3 w-3 rounded-full"
-                    style={{ backgroundColor: heatColor(norm(s.complaint_volume)) }}
-                  />
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-ink-muted">
+                    <span
+                      aria-hidden
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ backgroundColor: heatColor(norm(s.complaint_volume)) }}
+                    />
+                    {workloadTier(norm(s.complaint_volume))}
+                  </span>
                 </div>
                 <div className="mt-1 text-lg font-semibold text-navy-900 tabular-nums">{num(s.complaint_volume)}</div>
                 <div className="text-[10px] uppercase tracking-wider text-ink-subtle">complaint volume</div>

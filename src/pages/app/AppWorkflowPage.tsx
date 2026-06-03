@@ -299,6 +299,10 @@ export default function AppWorkflowPage() {
             >
               Open triage queue →
             </Link>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+              Priority is rule-based POC triage generated from complaint type, division, and status. It is not machine
+              learning and not a risk prediction.
+            </p>
           </div>
         </div>
       </div>
