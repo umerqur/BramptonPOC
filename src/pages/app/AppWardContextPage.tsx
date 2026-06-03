@@ -6,12 +6,21 @@ import {
   type WardWorkloadScenario,
 } from '../../services/municipalServiceRequests'
 
-const JOIN_NOTE =
-  'Brampton ward boundaries are real GeoHub data. Toronto benchmark complaints are not geographically joined to Brampton wards yet. Once Brampton provides operational complaint data, cases can be joined to these wards for local workload analysis.'
+// Required disclaimer for the synthetic workload scenario overlay.
+const SCENARIO_DISCLAIMER =
+  'Synthetic Brampton ward workload scenario. Not Brampton operational complaint data.'
 
-// Authenticated Brampton geographic context. Demonstrates that real Brampton
-// GeoHub ward boundary data exists, rendered as an SVG boundary preview plus a
-// card grid and table of the wards.
+// Longer-form context for the scenario, kept as supporting fine print. Wording is
+// workload intensity (not risk) and never implies Toronto 311 benchmark records
+// were plotted onto Brampton wards.
+const SCENARIO_CONTEXT =
+  'Real Brampton GeoHub ward boundaries are shaded by an invented workload scenario to preview how a ward-level workload view will look once Brampton provides operational complaint data. Wards are shaded by complaint volume to show workload intensity — higher complaint volume means higher workload intensity. These are illustrative scenario values only, not a risk prediction, and Toronto 311 benchmark records are never plotted onto Brampton wards.'
+
+// Authenticated Brampton geographic context. The real GeoHub ward boundary
+// geometry is used as the BASE layer of a single workload-context map, shaded by
+// a clearly-labelled SYNTHETIC workload scenario overlay. The raw geometry-only
+// map and ward metadata table are collapsed into a small validation accordion so
+// the actual POC value (the workload view) is the first thing the user sees.
 export default function AppWardContextPage() {
   const [wards, setWards] = useState<WardBoundary[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,146 +76,398 @@ export default function AppWardContextPage() {
     <div className="container-page py-10">
       <div className="section-eyebrow">Local Context</div>
       <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-        Brampton Geographic Context
+        Brampton ward workload context
       </h1>
       <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-        Real Brampton GeoHub ward boundaries provide local geographic context for the complaint workflow platform.
+        Real Brampton GeoHub ward boundaries provide the local geographic base layer, shaded by a synthetic
+        workload-intensity scenario to preview ward-level workload once Brampton provides operational complaint data.
       </p>
 
-      <div
-        role="note"
-        className="mt-6 flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900"
-      >
-        <span aria-hidden className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500" />
-        <span>{JOIN_NOTE}</span>
-      </div>
-
-      <div className="mt-6 text-sm text-ink-subtle">
-        {loading
-          ? 'Loading ward boundaries…'
-          : querySucceeded
-            ? `${wards.length.toLocaleString()} Brampton ward${wards.length === 1 ? '' : 's'}`
-            : 'Ward boundaries unavailable'}
-      </div>
-
       {error && (
-        <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-900">
+        <div className="mt-6 rounded-md border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-900">
           <div className="font-semibold">Could not load ward boundaries from Supabase.</div>
           <pre className="mt-1.5 whitespace-pre-wrap break-words font-mono text-xs text-rose-800">{error}</pre>
         </div>
       )}
 
-      {/* Map / boundary preview panel — REAL Brampton GeoHub geometry */}
-      {!error && <WardBoundaryPanel wards={wards} loading={loading} loaded={loaded} />}
-
-      {/* Synthetic workload scenario overlay — clearly labelled, NOT operational data */}
-      {!error && wards.length > 0 && scenarios.length > 0 && (
-        <WardScenarioOverlay wards={wards} scenarios={scenarios} />
+      {/* PRIMARY SECTION — real ward boundaries (base layer) + synthetic workload overlay */}
+      {!error && (
+        <WardWorkloadContext wards={wards} scenarios={scenarios} loading={loading} loaded={loaded} />
       )}
 
-      {/* Cards */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {wards.map((w) => (
-          <div key={w.id} className="card p-5">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-navy-900">{w.ward || `Ward ${w.objectid ?? w.id}`}</div>
-              {w.objectid != null && <span className="text-[11px] text-ink-subtle">#{w.objectid}</span>}
-            </div>
-            <dl className="mt-3 space-y-1.5 text-sm">
-              <Row label="Electoral area" value={w.electoral_area} />
-              <Row label="Source city" value={w.source_city} />
-              <Row label="Source dataset" value={w.source_dataset} />
-              <Row label="Boundary geometry" value={w.geojson_geometry ? 'GeoJSON available' : 'Not available'} />
-            </dl>
-          </div>
-        ))}
-        {querySucceeded && wards.length === 0 && (
-          <div className="text-sm text-ink-subtle">No ward boundaries available.</div>
-        )}
-      </div>
-
-      {/* Table */}
-      {wards.length > 0 && (
-        <div className="mt-8 card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-ink-subtle">
-                <tr className="text-left">
-                  <Th>Ward</Th>
-                  <Th>Electoral area</Th>
-                  <Th>Source city</Th>
-                  <Th>Source dataset</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {wards.map((w) => (
-                  <tr key={w.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-navy-900">{w.ward || '—'}</td>
-                    <td className="px-4 py-3 text-ink-muted">{w.electoral_area || '—'}</td>
-                    <td className="px-4 py-3 text-ink-muted">{w.source_city || '—'}</td>
-                    <td className="px-4 py-3 text-ink-muted">{w.source_dataset || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {/* Collapsed technical validation — the raw geometry map + ward metadata live here */}
+      {!error && (
+        <DataLayerValidation wards={wards} loading={loading} loaded={loaded} querySucceeded={querySucceeded} />
       )}
     </div>
   )
 }
 
+// ---------------------------------------------------------------------------
+// Primary section: Brampton ward workload context
+// ---------------------------------------------------------------------------
+
+/** Workload-intensity color from lower (green) → higher (red) for a normalized value t in [0,1]. */
+function heatColor(t: number): string {
+  const clamped = Math.max(0, Math.min(1, t))
+  const hue = 140 - clamped * 128 // 140 green → 12 red, through amber
+  return `hsl(${hue.toFixed(0)}, 78%, 52%)`
+}
+
+/** Workload-intensity tier label for a normalized value t in [0,1]. */
+function workloadTier(t: number): string {
+  if (t < 1 / 3) return 'Lower workload'
+  if (t < 2 / 3) return 'Medium workload'
+  return 'Higher workload'
+}
+
 /**
- * Boundary preview panel. When the ward rows carry usable GeoJSON geometry it
- * renders an SVG of the ward polygons; otherwise it falls back to a styled map
- * placeholder confirming the boundary layer is loaded.
+ * Unified workload-context map. The REAL Brampton ward polygons are the base
+ * layer; the SYNTHETIC workload scenario shades them by complaint volume. Ward
+ * labels render on every polygon, a low→high workload legend sits beneath the
+ * map, and hovering/selecting a ward populates the selected-ward detail panel.
  */
-function WardBoundaryPanel({
+function WardWorkloadContext({
   wards,
+  scenarios,
   loading,
   loaded,
 }: {
   wards: WardBoundary[]
+  scenarios: WardWorkloadScenario[]
   loading: boolean
   loaded: boolean
 }) {
   const map = useMemo(() => buildWardMap(wards), [wards])
-  const hasWards = wards.length > 0
+
+  const byWard = useMemo(() => {
+    const m = new Map<string, WardWorkloadScenario>()
+    for (const s of scenarios) m.set(s.ward.trim().toUpperCase(), s)
+    return m
+  }, [scenarios])
+
+  const { min, max } = useMemo(() => {
+    if (scenarios.length === 0) return { min: 0, max: 0 }
+    const vols = scenarios.map((s) => s.complaint_volume)
+    return { min: Math.min(...vols), max: Math.max(...vols) }
+  }, [scenarios])
+
+  const norm = (v: number) => (max > min ? (v - min) / (max - min) : 0.5)
+  const num = (v: number) => v.toLocaleString()
+  const scenarioFor = (wardName: string | null | undefined): WardWorkloadScenario | undefined =>
+    wardName ? byWard.get(wardName.trim().toUpperCase()) : undefined
+  const colorForWard = (wardName: string | null): string => {
+    const s = scenarioFor(wardName)
+    return s ? heatColor(norm(s.complaint_volume)) : '#e2e8f0'
+  }
+
+  // Ward selected by click; ward currently hovered. The detail panel shows the
+  // hovered ward first, then the clicked ward, then defaults to the busiest ward.
+  const [selectedWard, setSelectedWard] = useState<string | null>(null)
+  const [hoveredWard, setHoveredWard] = useState<string | null>(null)
+
+  const sortedScenarios = useMemo(
+    () => [...scenarios].sort((a, b) => b.complaint_volume - a.complaint_volume),
+    [scenarios],
+  )
+
+  const activeWardName = hoveredWard ?? selectedWard ?? sortedScenarios[0]?.ward ?? null
+  const activeScenario = scenarioFor(activeWardName)
+
+  const hasScenarios = scenarios.length > 0
 
   return (
-    <div className="mt-6 card overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+    <section aria-label="Brampton ward workload context" className="mt-6 card overflow-hidden">
+      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-sm font-semibold text-navy-900">Ward boundary layer</div>
-          <div className="text-xs text-ink-subtle">Brampton GeoHub electoral ward geometry</div>
+          <div className="text-sm font-semibold text-navy-900">Ward workload intensity</div>
+          <div className="text-xs text-ink-subtle">
+            Real Brampton ward boundaries · synthetic workload scenario overlay
+          </div>
         </div>
-        {hasWards && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
-            <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            {wards.length} ward{wards.length === 1 ? '' : 's'} loaded
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800 sm:self-auto">
+          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+          Synthetic scenario
+        </span>
       </div>
 
-      <div className="relative bg-gradient-to-br from-slate-50 to-sky-50 p-5">
-        {/* Subtle grid backdrop for the "map" feel */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.35]"
-          style={{
-            backgroundImage:
-              'linear-gradient(to right, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.06) 1px, transparent 1px)',
-            backgroundSize: '28px 28px',
-          }}
-        />
+      {/* Required disclaimer */}
+      <div
+        role="note"
+        className="flex items-start gap-2 border-b border-amber-100 bg-amber-50/50 px-5 py-2.5 text-xs text-amber-900"
+      >
+        <span aria-hidden className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+        <span>
+          <span className="font-semibold">{SCENARIO_DISCLAIMER}</span> {SCENARIO_CONTEXT}
+        </span>
+      </div>
 
+      <div className="grid gap-6 p-5 lg:grid-cols-5">
+        {/* Map: real boundaries as base layer, shaded by the synthetic overlay */}
+        <div className="lg:col-span-3">
+          {map ? (
+            <figure className="relative rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
+              {/* Subtle grid backdrop for the map feel */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 rounded-lg opacity-[0.35]"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(to right, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.06) 1px, transparent 1px)',
+                  backgroundSize: '28px 28px',
+                }}
+              />
+              <svg
+                role="img"
+                aria-label="Brampton ward boundaries shaded by synthetic workload intensity"
+                viewBox={`0 0 ${map.width} ${map.height}`}
+                className="relative mx-auto block h-auto w-full"
+              >
+                {map.shapes.map((shape) => {
+                  const s = scenarioFor(shape.wardName)
+                  const isActive = activeWardName != null && shape.wardName === activeWardName
+                  return (
+                    <path
+                      key={shape.id}
+                      d={shape.d}
+                      fill={colorForWard(shape.wardName)}
+                      fillOpacity={hasScenarios ? (isActive ? 0.92 : 0.72) : 0.4}
+                      stroke={isActive ? '#0f172a' : '#1e3a5f'}
+                      strokeWidth={isActive ? 2.25 : 1}
+                      strokeLinejoin="round"
+                      className="cursor-pointer transition-[fill-opacity]"
+                      onMouseEnter={() => setHoveredWard(shape.wardName)}
+                      onMouseLeave={() => setHoveredWard(null)}
+                      onClick={() => setSelectedWard(shape.wardName)}
+                    >
+                      <title>
+                        {shape.label} — synthetic workload scenario (not operational data, not a risk prediction)
+                        {s
+                          ? `\nWorkload intensity: ${workloadTier(norm(s.complaint_volume))}` +
+                            `\nComplaint volume: ${num(s.complaint_volume)}` +
+                            `\nOpen cases: ${num(s.open_cases)}` +
+                            `\nIn progress: ${num(s.in_progress_cases)}` +
+                            `\nEscalations: ${num(s.escalations)}` +
+                            `\nTop category: ${s.top_category}` +
+                            `\nEst. hours saved: ${num(Number(s.estimated_hours_saved))}`
+                          : '\nNo scenario data'}
+                      </title>
+                    </path>
+                  )
+                })}
+                {/* Ward labels */}
+                {map.shapes.map((shape) => (
+                  <text
+                    key={`label-${shape.id}`}
+                    x={shape.cx}
+                    y={shape.cy}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    className="pointer-events-none fill-navy-900"
+                    style={{ fontSize: map.labelSize, fontWeight: 700, paintOrder: 'stroke' }}
+                    stroke="#ffffff"
+                    strokeWidth={map.labelSize / 3.5}
+                  >
+                    {shape.short}
+                  </text>
+                ))}
+              </svg>
+
+              {/* Legend — lower workload → higher workload */}
+              <figcaption className="relative mt-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                  Workload intensity
+                </div>
+                <div
+                  className="mt-1 h-2 rounded-full"
+                  style={{
+                    background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
+                  }}
+                />
+                <div className="mt-1 flex justify-between text-[11px] text-ink-subtle">
+                  <span>Lower workload</span>
+                  <span>Higher workload</span>
+                </div>
+                {hasScenarios && (
+                  <div className="mt-0.5 flex justify-between text-[10px] text-ink-subtle tabular-nums">
+                    <span>{num(min)} complaints</span>
+                    <span>{num(max)} complaints</span>
+                  </div>
+                )}
+                <div className="mt-2 text-[11px] text-ink-subtle">
+                  Hover or select a ward to see its workload scenario detail.
+                </div>
+              </figcaption>
+            </figure>
+          ) : (
+            <div className="flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 px-6 py-10 text-center text-sm text-ink-subtle">
+              {loading
+                ? 'Loading ward boundaries…'
+                : loaded
+                  ? 'Ward geometry unavailable for the workload map.'
+                  : 'Ward boundaries unavailable.'}
+            </div>
+          )}
+        </div>
+
+        {/* Selected ward detail panel */}
+        <div className="lg:col-span-2">
+          <SelectedWardPanel
+            scenario={activeScenario}
+            wardName={activeWardName}
+            tier={activeScenario ? workloadTier(norm(activeScenario.complaint_volume)) : null}
+            color={activeScenario ? heatColor(norm(activeScenario.complaint_volume)) : '#e2e8f0'}
+            interactive={selectedWard != null}
+            hasScenarios={hasScenarios}
+          />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/** Detail panel for the hovered/selected ward, showing the full workload scenario. */
+function SelectedWardPanel({
+  scenario,
+  wardName,
+  tier,
+  color,
+  interactive,
+  hasScenarios,
+}: {
+  scenario: WardWorkloadScenario | undefined
+  wardName: string | null
+  tier: string | null
+  color: string
+  interactive: boolean
+  hasScenarios: boolean
+}) {
+  const num = (v: number) => v.toLocaleString()
+
+  if (!hasScenarios) {
+    return (
+      <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
+        Synthetic workload scenario data is not available.
+      </div>
+    )
+  }
+
+  if (!scenario) {
+    return (
+      <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
+        Hover or select a ward on the map to see its workload scenario.
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-full rounded-lg border border-slate-200 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+            {interactive ? 'Selected ward' : 'Busiest ward (synthetic)'}
+          </div>
+          <div className="text-base font-semibold text-navy-900">{wardName || scenario.ward}</div>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-ink-muted">
+          <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+          {tier}
+        </span>
+      </div>
+
+      <div className="mt-3 text-2xl font-semibold text-navy-900 tabular-nums">{num(scenario.complaint_volume)}</div>
+      <div className="text-[10px] uppercase tracking-wider text-ink-subtle">complaint volume</div>
+
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        <Metric label="Open cases" value={num(scenario.open_cases)} />
+        <Metric label="In progress" value={num(scenario.in_progress_cases)} />
+        <Metric label="Escalations" value={num(scenario.escalations)} />
+        <Metric label="Est. hours saved" value={num(Number(scenario.estimated_hours_saved))} />
+      </dl>
+
+      <div className="mt-3 border-t border-slate-100 pt-3 text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-ink-subtle">Top category</span>
+          <span className="font-medium text-navy-900">{scenario.top_category}</span>
+        </div>
+      </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+        Synthetic workload scenario values — not Brampton operational complaint data and not a risk prediction.
+      </p>
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-wider text-ink-subtle">{label}</dt>
+      <dd className="mt-0.5 text-lg font-semibold text-navy-900 tabular-nums">{value}</dd>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Collapsed technical validation accordion
+// ---------------------------------------------------------------------------
+
+/**
+ * Small, collapsed-by-default accordion proving the real GeoHub boundary layer
+ * loaded. Holds the raw geometry-only preview map and the ward metadata table so
+ * they no longer push the workload view below the fold.
+ */
+function DataLayerValidation({
+  wards,
+  loading,
+  loaded,
+  querySucceeded,
+}: {
+  wards: WardBoundary[]
+  loading: boolean
+  loaded: boolean
+  querySucceeded: boolean
+}) {
+  const map = useMemo(() => buildWardMap(wards), [wards])
+  const count = wards.length
+  const summary = loading
+    ? 'Loading Brampton wards from GeoHub…'
+    : querySucceeded
+      ? `${count} Brampton ward${count === 1 ? '' : 's'} loaded from GeoHub.`
+      : 'Brampton ward layer unavailable.'
+
+  return (
+    <details className="group mt-8 card overflow-hidden">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-3">
+        <div className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className={`inline-block h-2 w-2 rounded-full ${querySucceeded && count > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`}
+          />
+          <div>
+            <div className="text-sm font-semibold text-navy-900">Data layer validation</div>
+            <div className="text-xs text-ink-subtle">{summary}</div>
+          </div>
+        </div>
+        <span className="text-xs text-ink-subtle transition group-open:rotate-180" aria-hidden>
+          ▾
+        </span>
+      </summary>
+
+      <div className="border-t border-slate-100 px-5 py-4">
+        <p className="text-xs text-ink-muted">
+          Technical validation of the real Brampton GeoHub electoral ward geometry that backs the workload context map
+          above. This is the raw boundary layer with no scenario shading.
+        </p>
+
+        {/* Raw geometry-only preview */}
         {map ? (
-          <figure className="relative">
+          <figure className="relative mt-4 rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
             <svg
               role="img"
-              aria-label="Brampton ward boundary preview"
+              aria-label="Brampton ward boundary preview (raw geometry)"
               viewBox={`0 0 ${map.width} ${map.height}`}
-              className="mx-auto block h-auto w-full max-w-3xl"
+              className="mx-auto block h-auto w-full max-w-2xl"
             >
               {map.shapes.map((shape, i) => (
                 <path
@@ -223,7 +484,7 @@ function WardBoundaryPanel({
               ))}
               {map.shapes.map((shape) => (
                 <text
-                  key={`label-${shape.id}`}
+                  key={`v-label-${shape.id}`}
                   x={shape.cx}
                   y={shape.cy}
                   textAnchor="middle"
@@ -237,274 +498,53 @@ function WardBoundaryPanel({
                 </text>
               ))}
             </svg>
-            <figcaption className="relative mt-3 text-center text-xs text-ink-subtle">
-              Brampton ward boundary layer loaded — {map.shapes.length} polygon
-              {map.shapes.length === 1 ? '' : 's'} rendered from GeoJSON geometry.
+            <figcaption className="mt-3 text-center text-xs text-ink-subtle">
+              {map.shapes.length} polygon{map.shapes.length === 1 ? '' : 's'} rendered from GeoJSON geometry.
             </figcaption>
           </figure>
         ) : (
-          <div className="relative flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 px-6 py-10 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sky-100 text-sky-600">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M9 3 3 5v16l6-2 6 2 6-2V3l-6 2-6-2Zm0 0v16m6-14v16"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+          <div className="mt-4 flex min-h-[160px] items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-ink-subtle">
+            {loading
+              ? 'Loading ward boundary geometry…'
+              : loaded
+                ? 'No GeoJSON geometry available to preview.'
+                : 'Ward boundary geometry unavailable.'}
+          </div>
+        )}
+
+        {/* Ward metadata table */}
+        {wards.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-ink-subtle">
+                  <tr className="text-left">
+                    <Th>Ward</Th>
+                    <Th>Electoral area</Th>
+                    <Th>Source city</Th>
+                    <Th>Source dataset</Th>
+                    <Th>Boundary geometry</Th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {wards.map((w) => (
+                    <tr key={w.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-navy-900">{w.ward || `Ward ${w.objectid ?? w.id}`}</td>
+                      <td className="px-4 py-3 text-ink-muted">{w.electoral_area || '—'}</td>
+                      <td className="px-4 py-3 text-ink-muted">{w.source_city || '—'}</td>
+                      <td className="px-4 py-3 text-ink-muted">{w.source_dataset || '—'}</td>
+                      <td className="px-4 py-3 text-ink-muted">
+                        {w.geojson_geometry ? 'GeoJSON available' : 'Not available'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="mt-3 text-sm font-semibold text-navy-900">
-              {loading
-                ? 'Loading ward boundary layer…'
-                : hasWards
-                  ? 'Brampton ward boundary layer loaded'
-                  : loaded
-                    ? 'No ward boundary layer available'
-                    : 'Brampton ward boundary layer'}
-            </div>
-            {hasWards && (
-              <div className="mt-1 text-xs text-ink-subtle">
-                {wards.length} ward boundar{wards.length === 1 ? 'y is' : 'ies are'} available. Interactive polygon
-                rendering will appear here when GeoJSON geometry is present.
-              </div>
-            )}
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-const SCENARIO_DISCLAIMER =
-  'Synthetic Brampton ward workload scenario. Based on invented scenario values for demo visualization only. Not real Brampton complaint data and not a risk prediction. Wards are shaded by complaint volume to show workload intensity — higher complaint volume means higher workload intensity. This previews what a ward-level workload view will look like once Brampton provides operational complaint data. Toronto 311 benchmark records are never plotted onto Brampton wards.'
-
-/** Workload-intensity color from low (green) → high (red) for a normalized value t in [0,1]. */
-function heatColor(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t))
-  const hue = 140 - clamped * 128 // 140 green → 12 red, through amber
-  return `hsl(${hue.toFixed(0)}, 78%, 52%)`
-}
-
-/** Workload-intensity tier label for a normalized value t in [0,1]. */
-function workloadTier(t: number): string {
-  if (t < 1 / 3) return 'Low workload'
-  if (t < 2 / 3) return 'Medium workload'
-  return 'High workload'
-}
-
-/**
- * Synthetic workload overlay. Shades the REAL Brampton ward polygons by the
- * SYNTHETIC scenario complaint_volume to preview the eventual heatmap. Clearly
- * labelled as illustrative, non-operational data.
- */
-function WardScenarioOverlay({
-  wards,
-  scenarios,
-}: {
-  wards: WardBoundary[]
-  scenarios: WardWorkloadScenario[]
-}) {
-  const map = useMemo(() => buildWardMap(wards), [wards])
-
-  const byWard = useMemo(() => {
-    const m = new Map<string, WardWorkloadScenario>()
-    for (const s of scenarios) m.set(s.ward.trim().toUpperCase(), s)
-    return m
-  }, [scenarios])
-
-  const { min, max } = useMemo(() => {
-    const vols = scenarios.map((s) => s.complaint_volume)
-    return { min: Math.min(...vols), max: Math.max(...vols) }
-  }, [scenarios])
-
-  const totals = useMemo(
-    () =>
-      scenarios.reduce(
-        (acc, s) => ({
-          complaint_volume: acc.complaint_volume + s.complaint_volume,
-          open_cases: acc.open_cases + s.open_cases,
-          in_progress_cases: acc.in_progress_cases + s.in_progress_cases,
-          closed_cases: acc.closed_cases + s.closed_cases,
-          escalations: acc.escalations + s.escalations,
-          estimated_hours_saved: acc.estimated_hours_saved + Number(s.estimated_hours_saved),
-        }),
-        { complaint_volume: 0, open_cases: 0, in_progress_cases: 0, closed_cases: 0, escalations: 0, estimated_hours_saved: 0 },
-      ),
-    [scenarios],
-  )
-
-  const norm = (v: number) => (max > min ? (v - min) / (max - min) : 0.5)
-  const colorForWard = (wardName: string | null): string => {
-    if (!wardName) return '#e2e8f0'
-    const s = byWard.get(wardName.trim().toUpperCase())
-    return s ? heatColor(norm(s.complaint_volume)) : '#e2e8f0'
-  }
-  const num = (v: number) => v.toLocaleString()
-
-  const sortedScenarios = useMemo(
-    () => [...scenarios].sort((a, b) => b.complaint_volume - a.complaint_volume),
-    [scenarios],
-  )
-
-  return (
-    <div className="mt-8 card overflow-hidden ring-1 ring-amber-200">
-      <div className="flex flex-col gap-2 border-b border-slate-100 bg-amber-50/60 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800">
-            <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-            Synthetic scenario overlay
-          </span>
-          <span className="text-sm font-semibold text-navy-900">Ward workload intensity (preview)</span>
-        </div>
-        <span className="text-xs text-ink-subtle">Shaded by complaint volume</span>
-      </div>
-
-      <div
-        role="note"
-        className="flex items-start gap-2 border-b border-amber-100 bg-amber-50/40 px-5 py-2.5 text-xs text-amber-900"
-      >
-        <span aria-hidden className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-        <span>{SCENARIO_DISCLAIMER}</span>
-      </div>
-
-      <div className="grid gap-6 p-5 lg:grid-cols-2">
-        {/* Heatmap */}
-        <div>
-          {map ? (
-            <figure className="relative rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
-              <svg
-                role="img"
-                aria-label="Synthetic Brampton ward workload heatmap"
-                viewBox={`0 0 ${map.width} ${map.height}`}
-                className="mx-auto block h-auto w-full"
-              >
-                {map.shapes.map((shape) => {
-                  const s = shape.wardName ? byWard.get(shape.wardName.trim().toUpperCase()) : undefined
-                  return (
-                    <path
-                      key={shape.id}
-                      d={shape.d}
-                      fill={colorForWard(shape.wardName)}
-                      fillOpacity={0.72}
-                      stroke="#1e3a5f"
-                      strokeWidth={1}
-                      strokeLinejoin="round"
-                    >
-                      <title>
-                        {shape.label} — SYNTHETIC scenario (not operational data, not a risk prediction)
-                        {s
-                          ? `\nWorkload intensity: ${workloadTier(norm(s.complaint_volume))}` +
-                            `\nComplaint volume: ${num(s.complaint_volume)}` +
-                            `\nOpen cases: ${num(s.open_cases)}` +
-                            `\nIn progress: ${num(s.in_progress_cases)}` +
-                            `\nClosed: ${num(s.closed_cases)}` +
-                            `\nEscalations: ${num(s.escalations)}` +
-                            `\nTop category: ${s.top_category}` +
-                            `\nEst. hours saved: ${num(Number(s.estimated_hours_saved))}`
-                          : '\nNo scenario data'}
-                      </title>
-                    </path>
-                  )
-                })}
-                {map.shapes.map((shape) => (
-                  <text
-                    key={`hl-${shape.id}`}
-                    x={shape.cx}
-                    y={shape.cy}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    className="fill-navy-900"
-                    style={{ fontSize: map.labelSize, fontWeight: 700, paintOrder: 'stroke' }}
-                    stroke="#ffffff"
-                    strokeWidth={map.labelSize / 3.5}
-                  >
-                    {shape.short}
-                  </text>
-                ))}
-              </svg>
-
-              {/* Legend — workload intensity */}
-              <figcaption className="relative mt-3">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-                  Workload intensity
-                </div>
-                <div
-                  className="mt-1 h-2 rounded-full"
-                  style={{
-                    background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
-                  }}
-                />
-                <div className="mt-1 flex justify-between text-[11px] text-ink-subtle">
-                  <span>Low workload</span>
-                  <span>Medium workload</span>
-                  <span>High workload</span>
-                </div>
-                <div className="mt-0.5 flex justify-between text-[10px] text-ink-subtle tabular-nums">
-                  <span>{num(min)} complaints</span>
-                  <span>{num(max)} complaints</span>
-                </div>
-              </figcaption>
-            </figure>
-          ) : (
-            <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-ink-subtle">
-              Ward geometry unavailable for the heatmap.
-            </div>
-          )}
-        </div>
-
-        {/* Scenario metric cards */}
-        <div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {sortedScenarios.map((s) => (
-              <div key={s.id} className="rounded-lg border border-slate-200 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-navy-900">{s.ward}</span>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-ink-muted">
-                    <span
-                      aria-hidden
-                      className="inline-block h-2 w-2 rounded-full"
-                      style={{ backgroundColor: heatColor(norm(s.complaint_volume)) }}
-                    />
-                    {workloadTier(norm(s.complaint_volume))}
-                  </span>
-                </div>
-                <div className="mt-1 text-lg font-semibold text-navy-900 tabular-nums">{num(s.complaint_volume)}</div>
-                <div className="text-[10px] uppercase tracking-wider text-ink-subtle">complaint volume</div>
-                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-ink-muted">
-                  <div className="flex justify-between"><dt>Open</dt><dd className="tabular-nums">{num(s.open_cases)}</dd></div>
-                  <div className="flex justify-between"><dt>Active</dt><dd className="tabular-nums">{num(s.in_progress_cases)}</dd></div>
-                  <div className="flex justify-between"><dt>Closed</dt><dd className="tabular-nums">{num(s.closed_cases)}</dd></div>
-                  <div className="flex justify-between"><dt>Escal.</dt><dd className="tabular-nums">{num(s.escalations)}</dd></div>
-                </dl>
-                <div className="mt-2 flex items-center justify-between text-[11px]">
-                  <span className="text-ink-subtle">Top: <span className="text-ink">{s.top_category}</span></span>
-                  <span className="text-ink-subtle">{num(Number(s.estimated_hours_saved))} hrs saved</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Totals */}
-          <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs text-ink-muted">
-            <span className="font-semibold text-navy-900">Scenario totals:</span>{' '}
-            {num(totals.complaint_volume)} complaints · {num(totals.open_cases)} open ·{' '}
-            {num(totals.in_progress_cases)} active · {num(totals.closed_cases)} closed ·{' '}
-            {num(totals.escalations)} escalations · {num(totals.estimated_hours_saved)} est. hours saved
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <dt className="text-ink-subtle">{label}</dt>
-      <dd className="text-ink text-right">{value || '—'}</dd>
-    </div>
+    </details>
   )
 }
 
