@@ -292,9 +292,20 @@ export async function getComplaintFilterOptions(): Promise<ComplaintFilterOption
   }
 }
 
+// Explicit column list for the Brampton ward boundary context view. Selecting
+// named columns (rather than `*`) keeps the payload predictable and matches the
+// WardBoundary type exactly.
+const WARD_COLUMNS = 'id, objectid, ward, electoral_area, source_city, source_dataset, geojson_geometry'
+
 export async function getBramptonWardBoundaries(): Promise<WardBoundary[]> {
   const client = requireClient()
-  const { data, error } = await client.from(WARDS_TABLE).select('*').order('ward', { ascending: true })
+  // The supabase-js client targets the `public` schema by default, so this
+  // reads public.brampton_ward_boundaries. Any Supabase/RLS error is thrown so
+  // the caller can surface it — we never silently return an empty array.
+  const { data, error } = await client
+    .from(WARDS_TABLE)
+    .select(WARD_COLUMNS)
+    .order('ward', { ascending: true })
 
   if (error) throw error
   return (data ?? []) as WardBoundary[]
