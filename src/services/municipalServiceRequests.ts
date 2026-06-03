@@ -9,6 +9,7 @@ export const COMPLAINTS_TABLE = 'municipal_complaints'
 export const WARDS_TABLE = 'brampton_ward_boundaries'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
+export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
 
 /**
  * Standard advisory disclaimer for AI-assisted triage. The current POC triage is
@@ -648,4 +649,163 @@ export function filterMockComplaints(rows: ComplaintRow[], filters: ComplaintFil
 function priorityRank(priority: string): number {
   const order: Record<string, number> = { High: 3, Medium: 2, Low: 1 }
   return order[priority] ?? 0
+}
+
+// ---------------------------------------------------------------------------
+// AI assisted staff review (Claude, server-side only)
+// ---------------------------------------------------------------------------
+//
+// The Anthropic API key lives ONLY in the server-side Netlify function. The
+// browser never sees it: the client posts the selected case's allow-listed
+// fields to the function and receives structured JSON back. This is decision
+// support only — it never replaces the rule based POC triage and never makes a
+// final enforcement decision. Staff review is always required.
+
+/** Endpoint of the server-side Netlify function (reserved path, never shadowed). */
+const CASE_AI_REVIEW_ENDPOINT = '/.netlify/functions/generate-case-ai-review'
+
+/** Exactly the fields of the single selected case that are sent to the server. */
+export type CaseAiReviewInput = {
+  case_id: string
+  complaint_type: string
+  description: string
+  status: string
+  workflow_stage: string
+  priority: string
+  department: string
+  ward_or_area: string
+  ai_category: string
+  ai_summary: string
+  ai_recommended_action: string
+}
+
+/** Structured review returned by the function. */
+export type CaseAiReviewResult = {
+  staff_summary: string
+  recommended_next_action: string
+  missing_information: string
+  resident_response_draft: string
+  priority_rationale: string
+  human_review_note: string
+}
+
+export type CaseAiReviewResponse = {
+  case_id: string
+  model: string
+  prompt_version: string
+  result: CaseAiReviewResult
+}
+
+/** A persisted row in public.case_ai_reviews. */
+export type CaseAiReviewRow = {
+  id: string
+  case_id: string
+  model: string
+  prompt_version: string
+  result_json: CaseAiReviewResult
+  created_at: string | null
+}
+
+const EMPTY_FIELD = ''
+
+/** Map the live complaint detail row to the exact server input fields. */
+export function caseAiReviewInputFromComplaint(row: MunicipalComplaintRow): CaseAiReviewInput {
+  return {
+    case_id: row.case_id,
+    complaint_type: row.complaint_type ?? EMPTY_FIELD,
+    description: row.description ?? EMPTY_FIELD,
+    status: row.status ?? EMPTY_FIELD,
+    workflow_stage: row.workflow_stage ?? EMPTY_FIELD,
+    priority: row.priority ?? EMPTY_FIELD,
+    department: row.assigned_department ?? EMPTY_FIELD,
+    ward_or_area: row.ward_or_area ?? EMPTY_FIELD,
+    ai_category: row.ai_category ?? EMPTY_FIELD,
+    ai_summary: row.ai_summary ?? EMPTY_FIELD,
+    ai_recommended_action: row.ai_recommended_action ?? EMPTY_FIELD,
+  }
+}
+
+/** Map the queue/preview view-model row to the exact server input fields. */
+export function caseAiReviewInputFromRow(row: ComplaintRow): CaseAiReviewInput {
+  return {
+    case_id: row.id,
+    complaint_type: row.complaintType ?? EMPTY_FIELD,
+    description: row.description ?? EMPTY_FIELD,
+    status: row.status ?? EMPTY_FIELD,
+    workflow_stage: row.workflowStage ?? EMPTY_FIELD,
+    priority: row.priority ?? EMPTY_FIELD,
+    department: row.assignedDepartment ?? EMPTY_FIELD,
+    ward_or_area: row.wardOrArea ?? EMPTY_FIELD,
+    ai_category: row.aiCategory ?? EMPTY_FIELD,
+    ai_summary: row.aiSummary ?? EMPTY_FIELD,
+    ai_recommended_action: row.recommendedAction ?? EMPTY_FIELD,
+  }
+}
+
+/**
+ * Call the server-side Netlify function to generate an AI assisted staff review
+ * for a SINGLE selected case. Only ever invoked from an explicit staff click —
+ * never on page load and never for the queue list.
+ */
+export async function generateCaseAiReview(input: CaseAiReviewInput): Promise<CaseAiReviewResponse> {
+  const res = await fetch(CASE_AI_REVIEW_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+
+  let payload: unknown = null
+  try {
+    payload = await res.json()
+  } catch {
+    // fall through to the status-based error below
+  }
+
+  if (!res.ok) {
+    const message =
+      payload && typeof payload === 'object' && typeof (payload as Record<string, unknown>).error === 'string'
+        ? ((payload as Record<string, unknown>).error as string)
+        : `AI review failed (status ${res.status}).`
+    throw new Error(message)
+  }
+
+  return payload as CaseAiReviewResponse
+}
+
+/**
+ * Persist a generated review into public.case_ai_reviews. Best-effort: the
+ * generated review is still shown to staff even if persistence fails (for
+ * example before the migration is applied), so a failure here is surfaced but
+ * not fatal to the caller.
+ */
+export async function saveCaseAiReview(review: CaseAiReviewResponse): Promise<CaseAiReviewRow> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(CASE_AI_REVIEWS_TABLE)
+    .insert({
+      case_id: review.case_id,
+      model: review.model,
+      prompt_version: review.prompt_version,
+      result_json: review.result,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data as CaseAiReviewRow
+}
+
+/** Most recent persisted AI review for a case, or null if none/unavailable. */
+export async function getLatestCaseAiReview(caseId: string): Promise<CaseAiReviewRow | null> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(CASE_AI_REVIEWS_TABLE)
+    .select('*')
+    .eq('case_id', caseId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw error
+  return (data as CaseAiReviewRow) ?? null
 }
