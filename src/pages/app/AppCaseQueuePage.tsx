@@ -10,12 +10,26 @@ import {
   type ComplaintRow,
 } from '../../services/municipalServiceRequests'
 
-const VALID_SORT: SortKey[] = ['submitted_at', 'priority', 'status']
+const VALID_SORT: SortKey[] = ['submitted_at', 'operational_priority', 'status']
+
+// The triage stage that should default to operational priority ordering.
+const TRIAGE_STAGE = 'Needs review'
+
+/** Normalize a ?sort param, mapping the legacy 'priority' alias to the rank sort. */
+function normalizeSortParam(raw: string | null): SortKey | null {
+  if (!raw) return null
+  if (raw === 'priority') return 'operational_priority'
+  return VALID_SORT.includes(raw as SortKey) ? (raw as SortKey) : null
+}
 
 /** Build the initial filter state from URL query params (deep links from the console). */
 function filtersFromParams(params: URLSearchParams): CaseQueueFilters {
   const get = (key: string, fallback: string) => params.get(key) ?? fallback
-  const sortParam = params.get('sort')
+  const stage = get('stage', 'All')
+  const explicitSort = normalizeSortParam(params.get('sort'))
+  // The triage queue (Needs review) defaults to operational priority so staff
+  // see the cases to handle first, not just the newest. An explicit ?sort wins.
+  const sortKey: SortKey = explicitSort ?? (stage === TRIAGE_STAGE ? 'operational_priority' : 'submitted_at')
   return {
     query: get('q', ''),
     status: get('status', 'All'),
@@ -23,8 +37,8 @@ function filtersFromParams(params: URLSearchParams): CaseQueueFilters {
     department: get('department', 'All'),
     category: get('category', 'All'),
     ward: get('ward', 'All'),
-    workflowStage: get('stage', 'All'),
-    sortKey: VALID_SORT.includes(sortParam as SortKey) ? (sortParam as SortKey) : 'submitted_at',
+    workflowStage: stage,
+    sortKey,
   }
 }
 

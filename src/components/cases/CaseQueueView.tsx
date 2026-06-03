@@ -6,7 +6,7 @@ import {
   type ComplaintRow,
 } from '../../services/municipalServiceRequests'
 
-export type SortKey = 'submitted_at' | 'priority' | 'status'
+export type SortKey = 'submitted_at' | 'operational_priority' | 'status'
 
 export type CaseQueueFilters = {
   query: string
@@ -138,7 +138,7 @@ export default function CaseQueueView({
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent-500"
             >
               <option value="submitted_at">Submitted</option>
-              <option value="priority">Priority</option>
+              <option value="operational_priority">Priority rank</option>
               <option value="status">Status</option>
             </select>
           </div>
