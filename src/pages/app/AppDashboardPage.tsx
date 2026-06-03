@@ -1,18 +1,25 @@
 import { useEffect, useState } from 'react'
 import DashboardView from '../../components/dashboard/DashboardView'
 import {
-  getDashboardStats,
-  mockDashboardStats,
-  type DashboardStats,
+  getComplaintKpis,
+  getComplaintTypes,
+  getDepartmentWorkload,
+  mockComplaintKpis,
+  mockComplaintTypes,
+  mockDepartmentWorkload,
+  type ComplaintKpis,
+  type ComplaintTypeCount,
+  type DepartmentWorkload,
 } from '../../services/municipalServiceRequests'
 
-// Authenticated live dashboard. Reads directly from Supabase
-// (municipal_service_requests_ml_enriched) — this route is only reachable after
-// a successful magic-link login, and RLS restricts the table to authenticated
-// users. If the query fails or returns no rows, the page falls back to bundled
-// mock data so the dashboard always renders.
+// Authenticated live dashboard. Reads complaint KPIs and aggregate views
+// directly from Supabase — this route is only reachable after a successful
+// login. If the queries fail, the page falls back to bundled mock data so the
+// dashboard always renders.
 export default function AppDashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [kpis, setKpis] = useState<ComplaintKpis | null>(null)
+  const [departmentWorkload, setDepartmentWorkload] = useState<DepartmentWorkload[]>([])
+  const [complaintTypes, setComplaintTypes] = useState<ComplaintTypeCount[]>([])
   const [loading, setLoading] = useState(true)
   const [fallback, setFallback] = useState(false)
 
@@ -20,25 +27,31 @@ export default function AppDashboardPage() {
     let active = true
     setLoading(true)
     setFallback(false)
-    getDashboardStats()
-      .then((data) => {
+
+    Promise.all([getComplaintKpis(), getDepartmentWorkload(), getComplaintTypes()])
+      .then(([kpiData, workload, types]) => {
         if (!active) return
-        if (data.total === 0) {
-          // Live table reachable but empty — use mock data as a fallback.
-          setStats(mockDashboardStats())
-          setFallback(true)
+        if (!kpiData || kpiData.total_cases === 0) {
+          useMock()
         } else {
-          setStats(data)
+          setKpis(kpiData)
+          setDepartmentWorkload(workload)
+          setComplaintTypes(types)
         }
       })
       .catch((err) => {
         console.error('Failed to load live dashboard data, falling back to mock:', err)
-        if (active) {
-          setStats(mockDashboardStats())
-          setFallback(true)
-        }
+        if (active) useMock()
       })
       .finally(() => active && setLoading(false))
+
+    function useMock() {
+      setKpis(mockComplaintKpis())
+      setDepartmentWorkload(mockDepartmentWorkload())
+      setComplaintTypes(mockComplaintTypes())
+      setFallback(true)
+    }
+
     return () => {
       active = false
     }
@@ -46,7 +59,9 @@ export default function AppDashboardPage() {
 
   return (
     <DashboardView
-      stats={stats}
+      kpis={kpis}
+      departmentWorkload={departmentWorkload}
+      complaintTypes={complaintTypes}
       loading={loading}
       eyebrow="Live Dashboard"
       casesPath="/app/cases"

@@ -31,8 +31,10 @@ export default function AppLayout() {
           </Link>
 
           <nav className="hidden lg:flex items-center gap-2">
-            <StaffLink to="/app/dashboard">Live Dashboard</StaffLink>
+            <StaffLink to="/app/workflow">Workflow</StaffLink>
+            <StaffLink to="/app/dashboard">Dashboard</StaffLink>
             <StaffLink to="/app/cases">Cases</StaffLink>
+            <StaffLink to="/app/wards">Ward Context</StaffLink>
             {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
             <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
               Sign out
@@ -53,8 +55,10 @@ export default function AppLayout() {
         {open && (
           <div className="lg:hidden border-t border-slate-200 bg-white">
             <div className="container-page py-3 flex flex-col gap-1">
-              <StaffLink to="/app/dashboard" onClick={() => setOpen(false)}>Live Dashboard</StaffLink>
+              <StaffLink to="/app/workflow" onClick={() => setOpen(false)}>Workflow</StaffLink>
+              <StaffLink to="/app/dashboard" onClick={() => setOpen(false)}>Dashboard</StaffLink>
               <StaffLink to="/app/cases" onClick={() => setOpen(false)}>Cases</StaffLink>
+              <StaffLink to="/app/wards" onClick={() => setOpen(false)}>Ward Context</StaffLink>
               <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
             </div>
           </div>

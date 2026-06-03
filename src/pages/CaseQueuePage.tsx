@@ -1,19 +1,25 @@
 import { useMemo, useState } from 'react'
 import CaseQueueView, { type CaseQueueFilters } from '../components/cases/CaseQueueView'
-import { filterMockRows, mockFilterOptions, mockRequestRows } from '../services/municipalServiceRequests'
+import {
+  filterMockComplaints,
+  mockComplaintFilterOptions,
+  mockComplaintRows,
+} from '../services/municipalServiceRequests'
 
 // Public demo case queue. Uses bundled sample data only — filtering happens
 // entirely client-side so it is instant and never touches Supabase. The live
 // queue lives behind login at /app/cases.
-const allRows = mockRequestRows()
-const options = mockFilterOptions()
+const allRows = mockComplaintRows()
+const options = mockComplaintFilterOptions()
 
 const INITIAL_FILTERS: CaseQueueFilters = {
   query: '',
+  status: 'All',
+  priority: 'All',
+  department: 'All',
   category: 'All',
-  district: 'All',
-  risk: 'All',
-  sortKey: 'risk_score',
+  ward: 'All',
+  sortKey: 'submitted_at',
 }
 
 export default function CaseQueuePage() {
@@ -21,10 +27,12 @@ export default function CaseQueuePage() {
 
   const rows = useMemo(
     () =>
-      filterMockRows(allRows, {
+      filterMockComplaints(allRows, {
+        status: filters.status,
+        priority: filters.priority,
+        department: filters.department,
         category: filters.category,
-        district: filters.district,
-        riskLevel: filters.risk,
+        ward: filters.ward,
         search: filters.query,
         sort: filters.sortKey,
       }),

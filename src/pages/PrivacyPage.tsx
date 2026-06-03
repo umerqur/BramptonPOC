@@ -3,7 +3,7 @@ import SectionHeading from '../components/SectionHeading'
 const principles = [
   {
     title: 'Real public 311 data and synthetic internal fields only in POC',
-    body: 'The proof of concept is modelled on real public NYC 311 service request data, normalized into a municipal enforcement schema, with synthetic records used only for non public internal workflow fields. No private City data is required for this phase.',
+    body: 'The proof of concept is modelled on Toronto 311 public benchmark complaint data, normalized into a municipal complaint workflow schema, with synthetic records used only for non public internal workflow fields. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data. No private City data is required for this phase.',
   },
   {
     title: 'Decision support, not autonomous enforcement',

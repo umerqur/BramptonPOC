@@ -1,8 +1,16 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import RiskBadge from '../RiskBadge'
 import AdvisoryNotice from '../AdvisoryNotice'
+import { PriorityBadge, StatusBadge } from './CaseQueueView'
 import type { findCase } from '../../data/mockCases'
-import { normalizeRisk, type MunicipalServiceRequestRow } from '../../services/municipalServiceRequests'
+import {
+  addWorkflowEvent,
+  getSimilarComplaints,
+  getWorkflowEvents,
+  type MunicipalComplaintRow,
+  type WorkflowEvent,
+} from '../../services/municipalServiceRequests'
 
 type MockCase = NonNullable<ReturnType<typeof findCase>>
 
@@ -11,46 +19,122 @@ export function CaseNotFound({ id, casesPath }: { id?: string; casesPath: string
   return (
     <div className="container-page py-16 text-center">
       <h1 className="text-2xl font-semibold text-navy-900">Case not found</h1>
-      <p className="mt-2 text-ink-muted">No service request with ID <span className="font-mono">{id}</span>.</p>
+      <p className="mt-2 text-ink-muted">No complaint with case ID <span className="font-mono">{id}</span>.</p>
       <Link to={casesPath} className="mt-6 inline-block btn-primary">Back to case queue</Link>
     </div>
   )
 }
 
-/** Live Supabase request detail. */
-export function RequestDetailView({ row, casesPath }: { row: MunicipalServiceRequestRow; casesPath: string }) {
-  const risk = normalizeRisk(row.risk_level)
-  const address = row.address_label || row.street_name || 'Address not recorded'
-  const drivers = (row.risk_drivers ?? '').split('|').map((d) => d.trim()).filter(Boolean)
+// Human review actions. Each button records a workflow event for the case; it
+// does not auto-change the complaint table status in this POC.
+const REVIEW_ACTIONS: { label: string; eventType: string; toStatus?: string }[] = [
+  { label: 'Mark reviewed', eventType: 'human_review' },
+  { label: 'Assign', eventType: 'assignment' },
+  { label: 'Inspection required', eventType: 'inspection_required' },
+  { label: 'Warning issued', eventType: 'warning_issued' },
+  { label: 'Ticket issued', eventType: 'ticket_issued' },
+  { label: 'Referred elsewhere', eventType: 'referral' },
+  { label: 'No violation found', eventType: 'no_violation' },
+  { label: 'Close case', eventType: 'closure', toStatus: 'Closed' },
+]
+
+/** Live Supabase complaint detail with the full workflow + closure lifecycle. */
+export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplaintRow; casesPath: string }) {
+  const [events, setEvents] = useState<WorkflowEvent[]>([])
+  const [eventsLoading, setEventsLoading] = useState(true)
+  const [similar, setSimilar] = useState<MunicipalComplaintRow[]>([])
+  const [similarLoading, setSimilarLoading] = useState(true)
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const [actionNote, setActionNote] = useState<string | null>(null)
+
+  const address = row.address_or_location || row.fsa_or_area || 'Location not recorded'
+
+  function loadEvents() {
+    setEventsLoading(true)
+    getWorkflowEvents(row.case_id)
+      .then((data) => setEvents(data))
+      .catch((err) => {
+        console.error('Failed to load workflow events:', err)
+        setEvents([])
+      })
+      .finally(() => setEventsLoading(false))
+  }
+
+  useEffect(() => {
+    let active = true
+    loadEvents()
+    setSimilarLoading(true)
+    getSimilarComplaints(row, 5)
+      .then((data) => active && setSimilar(data))
+      .catch((err) => {
+        console.error('Failed to load similar complaints:', err)
+        if (active) setSimilar([])
+      })
+      .finally(() => active && setSimilarLoading(false))
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.case_id])
+
+  async function handleAction(action: (typeof REVIEW_ACTIONS)[number]) {
+    setPendingAction(action.eventType)
+    setActionNote(null)
+    try {
+      await addWorkflowEvent({
+        case_id: row.case_id,
+        event_type: action.eventType,
+        event_label: action.label,
+        from_status: row.status ?? undefined,
+        to_status: action.toStatus,
+        actor_type: 'staff',
+      })
+      setActionNote(`Recorded "${action.label}" in the audit trail.`)
+      loadEvents()
+    } catch (err) {
+      console.error('Failed to record workflow event:', err)
+      setActionNote(`Could not record "${action.label}". Check the connection and try again.`)
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  const residentDraft = useMemo(() => buildResidentDraft(row), [row])
 
   return (
     <div className="container-page py-10">
       <div className="text-xs text-ink-subtle">
         <Link to={casesPath} className="link-quiet">Case Queue</Link>
         <span className="mx-2">/</span>
-        <span>{row.source_id}</span>
+        <span>{row.case_id}</span>
       </div>
 
+      {/* Header */}
       <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">{row.source_id}</h1>
-            <RiskBadge risk={risk} />
-            {row.status && <span className="badge bg-navy-900/5 text-navy-900">{row.status}</span>}
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">{row.case_id}</h1>
+            {row.status && <StatusBadge status={row.status} />}
+            {row.workflow_stage && (
+              <span className="badge bg-navy-900/5 text-navy-900">{row.workflow_stage}</span>
+            )}
+            {row.priority && <PriorityBadge priority={row.priority} />}
           </div>
           <p className="mt-2 text-sm text-ink-muted">
-            {[row.category, row.district, address].filter(Boolean).join(' · ')}
+            {[row.complaint_type, row.ward_or_area, address].filter(Boolean).join(' · ')}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" disabled>Assign officer</button>
-          <button className="btn-primary" disabled>Take recommended action</button>
-        </div>
+        {row.source_dataset && (
+          <div className="text-xs text-ink-subtle">
+            Source dataset
+            <div className="mt-0.5 font-medium text-navy-900">{row.source_dataset}</div>
+          </div>
+        )}
       </div>
 
       <div className="mt-3 text-[11px] text-ink-subtle">
-        Public NYC 311 service request normalized for POC modelling. Not Brampton operational data. Buttons disabled in
-        POC — decision support only.
+        Toronto 311 public benchmark complaint used to demonstrate the workflow. Not Brampton operational complaint
+        data. Workflow and closure tracking with staff reviewed decision support.
       </div>
 
       <div className="mt-4">
@@ -58,110 +142,180 @@ export function RequestDetailView({ row, casesPath }: { row: MunicipalServiceReq
       </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
+        {/* Left column */}
         <div className="lg:col-span-2 space-y-6">
-          <Card title="Request detail">
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-              <Field label="Category" value={row.category} />
-              <Field label="Subcategory" value={row.subcategory} />
-              <Field label="Issue detail" value={row.issue_detail} />
-              <Field label="Location type" value={row.location_type} />
-              <Field label="Agency" value={row.agency_name || row.agency} />
-              <Field label="Channel" value={row.channel} />
-            </dl>
-          </Card>
-
-          <Card title="Resolution">
+          {/* 1. Original complaint */}
+          <Card title="Original complaint">
             <p className="text-sm text-ink leading-relaxed">
-              {row.closure_text || 'No closure or resolution text recorded for this request.'}
+              {row.description || 'No complaint description recorded for this case.'}
             </p>
-          </Card>
-
-          <Card title="Risk explanation">
-            <div className="flex items-center gap-3">
-              <div className="text-xs text-ink-subtle">Risk score</div>
-              <div className="text-2xl font-semibold text-navy-900 tabular-nums">{row.risk_score ?? '—'}</div>
-              <RiskBadge risk={risk} />
-            </div>
-            <ul className="mt-4 space-y-2">
-              {drivers.length === 0 ? (
-                <li className="text-sm text-ink-subtle">No risk drivers recorded.</li>
-              ) : (
-                drivers.map((d, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-ink">
-                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-accent-500 shrink-0" />
-                    <span>{d}</span>
-                  </li>
-                ))
-              )}
-            </ul>
-          </Card>
-
-          <Card title="ML pattern signal" advisory>
-            <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
-              <div>
-                <div className="text-xs text-ink-subtle">Violation pattern probability</div>
-                <div className="text-2xl font-semibold text-navy-900 tabular-nums">
-                  {formatProb(row.ml_violation_probability)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-ink-subtle">Pattern label</div>
-                <div className="mt-1 text-base font-medium text-navy-900">
-                  {row.ml_violation_pattern_label || '—'}
-                </div>
-              </div>
-            </div>
             <dl className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-              <Field label="Pattern class" value={row.ml_violation_pattern_class} />
-              <Field label="Decision threshold" value={formatScore(row.ml_decision_threshold)} />
-              <Field label="Model" value={row.ml_model_name} />
-              <Field label="Model version" value={row.ml_model_version} />
-              <Field label="Output type" value={row.ml_output_type} />
+              <Field label="Complaint type" value={row.complaint_type} />
+              <Field label="Submitted" value={formatDateTime(row.submitted_at)} />
+              <Field label="Location" value={address} />
+              <Field label="Ward or area" value={row.ward_or_area} />
+              <Field label="Source channel" value={row.source_channel} />
+              <Field label="Source city" value={row.source_city} />
             </dl>
+          </Card>
+
+          {/* 2. AI-assisted triage */}
+          <Card title="AI-assisted triage" advisory>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <Field label="AI category" value={row.ai_category} />
+              <Field label="AI priority" value={row.ai_priority} />
+            </dl>
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-wider text-ink-subtle">AI summary</div>
+              <p className="mt-1 text-sm text-ink leading-relaxed">
+                {row.ai_summary || 'No AI summary available.'}
+              </p>
+            </div>
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-wider text-ink-subtle">Recommended action</div>
+              <p className="mt-1 text-sm font-medium text-navy-900">
+                {row.ai_recommended_action || 'Validate details and assign to the responsible team.'}
+              </p>
+            </div>
             <div className="mt-4">
               <AdvisoryNotice variant="inline" />
             </div>
           </Card>
-        </div>
 
-        <div className="space-y-6">
-          <Card title="Recommended action">
-            <div className="text-sm text-ink-muted">Advisory recommendation, pending staff review</div>
-            <div className="mt-2 text-base font-semibold text-navy-900">
-              {row.recommended_action || 'Standard processing'}
+          {/* 3. Human review */}
+          <Card title="Human review" hint="records a workflow event">
+            <p className="text-sm text-ink-muted">
+              Staff reviewed decision support. Recording a decision adds a workflow event to the audit trail; it does
+              not automatically change the complaint status in this POC.
+            </p>
+            {row.human_decision && (
+              <div className="mt-3 text-sm">
+                <span className="text-ink-subtle">Latest recorded decision: </span>
+                <span className="font-medium text-navy-900">{row.human_decision}</span>
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {REVIEW_ACTIONS.map((action) => (
+                <button
+                  key={action.eventType}
+                  onClick={() => handleAction(action)}
+                  disabled={pendingAction !== null}
+                  className="btn-secondary text-sm py-1.5 px-3 disabled:opacity-50"
+                >
+                  {pendingAction === action.eventType ? 'Recording…' : action.label}
+                </button>
+              ))}
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-ink-subtle">
-              <Metric label="Days open" value={row.days_open ?? '—'} />
-              <Metric label="Status" value={row.is_closed ? 'Closed' : 'Open'} />
-            </div>
+            {actionNote && <div className="mt-3 text-xs text-ink-muted">{actionNote}</div>}
           </Card>
 
-          <Card title="ML hotspot cluster" advisory>
-            {row.ml_hotspot_cluster_id == null ? (
-              <div className="text-sm text-ink-subtle">Not assigned to a hotspot cluster.</div>
+          {/* 5. Resident response draft */}
+          <Card title="Resident response draft" aiGenerated>
+            <p className="text-xs text-ink-subtle">
+              Generated locally from the complaint type, status, assigned department, and AI triage. Staff must review
+              and edit before sending to a resident.
+            </p>
+            <pre className="mt-3 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-ink leading-relaxed font-sans">
+              {residentDraft}
+            </pre>
+          </Card>
+        </div>
+
+        {/* Right column */}
+        <div className="space-y-6">
+          {/* 4. Similar cases */}
+          <Card title="Similar cases" hint={similarLoading ? 'loading…' : `${similar.length}`}>
+            <p className="text-[11px] text-ink-subtle">
+              Same complaint type and ward or area, excluding this case.
+            </p>
+            {similarLoading ? (
+              <div className="mt-3 text-sm text-ink-subtle">Finding similar complaints…</div>
+            ) : similar.length === 0 ? (
+              <div className="mt-3 text-sm text-ink-subtle">No similar complaints found.</div>
             ) : (
-              <div className="grid grid-cols-2 gap-3 text-xs text-ink-subtle">
-                <Metric label="Cluster ID" value={row.ml_hotspot_cluster_id} />
-                <Metric label="Cluster size" value={row.ml_hotspot_cluster_size ?? '—'} />
-                <Metric label="Hotspot score" value={formatScore(row.ml_hotspot_score)} />
-                <Metric label="Hotspot label" value={row.ml_hotspot_label || '—'} />
-              </div>
+              <ul className="mt-3 space-y-2 text-sm">
+                {similar.map((s) => (
+                  <li key={s.case_id} className="flex flex-col">
+                    <Link to={`${casesPath}/${encodeURIComponent(s.case_id)}`} className="link-quiet font-medium">
+                      {s.case_id}
+                    </Link>
+                    <span className="text-[11px] text-ink-subtle">
+                      {[s.status, formatDate(s.submitted_at)].filter(Boolean).join(' · ')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
           </Card>
 
-          <Card title="Record">
+          {/* Assignment summary */}
+          <Card title="Assignment">
             <dl className="space-y-2 text-sm">
-              <Field label="Opened" value={formatDate(row.opened_at)} />
-              <Field label="Closed" value={formatDate(row.closed_at)} />
-              <Field label="Postal code" value={row.postal_code} />
-              <Field label="District" value={row.district} />
-              <Field label="Source" value={row.source_dataset} />
+              <Field label="Department" value={row.assigned_department} />
+              <Field label="Unit" value={row.department_unit} />
+              <Field label="Priority" value={row.priority} />
             </dl>
+          </Card>
+
+          {/* 6. Audit trail */}
+          <Card title="Audit trail" hint={eventsLoading ? 'loading…' : `${events.length}`}>
+            {eventsLoading ? (
+              <div className="text-sm text-ink-subtle">Loading workflow events…</div>
+            ) : events.length === 0 ? (
+              <div className="text-sm text-ink-subtle">No workflow events recorded yet.</div>
+            ) : (
+              <ul className="space-y-3 text-xs">
+                {events.map((e) => (
+                  <li key={e.id} className="flex items-start gap-3">
+                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+                    <div className="flex-1">
+                      <div className="text-ink">{e.event_label || e.event_type}</div>
+                      {(e.from_status || e.to_status) && (
+                        <div className="text-ink-subtle">
+                          {[e.from_status, e.to_status].filter(Boolean).join(' → ')}
+                        </div>
+                      )}
+                      {e.notes && <div className="text-ink-subtle">{e.notes}</div>}
+                      <div className="text-ink-subtle">
+                        {(e.actor_type || 'staff')} · {formatDateTime(e.created_at)}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
       </div>
     </div>
   )
+}
+
+/** Build a resident-facing response draft from the complaint fields. */
+function buildResidentDraft(row: MunicipalComplaintRow): string {
+  const type = row.complaint_type || 'your reported concern'
+  const dept = row.assigned_department || 'the responsible municipal team'
+  const status = (row.status || 'in progress').toLowerCase()
+  const summary = row.ai_summary?.trim()
+  const action = row.ai_recommended_action?.trim()
+
+  const lines = [
+    `Re: Complaint ${row.case_id} — ${type}`,
+    '',
+    'Hello,',
+    '',
+    `Thank you for contacting us about ${type}. This complaint has been received and is currently ${status}. It has been routed to ${dept}.`,
+  ]
+  if (summary) lines.push('', `Summary of the issue: ${summary}`)
+  if (action) lines.push('', `Next step: ${action}`)
+  lines.push(
+    '',
+    'We will follow up if we need additional information. You can reference the case number above in any further correspondence.',
+    '',
+    'Sincerely,',
+    `${dept}`,
+  )
+  return lines.join('\n')
 }
 
 /** Rich mock case detail used by the public demo. */
@@ -187,13 +341,14 @@ export function MockCaseDetailView({ c, casesPath }: { c: MockCase; casesPath: s
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" disabled>Assign officer</button>
+          <button className="btn-secondary" disabled>Assign</button>
           <button className="btn-primary" disabled>Take recommended action</button>
         </div>
       </div>
 
       <div className="mt-3 text-[11px] text-ink-subtle">
-        Buttons disabled in POC — decision support only. Final action remains with authorized municipal staff.
+        Buttons disabled in this public demo — decision support only. Final action remains with authorized municipal
+        staff.
       </div>
 
       <div className="mt-4">
@@ -216,22 +371,6 @@ export function MockCaseDetailView({ c, casesPath }: { c: MockCase; casesPath: s
                     <span>{s.date} · {s.channel}</span>
                   </div>
                   <p className="mt-1 text-sm text-ink">{s.summary}</p>
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          <Card title="Risk explanation" aiGenerated>
-            <div className="flex items-center gap-3">
-              <div className="text-xs text-ink-subtle">Risk score</div>
-              <div className="text-2xl font-semibold text-navy-900 tabular-nums">{c.riskScore}</div>
-              <RiskBadge risk={c.risk} />
-            </div>
-            <ul className="mt-4 space-y-2">
-              {c.riskDrivers.map((d, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-ink">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-accent-500 shrink-0" />
-                  <span>{d}</span>
                 </li>
               ))}
             </ul>
@@ -277,7 +416,7 @@ export function MockCaseDetailView({ c, casesPath }: { c: MockCase; casesPath: s
           <Card title="Audit trail" hint="placeholder">
             <ul className="space-y-3 text-xs">
               <AuditEntry time="just now" actor="System" text="AI case summary regenerated" />
-              <AuditEntry time="2h ago" actor="J. Lee (Triage)" text="Risk reviewed and acknowledged" />
+              <AuditEntry time="2h ago" actor="J. Lee (Triage)" text="Complaint reviewed and acknowledged" />
               <AuditEntry time="yesterday" actor="System" text="Case opened from intake batch" />
               <AuditEntry time="—" actor="—" text="Full audit trail available in production with role based access" />
             </ul>
@@ -292,6 +431,12 @@ function formatDate(value: string | null): string | null {
   if (!value) return null
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString()
+}
+
+function formatDateTime(value: string | null): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -330,7 +475,7 @@ function Card({
           {advisory && (
             <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-amber-800 ring-1 ring-inset ring-amber-200">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-              Advisory signal
+              Rule based POC triage
             </span>
           )}
           {hint && <span>{hint}</span>}
@@ -339,18 +484,6 @@ function Card({
       <div className="mt-4">{children}</div>
     </div>
   )
-}
-
-/** Format an ML probability (0–1) as a percentage, or a dash when absent. */
-function formatProb(value: number | null): string {
-  if (value == null) return '—'
-  return `${Math.round(value * 100)}%`
-}
-
-/** Format an ML score / threshold to two decimals, or a dash when absent. */
-function formatScore(value: number | null): string {
-  if (value == null) return '—'
-  return value.toFixed(2)
 }
 
 function Metric({ label, value }: { label: string; value: React.ReactNode }) {
