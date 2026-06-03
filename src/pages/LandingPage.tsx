@@ -74,9 +74,9 @@ export default function LandingPage() {
       <section className="container-page py-16 lg:py-20">
         <SectionHeading eyebrow="01 — Problem" title="High complaint volume, limited time to triage" />
         <p className="mt-4 max-w-3xl text-ink-muted">
-          Municipal enforcement teams receive large volumes of complaints across property standards, parking, noise,
-          waste, zoning, licensing, and other bylaw categories. Reviewing repeat complaints, identifying hotspots, and
-          preparing case packages can be manual and time consuming.
+          Municipal complaint teams receive large volumes of complaints across property standards, parking, noise,
+          waste, zoning, licensing, and other bylaw categories. Validating, triaging, assigning, and closing repeat
+          complaints can be manual and time consuming.
         </p>
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -108,7 +108,7 @@ export default function LandingPage() {
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {[
-              { title: 'Real public 311 data layer', body: 'NYC 311 service request data is normalized into a Brampton compatible enforcement schema, with synthetic records used only for missing internal workflow fields.' },
+              { title: 'Real public 311 data layer', body: 'Toronto 311 public benchmark complaint data is normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for missing internal workflow fields. Brampton GeoHub ward boundaries provide real local context.' },
               { title: 'Transparent scoring', body: 'A rules based risk score with explainable drivers and ML ready feature design.' },
               { title: 'Officer ready outputs', body: 'Case summaries, recommended actions, and briefing notes designed for staff review.' },
             ].map((c) => (

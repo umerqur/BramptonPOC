@@ -30,7 +30,7 @@ export default function Logo({ className = 'h-7 w-7' }: Props) {
         <circle cx="25.5" cy="7.5" r="1.5" />
       </g>
 
-      {/* Location pin — hotspot detection */}
+      {/* Location pin — local ward context */}
       <path
         d="M16 28.5 C 12 23.5 8 19 8 13 a 8 8 0 1 1 16 0 c 0 6 -4 10.5 -8 15.5 Z"
         fill="url(#pei-pin)"

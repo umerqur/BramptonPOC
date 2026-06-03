@@ -13,6 +13,8 @@ import NotFoundPage from './pages/NotFoundPage'
 import AppDashboardPage from './pages/app/AppDashboardPage'
 import AppCaseQueuePage from './pages/app/AppCaseQueuePage'
 import AppCaseDetailPage from './pages/app/AppCaseDetailPage'
+import AppWorkflowPage from './pages/app/AppWorkflowPage'
+import AppWardContextPage from './pages/app/AppWardContextPage'
 
 export default function App() {
   return (
@@ -34,6 +36,8 @@ export default function App() {
       <Route path="/app" element={<ProtectedRoute />}>
         <Route index element={<Navigate to="/app/dashboard" replace />} />
         <Route path="dashboard" element={<AppDashboardPage />} />
+        <Route path="workflow" element={<AppWorkflowPage />} />
+        <Route path="wards" element={<AppWardContextPage />} />
         <Route path="cases" element={<AppCaseQueuePage />} />
         <Route path="cases/:id" element={<AppCaseDetailPage />} />
       </Route>

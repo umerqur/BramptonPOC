@@ -1,17 +1,25 @@
 import DashboardView from '../components/dashboard/DashboardView'
-import { mockDashboardStats } from '../services/municipalServiceRequests'
+import {
+  mockComplaintKpis,
+  mockComplaintTypes,
+  mockDepartmentWorkload,
+} from '../services/municipalServiceRequests'
 
 // Public demo dashboard. Intentionally uses bundled sample data only — it does
-// not query Supabase, so it loads instantly and always looks good. Live data
-// lives behind login at /app/dashboard.
-const stats = mockDashboardStats()
+// not query Supabase, so it loads instantly. Live data lives behind login at
+// /app/dashboard.
+const kpis = mockComplaintKpis()
+const departmentWorkload = mockDepartmentWorkload()
+const complaintTypes = mockComplaintTypes()
 
 export default function DashboardPage() {
   return (
     <DashboardView
-      stats={stats}
+      kpis={kpis}
+      departmentWorkload={departmentWorkload}
+      complaintTypes={complaintTypes}
       loading={false}
-      eyebrow="Demo Dashboard"
+      eyebrow="Workflow Demo"
       casesPath="/cases"
       statusSlot={<SampleDataBadge />}
     />

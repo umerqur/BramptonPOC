@@ -42,7 +42,7 @@ export default function Header() {
             Login
           </NavLink>
           <Link to="/dashboard" className="btn-primary text-sm py-2 px-4">
-            Demo Dashboard
+            Workflow Demo
           </Link>
         </nav>
 
@@ -83,7 +83,7 @@ export default function Header() {
               Login
             </NavLink>
             <Link to="/dashboard" onClick={() => setOpen(false)} className="btn-primary mt-2">
-              View Demo Dashboard
+              View Workflow Demo
             </Link>
           </div>
         </div>

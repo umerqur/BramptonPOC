@@ -1,174 +1,162 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
-import type { Risk } from '../data/types'
 
-// Primary data source: the ML-enriched view of municipal service requests.
-// This table carries the base service-request columns plus advisory ML
-// pattern-detection and hotspot fields produced by the local PyTorch pipeline.
-export const TABLE = 'municipal_service_requests_ml_enriched'
-
-/**
- * Standard advisory disclaimer for all ML-derived outputs. Surfaced in the UI
- * wherever an ML signal is shown.
- */
-export const ML_ADVISORY =
-  'ML outputs are advisory pattern detection signals only. They are not enforcement decisions. Final decisions remain with authorized municipal staff.'
+// Primary data source for the authenticated Brampton complaint workflow app.
+// Toronto 311 public benchmark complaints are loaded into `municipal_complaints`
+// to demonstrate the complaint workflow; Brampton GeoHub ward boundaries provide
+// real local context. This is not Brampton operational complaint data.
+export const COMPLAINTS_TABLE = 'municipal_complaints'
+export const WARDS_TABLE = 'brampton_ward_boundaries'
+export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
+export const AI_TRIAGE_TABLE = 'ai_triage_results'
 
 /**
- * Shape of a row in the Supabase `municipal_service_requests_ml_enriched`
- * table. The base columns mirror
- * supabase/migrations/001_create_municipal_service_requests.sql; the `ml_*`
- * columns are added by the ML enrichment pipeline.
+ * Standard advisory disclaimer for AI-assisted triage. The current POC triage is
+ * rule based using existing columns in `municipal_complaints` — it is decision
+ * support only, never a final enforcement decision.
  */
-export type MunicipalServiceRequestRow = {
-  id: string
-  source_city: string | null
+export const TRIAGE_ADVISORY =
+  'AI-assisted triage is rule based POC decision support only. It is not a final enforcement decision. Authorized municipal staff review and decide every case.'
+
+/** Product positioning note used across the authenticated app. */
+export const DATA_POSITIONING =
+  'Toronto 311 public benchmark data is used to demonstrate the complaint workflow. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data.'
+
+/**
+ * Shape of a row in the Supabase `municipal_complaints` table.
+ */
+export type MunicipalComplaintRow = {
+  id: number
+  case_id: string
+  source_city: string
   source_dataset: string | null
-  source_id: string
-  opened_at: string | null
-  closed_at: string | null
-  agency: string | null
-  agency_name: string | null
-  category: string | null
-  subcategory: string | null
-  issue_detail: string | null
-  location_type: string | null
-  postal_code: string | null
-  address_label: string | null
-  street_name: string | null
-  city: string | null
+  source_channel: string | null
+  submitted_at: string | null
   status: string | null
-  closure_text: string | null
-  community_board: string | null
-  council_district: number | null
-  district: string | null
-  channel: string | null
+  resolution_status: string | null
+  workflow_stage: string | null
+  fsa_or_area: string | null
+  intersection_street_1: string | null
+  intersection_street_2: string | null
+  address_or_location: string | null
+  ward_or_area: string | null
+  complaint_type: string | null
+  assigned_department: string | null
+  department_unit: string | null
+  priority: string | null
+  ai_category: string | null
+  ai_priority: string | null
+  ai_summary: string | null
+  ai_recommended_action: string | null
+  human_decision: string | null
+  closed_at: string | null
   latitude: number | null
   longitude: number | null
-  days_open: number | null
-  is_closed: boolean | null
-  risk_score: number | null
-  risk_level: string | null
-  recommended_action: string | null
-  risk_drivers: string | null
-  // --- ML enrichment fields (advisory pattern detection only) ---
-  ml_violation_probability: number | null
-  ml_violation_pattern_class: number | null
-  ml_violation_pattern_label: string | null
-  ml_model_name: string | null
-  ml_model_version: string | null
-  ml_decision_threshold: number | null
-  ml_output_type: string | null
-  ml_hotspot_cluster_id: number | null
-  ml_hotspot_cluster_size: number | null
-  ml_hotspot_score: number | null
-  ml_hotspot_label: string | null
+  description: string | null
+  created_at: string | null
 }
 
 /**
- * A normalized view-model row used by the dashboard and case queue tables.
- * Both real Supabase rows and the mock fallback cases map into this shape so
- * the UI does not need to branch on the data source.
+ * Normalized view-model row used by the case queue table. Both real Supabase
+ * rows and the mock fallback cases map into this shape so the UI does not need
+ * to branch on the data source.
  */
-export type RequestRow = {
+export type ComplaintRow = {
   id: string
-  category: string
-  district: string
-  address: string
-  daysOpen: number
-  riskScore: number
-  risk: Risk
-  recommendedAction: string
+  submittedAt: string | null
+  complaintType: string
   status: string
-  // --- advisory ML fields surfaced in the case queue ---
-  mlProbability: number | null
-  mlPatternClass: number | null
-  mlPatternLabel: string
-  mlHotspotScore: number | null
-  mlHotspotLabel: string
-  mlHotspotClusterId: number | null
+  workflowStage: string
+  priority: string
+  aiCategory: string
+  assignedDepartment: string
+  departmentUnit: string
+  wardOrArea: string
+  address: string
+  aiSummary: string
+  recommendedAction: string
 }
 
-export type CategoryCount = {
-  category: string
-  count: number
-}
-
-/** A single hotspot cluster marker for the geospatial view. */
-export type Hotspot = {
-  clusterId: number
-  size: number
-  score: number
-  patternLabel: string
-  hotspotLabel: string
-  lat: number
-  lng: number
-}
-
-export type DashboardStats = {
-  total: number
-  highRisk: number
-  open: number
-  avgDaysOpen: number
-  /** Cases whose ML pattern label is a high-signal tier. */
-  highSignal: number
-  /** Cases whose ML pattern label is a moderate-signal tier. */
-  moderateSignal: number
-  /** Distinct ML hotspot clusters. */
-  hotspotClusters: number
-  categoriesByCount: CategoryCount[]
-  topHighRisk: RequestRow[]
-  hotspots: Hotspot[]
-}
-
-export type RequestFilters = {
+export type ComplaintFilters = {
+  status?: string
+  priority?: string
+  department?: string
   category?: string
-  district?: string
-  riskLevel?: string
+  ward?: string
   search?: string
-  sort?: 'risk_score' | 'days_open'
+  sort?: 'submitted_at' | 'priority' | 'status'
   limit?: number
 }
 
-export type FilterOptions = {
+export type ComplaintFilterOptions = {
+  statuses: string[]
+  priorities: string[]
+  departments: string[]
   categories: string[]
-  districts: string[]
+  wards: string[]
 }
 
-export const RISK_LEVELS: Risk[] = ['Critical', 'High', 'Medium', 'Low']
-const HIGH_RISK_LEVELS = ['High', 'Critical']
-
-// Columns selected for table/list views. Keeps payloads small over 49k rows.
-const LIST_COLUMNS =
-  'source_id, category, district, address_label, street_name, status, days_open, risk_score, risk_level, recommended_action, ml_violation_probability, ml_violation_pattern_class, ml_violation_pattern_label, ml_hotspot_score, ml_hotspot_label, ml_hotspot_cluster_id'
-
-/** Coerce an arbitrary risk_level string into the typed Risk union. */
-export function normalizeRisk(value: string | null | undefined): Risk {
-  const match = RISK_LEVELS.find((r) => r.toLowerCase() === String(value ?? '').toLowerCase())
-  return match ?? 'Low'
+export type ComplaintKpis = {
+  total_cases: number
+  in_progress_cases: number
+  new_or_initiated_cases: number
+  closed_or_completed_cases: number
+  cancelled_cases: number
+  complaint_types: number
+  departments: number
+  wards_or_areas: number
 }
 
-function rowAddress(row: Pick<MunicipalServiceRequestRow, 'address_label' | 'street_name'>): string {
-  return row.address_label || row.street_name || 'Address not recorded'
+export type DepartmentWorkload = {
+  assigned_department: string | null
+  case_count: number
+  closed_or_completed_count: number
+  in_progress_count: number
 }
 
-function mapRow(row: Partial<MunicipalServiceRequestRow>): RequestRow {
+export type ComplaintTypeCount = {
+  complaint_type: string | null
+  ai_category: string | null
+  case_count: number
+}
+
+export type WardBoundary = {
+  id: number
+  objectid: number | null
+  ward: string | null
+  electoral_area: string | null
+  source_city: string | null
+  source_dataset: string | null
+  geojson_geometry: unknown
+}
+
+export type WorkflowEvent = {
+  id: number
+  case_id: string
+  event_type: string
+  event_label: string | null
+  from_status: string | null
+  to_status: string | null
+  actor_type: string | null
+  notes: string | null
+  created_at: string | null
+}
+
+function mapComplaintRow(row: MunicipalComplaintRow): ComplaintRow {
   return {
-    id: row.source_id ?? '',
-    category: row.category || 'Uncategorized',
-    district: row.district || 'Unknown',
-    address: rowAddress(row as MunicipalServiceRequestRow),
-    daysOpen: row.days_open ?? 0,
-    riskScore: row.risk_score ?? 0,
-    risk: normalizeRisk(row.risk_level),
-    recommendedAction: row.recommended_action || 'Standard processing',
+    id: row.case_id,
+    submittedAt: row.submitted_at,
+    complaintType: row.complaint_type || 'Uncategorized',
     status: row.status || 'Unknown',
-    mlProbability: row.ml_violation_probability ?? null,
-    mlPatternClass: row.ml_violation_pattern_class ?? null,
-    mlPatternLabel: row.ml_violation_pattern_label || '—',
-    mlHotspotScore: row.ml_hotspot_score ?? null,
-    mlHotspotLabel: row.ml_hotspot_label || '—',
-    mlHotspotClusterId: row.ml_hotspot_cluster_id ?? null,
+    workflowStage: row.workflow_stage || 'Needs review',
+    priority: row.priority || 'Low',
+    aiCategory: row.ai_category || 'General municipal service',
+    assignedDepartment: row.assigned_department || 'Unassigned',
+    departmentUnit: row.department_unit || 'Unassigned',
+    wardOrArea: row.ward_or_area || row.fsa_or_area || 'Unknown',
+    address: row.address_or_location || row.fsa_or_area || 'Location not recorded',
+    aiSummary: row.ai_summary || 'No AI summary available.',
+    recommendedAction: row.ai_recommended_action || 'Validate details and assign to the responsible team.',
   }
 }
 
@@ -179,416 +167,344 @@ function requireClient() {
   return supabase
 }
 
-/**
- * Fetch service requests for the case queue. Filtering for category, district,
- * risk level and free-text search is performed server-side; results are
- * ordered by the requested sort column and capped by `limit`.
- */
-export async function getMunicipalServiceRequests(filters: RequestFilters = {}): Promise<RequestRow[]> {
+// Columns selected for the case queue list view. Keeps payloads small over the
+// full complaint table.
+const LIST_COLUMNS =
+  'id, case_id, source_city, source_dataset, source_channel, submitted_at, status, resolution_status, workflow_stage, fsa_or_area, intersection_street_1, intersection_street_2, address_or_location, ward_or_area, complaint_type, assigned_department, department_unit, priority, ai_category, ai_priority, ai_summary, ai_recommended_action, human_decision, closed_at, latitude, longitude, description, created_at'
+
+export async function getComplaintKpis(): Promise<ComplaintKpis> {
   const client = requireClient()
-  const { category, district, riskLevel, search, sort = 'risk_score', limit = 500 } = filters
+  const { data, error } = await client
+    .from('v_municipal_complaint_kpis')
+    .select('*')
+    .single()
 
-  let query = client.from(TABLE).select(LIST_COLUMNS)
+  if (error) throw error
+  return data as ComplaintKpis
+}
 
-  if (category && category !== 'All') query = query.eq('category', category)
-  if (district && district !== 'All') query = query.eq('district', district)
-  if (riskLevel && riskLevel !== 'All') query = query.eq('risk_level', riskLevel)
+export async function getDepartmentWorkload(): Promise<DepartmentWorkload[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_complaints_by_department')
+    .select('*')
+    .limit(10)
+
+  if (error) throw error
+  return (data ?? []) as DepartmentWorkload[]
+}
+
+export async function getComplaintTypes(): Promise<ComplaintTypeCount[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_complaints_by_type')
+    .select('*')
+    .limit(10)
+
+  if (error) throw error
+  return (data ?? []) as ComplaintTypeCount[]
+}
+
+export async function getMunicipalComplaints(filters: ComplaintFilters = {}): Promise<ComplaintRow[]> {
+  const client = requireClient()
+  const {
+    status,
+    priority,
+    department,
+    category,
+    ward,
+    search,
+    sort = 'submitted_at',
+    limit = 500,
+  } = filters
+
+  let query = client.from(COMPLAINTS_TABLE).select(LIST_COLUMNS)
+
+  if (status && status !== 'All') query = query.eq('status', status)
+  if (priority && priority !== 'All') query = query.eq('priority', priority)
+  if (department && department !== 'All') query = query.eq('assigned_department', department)
+  if (category && category !== 'All') query = query.eq('ai_category', category)
+  if (ward && ward !== 'All') query = query.eq('ward_or_area', ward)
 
   const trimmed = search?.trim()
   if (trimmed) {
-    // Strip characters that have special meaning in a PostgREST `or` filter.
     const term = trimmed.replace(/[,()*%]/g, ' ').trim()
     if (term) {
       query = query.or(
         [
-          `source_id.ilike.%${term}%`,
-          `category.ilike.%${term}%`,
-          `district.ilike.%${term}%`,
-          `address_label.ilike.%${term}%`,
-          `street_name.ilike.%${term}%`,
+          `case_id.ilike.%${term}%`,
+          `complaint_type.ilike.%${term}%`,
+          `assigned_department.ilike.%${term}%`,
+          `ward_or_area.ilike.%${term}%`,
+          `address_or_location.ilike.%${term}%`,
+          `ai_category.ilike.%${term}%`,
         ].join(','),
       )
     }
   }
 
-  const { data, error } = await query.order(sort, { ascending: false, nullsFirst: false }).limit(limit)
+  const ascending = sort === 'submitted_at' ? false : true
+  const { data, error } = await query.order(sort, { ascending, nullsFirst: false }).limit(limit)
+
   if (error) throw error
-  return (data ?? []).map(mapRow)
+  return ((data ?? []) as MunicipalComplaintRow[]).map(mapComplaintRow)
 }
 
-/** Highest risk-scored requests, used for the dashboard priority queue. */
-export async function getHighRiskRequests(limit = 6): Promise<RequestRow[]> {
+export async function getComplaintByCaseId(caseId: string): Promise<MunicipalComplaintRow | null> {
   const client = requireClient()
   const { data, error } = await client
-    .from(TABLE)
-    .select(LIST_COLUMNS)
-    .order('risk_score', { ascending: false, nullsFirst: false })
-    .limit(limit)
+    .from(COMPLAINTS_TABLE)
+    .select('*')
+    .eq('case_id', caseId)
+    .maybeSingle()
+
   if (error) throw error
-  return (data ?? []).map(mapRow)
+  return (data as MunicipalComplaintRow) ?? null
 }
 
-/** A single request looked up by its source_id (the public-facing id). */
-export async function getRequestBySourceId(sourceId: string): Promise<MunicipalServiceRequestRow | null> {
-  const client = requireClient()
-  const { data, error } = await client.from(TABLE).select('*').eq('source_id', sourceId).maybeSingle()
-  if (error) throw error
-  return (data as MunicipalServiceRequestRow) ?? null
-}
-
-async function countWhere(apply?: (q: ReturnType<typeof buildCountQuery>) => unknown): Promise<number> {
-  let query = buildCountQuery()
-  if (apply) query = apply(query) as typeof query
-  const { count, error } = await query
-  if (error) throw error
-  return count ?? 0
-}
-
-function buildCountQuery() {
-  return requireClient().from(TABLE).select('*', { count: 'exact', head: true })
-}
-
-/**
- * Aggregate statistics for the dashboard.
- *
- * Resilience strategy (so a single capability gap doesn't drop the whole
- * dashboard to mock data):
- *   1. Foundational read — a cheap exact total count plus a bounded sample
- *      via plain `select`. These are the simplest possible queries; if they
- *      fail the table is genuinely unreadable (missing table or blocking RLS)
- *      and the page falls back to mock data.
- *   2. Exact KPI counts (high-risk, open) via cheap `head` count queries.
- *      These never use aggregate functions, so they work regardless of
- *      project settings; if one does fail we estimate from the sample rather
- *      than discarding the real data we already have.
- *   3. Category breakdown + average days-open via PostgREST aggregate
- *      functions, which some projects disable. On failure we derive both from
- *      the sample fetched in step 1.
- */
-export async function getDashboardStats(): Promise<DashboardStats> {
+export async function getComplaintFilterOptions(): Promise<ComplaintFilterOptions> {
   const client = requireClient()
 
-  // Step 1 — foundational read. A failure here is fatal (handled by caller).
-  const [totalRes, sampleRes] = await Promise.all([
-    client.from(TABLE).select('*', { count: 'exact', head: true }),
-    client
-      .from(TABLE)
-      .select('category, days_open, risk_level, is_closed, ml_violation_pattern_label')
-      .limit(1000),
+  const [statusRes, priorityRes, departmentRes, categoryRes, wardRes] = await Promise.all([
+    client.from(COMPLAINTS_TABLE).select('status').not('status', 'is', null).limit(5000),
+    client.from(COMPLAINTS_TABLE).select('priority').not('priority', 'is', null).limit(5000),
+    client.from(COMPLAINTS_TABLE).select('assigned_department').not('assigned_department', 'is', null).limit(5000),
+    client.from(COMPLAINTS_TABLE).select('ai_category').not('ai_category', 'is', null).limit(5000),
+    client.from(COMPLAINTS_TABLE).select('ward_or_area').not('ward_or_area', 'is', null).limit(5000),
   ])
-  if (totalRes.error) throw totalRes.error
-  if (sampleRes.error) throw sampleRes.error
 
-  const total = totalRes.count ?? 0
-  const sample = (sampleRes.data ?? []) as Array<
-    Pick<
-      MunicipalServiceRequestRow,
-      'category' | 'days_open' | 'risk_level' | 'is_closed' | 'ml_violation_pattern_label'
-    >
-  >
-
-  // Step 2 — exact KPI counts and the priority queue. Each degrades on its own
-  // instead of taking down the whole dashboard.
-  const [highRisk, open, highSignal, moderateSignal, hotspotClusters, hotspots, topHighRisk] =
-    await Promise.all([
-      countWhere((q) => q.in('risk_level', HIGH_RISK_LEVELS)).catch(() =>
-        sample.filter((r) => HIGH_RISK_LEVELS.includes(normalizeRisk(r.risk_level))).length,
-      ),
-      countWhere((q) => q.eq('is_closed', false)).catch(() =>
-        sample.filter((r) => r.is_closed === false).length,
-      ),
-      // Signal tiers map to the ML pattern label (high / moderate / low). If the
-      // enrichment uses a different labelling scheme, adjust SIGNAL_MATCH below.
-      countWhere((q) => q.ilike('ml_violation_pattern_label', SIGNAL_MATCH.high)).catch(
-        () => sample.filter((r) => isSignal(r.ml_violation_pattern_label, 'high')).length,
-      ),
-      countWhere((q) => q.ilike('ml_violation_pattern_label', SIGNAL_MATCH.moderate)).catch(
-        () => sample.filter((r) => isSignal(r.ml_violation_pattern_label, 'moderate')).length,
-      ),
-      getHotspotClusterCount(client).catch((err) => {
-        console.warn('Hotspot cluster count failed, omitting:', err)
-        return 0
-      }),
-      getHotspots(client).catch((err) => {
-        console.warn('Hotspot query failed, omitting:', err)
-        return [] as Hotspot[]
-      }),
-      getHighRiskRequests(6).catch((err) => {
-        console.warn('Priority queue query failed, omitting:', err)
-        return [] as RequestRow[]
-      }),
-    ])
-
-  // Step 3 — category breakdown and average. Try true DB aggregates first,
-  // then fall back to the in-memory sample.
-  let categoriesByCount: CategoryCount[]
-  let avgDaysOpen: number
-  try {
-    ;[categoriesByCount, avgDaysOpen] = await Promise.all([
-      getCategoriesByCount(client),
-      getAverageDaysOpen(client),
-    ])
-  } catch (err) {
-    console.warn('Aggregate queries unavailable, using sampled estimates:', err)
-    const sampled = sampledAggregates(sample)
-    categoriesByCount = sampled.categoriesByCount
-    avgDaysOpen = sampled.avgDaysOpen
+  for (const res of [statusRes, priorityRes, departmentRes, categoryRes, wardRes]) {
+    if (res.error) throw res.error
   }
+
+  const uniq = (values: Array<string | null | undefined>) =>
+    Array.from(new Set(values.filter(Boolean) as string[])).sort()
+
+  const col = <T extends string>(rows: unknown, key: T): Array<string | null> =>
+    ((rows ?? []) as Array<Record<string, string | null>>).map((r) => r[key])
 
   return {
-    total,
-    highRisk,
-    open,
-    avgDaysOpen,
-    highSignal,
-    moderateSignal,
-    hotspotClusters,
-    categoriesByCount,
-    topHighRisk,
-    hotspots,
+    statuses: uniq(col(statusRes.data, 'status')),
+    priorities: uniq(col(priorityRes.data, 'priority')),
+    departments: uniq(col(departmentRes.data, 'assigned_department')),
+    categories: uniq(col(categoryRes.data, 'ai_category')),
+    wards: uniq(col(wardRes.data, 'ward_or_area')),
   }
 }
 
-// ML pattern-signal tier matching. Signal tiers are read from
-// `ml_violation_pattern_label` (case-insensitive substring). Centralized here
-// so the labelling scheme can be adjusted in one place.
-const SIGNAL_MATCH = { high: '%high%', moderate: '%moderate%', low: '%low%' } as const
-
-function isSignal(label: string | null | undefined, tier: 'high' | 'moderate' | 'low'): boolean {
-  return String(label ?? '').toLowerCase().includes(tier)
-}
-
-/**
- * Count of distinct ML hotspot clusters. Uses a PostgREST group-by aggregate
- * (one row per cluster id) so the payload stays bounded (~hundreds of rows)
- * rather than scanning all 49k records.
- */
-async function getHotspotClusterCount(client: NonNullable<typeof supabase>): Promise<number> {
-  const { data, error } = await client.from(TABLE).select('ml_hotspot_cluster_id, n:source_id.count()')
-  if (error) throw error
-  return ((data ?? []) as Array<{ ml_hotspot_cluster_id: number | null }>).filter(
-    (r) => r.ml_hotspot_cluster_id != null,
-  ).length
-}
-
-/**
- * One representative marker per hotspot cluster for the geospatial view.
- * Fetches the highest-scoring rows that belong to a cluster and have
- * coordinates, then keeps the first row seen per cluster id.
- */
-export async function getHotspots(
-  client: NonNullable<typeof supabase>,
-  limit = 250,
-): Promise<Hotspot[]> {
-  const { data, error } = await client
-    .from(TABLE)
-    .select(
-      'ml_hotspot_cluster_id, ml_hotspot_cluster_size, ml_hotspot_score, ml_hotspot_label, ml_violation_pattern_label, latitude, longitude',
-    )
-    .not('ml_hotspot_cluster_id', 'is', null)
-    .not('latitude', 'is', null)
-    .not('longitude', 'is', null)
-    .order('ml_hotspot_score', { ascending: false, nullsFirst: false })
-    .limit(2000)
-  if (error) throw error
-
-  const seen = new Set<number>()
-  const out: Hotspot[] = []
-  for (const r of (data ?? []) as Array<Partial<MunicipalServiceRequestRow>>) {
-    const clusterId = r.ml_hotspot_cluster_id
-    if (clusterId == null || seen.has(clusterId)) continue
-    if (r.latitude == null || r.longitude == null) continue
-    seen.add(clusterId)
-    out.push({
-      clusterId,
-      size: r.ml_hotspot_cluster_size ?? 0,
-      score: r.ml_hotspot_score ?? 0,
-      patternLabel: r.ml_violation_pattern_label || '—',
-      hotspotLabel: r.ml_hotspot_label || '—',
-      lat: r.latitude,
-      lng: r.longitude,
-    })
-    if (out.length >= limit) break
-  }
-  return out
-}
-
-/**
- * Category counts and average days-open derived from an already-fetched sample
- * of rows. Used as a fallback when PostgREST aggregate functions are disabled.
- */
-function sampledAggregates(
-  rows: Array<Pick<MunicipalServiceRequestRow, 'category' | 'days_open'>>,
-): { categoriesByCount: CategoryCount[]; avgDaysOpen: number } {
-  const counts = new Map<string, number>()
-  let daysSum = 0
-  let daysCount = 0
-  for (const r of rows) {
-    if (r.category) counts.set(r.category, (counts.get(r.category) ?? 0) + 1)
-    if (typeof r.days_open === 'number') {
-      daysSum += r.days_open
-      daysCount += 1
-    }
-  }
-  return {
-    categoriesByCount: Array.from(counts.entries())
-      .map(([category, count]) => ({ category, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12),
-    avgDaysOpen: daysCount ? Math.round(daysSum / daysCount) : 0,
-  }
-}
-
-async function getCategoriesByCount(client: NonNullable<typeof supabase>): Promise<CategoryCount[]> {
-  const { data, error } = await client
-    .from(TABLE)
-    // PostgREST aggregate: group by category, count rows per group.
-    .select('category, count:source_id.count()')
-  if (error) throw error
-  return ((data ?? []) as Array<{ category: string | null; count: number }>)
-    .filter((r) => r.category)
-    .map((r) => ({ category: r.category as string, count: Number(r.count) || 0 }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 12)
-}
-
-async function getAverageDaysOpen(client: NonNullable<typeof supabase>): Promise<number> {
-  const { data, error } = await client.from(TABLE).select('avg:days_open.avg()').single()
-  if (error) throw error
-  const avg = (data as { avg: number | string | null } | null)?.avg
-  return Math.round(Number(avg) || 0)
-}
-
-/**
- * Distinct categories and districts for the case queue filter dropdowns.
- * Derived from a bounded sample of rows so it works without DB-side DISTINCT.
- */
-export async function getFilterOptions(): Promise<FilterOptions> {
+export async function getBramptonWardBoundaries(): Promise<WardBoundary[]> {
   const client = requireClient()
-  const { data, error } = await client.from(TABLE).select('category, district').limit(1000)
+  const { data, error } = await client.from(WARDS_TABLE).select('*').order('ward', { ascending: true })
+
   if (error) throw error
-  const rows = (data ?? []) as Array<Pick<MunicipalServiceRequestRow, 'category' | 'district'>>
-  const unique = (values: Array<string | null>) =>
-    Array.from(new Set(values.filter((v): v is string => Boolean(v)))).sort((a, b) => a.localeCompare(b))
-  return {
-    categories: unique(rows.map((r) => r.category)),
-    districts: unique(rows.map((r) => r.district)),
-  }
+  return (data ?? []) as WardBoundary[]
 }
 
-// ---------------------------------------------------------------------------
-// Mock fallback helpers — used when Supabase is not configured or a query
-// fails, so the POC still renders without a live backend. Do not remove.
-// ---------------------------------------------------------------------------
+export async function addWorkflowEvent(input: {
+  case_id: string
+  event_type: string
+  event_label?: string
+  from_status?: string
+  to_status?: string
+  actor_type?: string
+  notes?: string
+}) {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKFLOW_EVENTS_TABLE)
+    .insert({
+      case_id: input.case_id,
+      event_type: input.event_type,
+      event_label: input.event_label ?? input.event_type,
+      from_status: input.from_status ?? null,
+      to_status: input.to_status ?? null,
+      actor_type: input.actor_type ?? 'staff',
+      notes: input.notes ?? null,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function getWorkflowEvents(caseId: string): Promise<WorkflowEvent[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKFLOW_EVENTS_TABLE)
+    .select('*')
+    .eq('case_id', caseId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as WorkflowEvent[]
+}
 
 /**
- * Synthesize advisory ML fields from a mock case so the fallback UI mirrors the
- * live ML-enriched shape. These are derived from the existing mock signals
- * (risk + repeat complaints), not real model output.
+ * Similar complaints by the same complaint type and ward/area, excluding the
+ * current case. Used by the case detail "Similar cases" panel.
  */
-function mockMlFields(c: (typeof cases)[number]): {
-  mlProbability: number
-  mlPatternClass: number
-  mlPatternLabel: string
-  mlHotspotScore: number | null
-  mlHotspotLabel: string
-  mlHotspotClusterId: number | null
-} {
-  const mlProbability = Math.min(1, Math.max(0, Math.round((c.riskScore / 100) * 100) / 100))
-  const tier = c.risk === 'Critical' || c.risk === 'High' ? 'High' : c.risk === 'Medium' ? 'Moderate' : 'Low'
-  const clustered = c.repeatComplaints >= 3
+export async function getSimilarComplaints(
+  current: MunicipalComplaintRow,
+  limit = 5,
+): Promise<MunicipalComplaintRow[]> {
+  const client = requireClient()
+  let query = client.from(COMPLAINTS_TABLE).select(LIST_COLUMNS).neq('case_id', current.case_id)
+
+  if (current.complaint_type) query = query.eq('complaint_type', current.complaint_type)
+  if (current.ward_or_area) query = query.eq('ward_or_area', current.ward_or_area)
+
+  const { data, error } = await query.order('submitted_at', { ascending: false, nullsFirst: false }).limit(limit)
+  if (error) throw error
+  return (data ?? []) as MunicipalComplaintRow[]
+}
+
+// ---------------------------------------------------------------------------
+// Mock fallback helpers — used by the public demo pages and when Supabase is
+// unavailable, so the POC still renders without a live backend. These derive
+// from the bundled sample cases and intentionally use Brampton/Ontario framing.
+// Do not remove.
+// ---------------------------------------------------------------------------
+
+const DEPARTMENT_BY_CATEGORY: Record<string, string> = {
+  'Property Standards': 'By-law Enforcement',
+  Parking: 'By-law Enforcement',
+  Noise: 'By-law Enforcement',
+  Waste: 'Public Works',
+  Zoning: 'Planning & Development',
+  Licensing: 'Licensing & Permits',
+  'Illegal Dumping': 'Public Works',
+  'Grass and Weeds': 'Parks & Forestry',
+}
+
+function mockPriority(c: (typeof cases)[number]): string {
+  if (c.risk === 'Critical' || c.risk === 'High') return 'High'
+  if (c.risk === 'Medium') return 'Medium'
+  return 'Low'
+}
+
+function mockStatus(c: (typeof cases)[number], index: number): string {
+  if (c.status === 'New') return 'New'
+  // Give the sample some closed/cancelled variety for the KPI cards.
+  if (index % 5 === 0) return 'Closed'
+  if (index % 11 === 0) return 'Cancelled'
+  return 'In Progress'
+}
+
+function mockSubmittedAt(c: (typeof cases)[number]): string {
+  const d = new Date()
+  d.setDate(d.getDate() - (c.daysOpen ?? 0))
+  return d.toISOString()
+}
+
+export function mockComplaintRows(): ComplaintRow[] {
+  return cases.map((c, i) => ({
+    id: c.id,
+    submittedAt: mockSubmittedAt(c),
+    complaintType: c.category,
+    status: mockStatus(c, i),
+    workflowStage: c.status,
+    priority: mockPriority(c),
+    aiCategory: c.category,
+    assignedDepartment: DEPARTMENT_BY_CATEGORY[c.category] ?? 'General Municipal Services',
+    departmentUnit: `${c.ward} unit`,
+    wardOrArea: c.ward,
+    address: c.address,
+    aiSummary: c.summary,
+    recommendedAction: c.recommendedAction,
+  }))
+}
+
+export function mockComplaintFilterOptions(): ComplaintFilterOptions {
+  const rows = mockComplaintRows()
+  const uniq = (values: string[]) => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b))
   return {
-    mlProbability,
-    mlPatternClass: tier === 'High' ? 2 : tier === 'Moderate' ? 1 : 0,
-    mlPatternLabel: `${tier} pattern signal`,
-    mlHotspotScore: clustered ? Math.round(mlProbability * 100) / 100 : null,
-    mlHotspotLabel: clustered ? 'Active cluster' : c.repeatComplaints >= 2 ? 'Emerging cluster' : 'No cluster',
-    mlHotspotClusterId: clustered ? 400 + (Number(c.id.replace(/\D/g, '')) % 13) : null,
+    statuses: uniq(rows.map((r) => r.status)),
+    priorities: uniq(rows.map((r) => r.priority)),
+    departments: uniq(rows.map((r) => r.assignedDepartment)),
+    categories: uniq(rows.map((r) => r.aiCategory)),
+    wards: uniq(rows.map((r) => r.wardOrArea)),
   }
 }
 
-export function mockRequestRows(): RequestRow[] {
-  return cases
-    .slice()
-    .sort((a, b) => b.riskScore - a.riskScore)
-    .map((c) => ({
-      id: c.id,
-      category: c.category,
-      district: c.ward,
-      address: c.address,
-      daysOpen: c.daysOpen,
-      riskScore: c.riskScore,
-      risk: c.risk,
-      recommendedAction: c.recommendedAction,
-      status: c.status,
-      ...mockMlFields(c),
-    }))
-}
-
-export function mockFilterOptions(): FilterOptions {
-  const rows = mockRequestRows()
-  const unique = (values: string[]) => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b))
+export function mockComplaintKpis(): ComplaintKpis {
+  const rows = mockComplaintRows()
+  const count = (pred: (r: ComplaintRow) => boolean) => rows.filter(pred).length
   return {
-    categories: unique(rows.map((r) => r.category)),
-    districts: unique(rows.map((r) => r.district)),
+    total_cases: rows.length,
+    in_progress_cases: count((r) => r.status === 'In Progress'),
+    new_or_initiated_cases: count((r) => r.status === 'New'),
+    closed_or_completed_cases: count((r) => r.status === 'Closed'),
+    cancelled_cases: count((r) => r.status === 'Cancelled'),
+    complaint_types: new Set(rows.map((r) => r.complaintType)).size,
+    departments: new Set(rows.map((r) => r.assignedDepartment)).size,
+    wards_or_areas: new Set(rows.map((r) => r.wardOrArea)).size,
   }
 }
 
-export function mockDashboardStats(): DashboardStats {
-  const rows = mockRequestRows()
-  const counts = new Map<string, number>()
-  for (const r of rows) counts.set(r.category, (counts.get(r.category) ?? 0) + 1)
-
-  // Build hotspot markers from clustered mock rows with deterministic pseudo
-  // coordinates around a Brampton-area bounding box.
-  const clusterSeen = new Set<number>()
-  const hotspots: Hotspot[] = []
-  rows.forEach((r, i) => {
-    if (r.mlHotspotClusterId == null || clusterSeen.has(r.mlHotspotClusterId)) return
-    clusterSeen.add(r.mlHotspotClusterId)
-    hotspots.push({
-      clusterId: r.mlHotspotClusterId,
-      size: Math.max(2, r.riskScore % 9),
-      score: r.mlHotspotScore ?? 0,
-      patternLabel: r.mlPatternLabel,
-      hotspotLabel: r.mlHotspotLabel,
-      lat: 43.68 + ((i * 7) % 20) / 100,
-      lng: -79.78 + ((i * 11) % 24) / 100,
-    })
-  })
-
-  return {
-    total: rows.length,
-    highRisk: rows.filter((r) => r.risk === 'High' || r.risk === 'Critical').length,
-    open: rows.filter((r) => r.status !== 'Closed').length,
-    avgDaysOpen: Math.round(rows.reduce((s, r) => s + r.daysOpen, 0) / Math.max(rows.length, 1)),
-    highSignal: rows.filter((r) => isSignal(r.mlPatternLabel, 'high')).length,
-    moderateSignal: rows.filter((r) => isSignal(r.mlPatternLabel, 'moderate')).length,
-    hotspotClusters: clusterSeen.size,
-    categoriesByCount: Array.from(counts.entries())
-      .map(([category, count]) => ({ category, count }))
-      .sort((a, b) => b.count - a.count),
-    topHighRisk: rows.slice(0, 6),
-    hotspots,
+export function mockDepartmentWorkload(): DepartmentWorkload[] {
+  const rows = mockComplaintRows()
+  const byDept = new Map<string, DepartmentWorkload>()
+  for (const r of rows) {
+    const dept = r.assignedDepartment
+    const entry =
+      byDept.get(dept) ??
+      { assigned_department: dept, case_count: 0, closed_or_completed_count: 0, in_progress_count: 0 }
+    entry.case_count += 1
+    if (r.status === 'Closed') entry.closed_or_completed_count += 1
+    if (r.status === 'In Progress') entry.in_progress_count += 1
+    byDept.set(dept, entry)
   }
+  return Array.from(byDept.values())
+    .sort((a, b) => b.case_count - a.case_count)
+    .slice(0, 10)
+}
+
+export function mockComplaintTypes(): ComplaintTypeCount[] {
+  const rows = mockComplaintRows()
+  const byType = new Map<string, ComplaintTypeCount>()
+  for (const r of rows) {
+    const key = r.complaintType
+    const entry = byType.get(key) ?? { complaint_type: key, ai_category: r.aiCategory, case_count: 0 }
+    entry.case_count += 1
+    byType.set(key, entry)
+  }
+  return Array.from(byType.values())
+    .sort((a, b) => b.case_count - a.case_count)
+    .slice(0, 10)
 }
 
 /** Client-side equivalent of the server filters, for the mock fallback path. */
-export function filterMockRows(rows: RequestRow[], filters: RequestFilters): RequestRow[] {
-  const { category, district, riskLevel, search, sort = 'risk_score' } = filters
+export function filterMockComplaints(rows: ComplaintRow[], filters: ComplaintFilters): ComplaintRow[] {
+  const { status, priority, department, category, ward, search, sort = 'submitted_at' } = filters
   const q = search?.trim().toLowerCase()
+  const matches = (sel: string | undefined, value: string) => !sel || sel === 'All' || sel === value
   return rows
-    .filter((r) => (!category || category === 'All' ? true : r.category === category))
-    .filter((r) => (!district || district === 'All' ? true : r.district === district))
-    .filter((r) => (!riskLevel || riskLevel === 'All' ? true : r.risk === riskLevel))
+    .filter((r) => matches(status, r.status))
+    .filter((r) => matches(priority, r.priority))
+    .filter((r) => matches(department, r.assignedDepartment))
+    .filter((r) => matches(category, r.aiCategory))
+    .filter((r) => matches(ward, r.wardOrArea))
     .filter((r) => {
       if (!q) return true
       return (
         r.id.toLowerCase().includes(q) ||
-        r.category.toLowerCase().includes(q) ||
-        r.district.toLowerCase().includes(q) ||
-        r.address.toLowerCase().includes(q)
+        r.complaintType.toLowerCase().includes(q) ||
+        r.assignedDepartment.toLowerCase().includes(q) ||
+        r.wardOrArea.toLowerCase().includes(q) ||
+        r.address.toLowerCase().includes(q) ||
+        r.aiCategory.toLowerCase().includes(q)
       )
     })
-    .sort((a, b) => (sort === 'days_open' ? b.daysOpen - a.daysOpen : b.riskScore - a.riskScore))
+    .sort((a, b) => {
+      if (sort === 'priority') return priorityRank(b.priority) - priorityRank(a.priority)
+      if (sort === 'status') return a.status.localeCompare(b.status)
+      // submitted_at — newest first
+      return (b.submittedAt ?? '').localeCompare(a.submittedAt ?? '')
+    })
+}
+
+function priorityRank(priority: string): number {
+  const order: Record<string, number> = { High: 3, Medium: 2, Low: 1 }
+  return order[priority] ?? 0
 }
