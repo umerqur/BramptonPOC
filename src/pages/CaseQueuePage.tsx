@@ -19,6 +19,7 @@ const INITIAL_FILTERS: CaseQueueFilters = {
   department: 'All',
   category: 'All',
   ward: 'All',
+  workflowStage: 'All',
   sortKey: 'submitted_at',
 }
 
