@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { type ComplaintRow } from '../../services/municipalServiceRequests'
+import { caseAiReviewInputFromRow, type ComplaintRow } from '../../services/municipalServiceRequests'
 import { PriorityBadge, StatusBadge } from './CaseQueueView'
+import CaseAiReview from './CaseAiReview'
 
 /**
  * Shared staff work-queue UI: a queue list of case cards plus a selected-case
@@ -144,7 +145,8 @@ export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; cas
   }
 
   return (
-    <div className="card overflow-hidden">
+    <div className="space-y-6">
+      <div className="card overflow-hidden">
       <div className="border-b border-slate-100 px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -189,6 +191,10 @@ export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; cas
           Open full case detail
         </Link>
       </div>
+      </div>
+
+      {/* AI assisted staff review for the selected case only — on staff click */}
+      <CaseAiReview key={row.id} input={caseAiReviewInputFromRow(row)} compact />
     </div>
   )
 }

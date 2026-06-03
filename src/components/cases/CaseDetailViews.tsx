@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 import RiskBadge from '../RiskBadge'
 import AdvisoryNotice from '../AdvisoryNotice'
 import { PriorityBadge, StatusBadge } from './CaseQueueView'
+import CaseAiReview from './CaseAiReview'
 import type { findCase } from '../../data/mockCases'
 import {
   addWorkflowEvent,
+  caseAiReviewInputFromComplaint,
   getSimilarComplaints,
   getWorkflowEvents,
   type MunicipalComplaintRow,
@@ -100,6 +102,7 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
   }
 
   const residentDraft = useMemo(() => buildResidentDraft(row), [row])
+  const aiReviewInput = useMemo(() => caseAiReviewInputFromComplaint(row), [row])
 
   return (
     <div className="container-page py-10">
@@ -181,6 +184,9 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
               <AdvisoryNotice variant="inline" />
             </div>
           </Card>
+
+          {/* AI assisted staff review — optional, on-demand, single case only */}
+          <CaseAiReview input={aiReviewInput} />
 
           {/* 3. Human review */}
           <Card title="Human review" hint="records a workflow event">
