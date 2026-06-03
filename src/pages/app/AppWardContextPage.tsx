@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   getBramptonWardBoundaries,
+  getWardWorkloadScenarios,
   type WardBoundary,
+  type WardWorkloadScenario,
 } from '../../services/municipalServiceRequests'
 
 const JOIN_NOTE =
@@ -19,6 +21,8 @@ export default function AppWardContextPage() {
   // Distinguish "query has not succeeded yet" from "query succeeded with 0 rows"
   // so we never render "0 Brampton wards" unless the load genuinely returned 0.
   const [loaded, setLoaded] = useState(false)
+  // Synthetic workload scenario overlay (separate, clearly-labelled layer).
+  const [scenarios, setScenarios] = useState<WardWorkloadScenario[]>([])
 
   useEffect(() => {
     let active = true
@@ -37,6 +41,20 @@ export default function AppWardContextPage() {
         setError(errorMessage(err))
       })
       .finally(() => active && setLoading(false))
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    getWardWorkloadScenarios()
+      .then((data) => active && setScenarios(data))
+      .catch((err: unknown) => {
+        // The overlay is supplementary; a failure here must not break the page.
+        console.error('Failed to load ward workload scenarios:', err)
+        if (active) setScenarios([])
+      })
     return () => {
       active = false
     }
@@ -78,8 +96,13 @@ export default function AppWardContextPage() {
         </div>
       )}
 
-      {/* Map / boundary preview panel */}
+      {/* Map / boundary preview panel — REAL Brampton GeoHub geometry */}
       {!error && <WardBoundaryPanel wards={wards} loading={loading} loaded={loaded} />}
+
+      {/* Synthetic workload scenario overlay — clearly labelled, NOT operational data */}
+      {!error && wards.length > 0 && scenarios.length > 0 && (
+        <WardScenarioOverlay wards={wards} scenarios={scenarios} />
+      )}
 
       {/* Cards */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -254,6 +277,213 @@ function WardBoundaryPanel({
   )
 }
 
+const SCENARIO_DISCLAIMER =
+  'Synthetic Brampton ward workload scenario. Not Brampton operational complaint data. This layer is illustrative only — it demonstrates what a ward-level workload heatmap will look like once Brampton provides operational complaint data. Toronto 311 benchmark records are never plotted onto Brampton wards.'
+
+/** Heat color from low (green) → high (red) for a normalized value t in [0,1]. */
+function heatColor(t: number): string {
+  const clamped = Math.max(0, Math.min(1, t))
+  const hue = 140 - clamped * 128 // 140 green → 12 red, through amber
+  return `hsl(${hue.toFixed(0)}, 78%, 52%)`
+}
+
+/**
+ * Synthetic workload overlay. Shades the REAL Brampton ward polygons by the
+ * SYNTHETIC scenario complaint_volume to preview the eventual heatmap. Clearly
+ * labelled as illustrative, non-operational data.
+ */
+function WardScenarioOverlay({
+  wards,
+  scenarios,
+}: {
+  wards: WardBoundary[]
+  scenarios: WardWorkloadScenario[]
+}) {
+  const map = useMemo(() => buildWardMap(wards), [wards])
+
+  const byWard = useMemo(() => {
+    const m = new Map<string, WardWorkloadScenario>()
+    for (const s of scenarios) m.set(s.ward.trim().toUpperCase(), s)
+    return m
+  }, [scenarios])
+
+  const { min, max } = useMemo(() => {
+    const vols = scenarios.map((s) => s.complaint_volume)
+    return { min: Math.min(...vols), max: Math.max(...vols) }
+  }, [scenarios])
+
+  const totals = useMemo(
+    () =>
+      scenarios.reduce(
+        (acc, s) => ({
+          complaint_volume: acc.complaint_volume + s.complaint_volume,
+          open_cases: acc.open_cases + s.open_cases,
+          in_progress_cases: acc.in_progress_cases + s.in_progress_cases,
+          closed_cases: acc.closed_cases + s.closed_cases,
+          escalations: acc.escalations + s.escalations,
+          estimated_hours_saved: acc.estimated_hours_saved + Number(s.estimated_hours_saved),
+        }),
+        { complaint_volume: 0, open_cases: 0, in_progress_cases: 0, closed_cases: 0, escalations: 0, estimated_hours_saved: 0 },
+      ),
+    [scenarios],
+  )
+
+  const norm = (v: number) => (max > min ? (v - min) / (max - min) : 0.5)
+  const colorForWard = (wardName: string | null): string => {
+    if (!wardName) return '#e2e8f0'
+    const s = byWard.get(wardName.trim().toUpperCase())
+    return s ? heatColor(norm(s.complaint_volume)) : '#e2e8f0'
+  }
+  const num = (v: number) => v.toLocaleString()
+
+  const sortedScenarios = useMemo(
+    () => [...scenarios].sort((a, b) => b.complaint_volume - a.complaint_volume),
+    [scenarios],
+  )
+
+  return (
+    <div className="mt-8 card overflow-hidden ring-1 ring-amber-200">
+      <div className="flex flex-col gap-2 border-b border-slate-100 bg-amber-50/60 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800">
+            <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Synthetic scenario overlay
+          </span>
+          <span className="text-sm font-semibold text-navy-900">Ward workload heatmap (preview)</span>
+        </div>
+        <span className="text-xs text-ink-subtle">Shaded by complaint volume</span>
+      </div>
+
+      <div
+        role="note"
+        className="flex items-start gap-2 border-b border-amber-100 bg-amber-50/40 px-5 py-2.5 text-xs text-amber-900"
+      >
+        <span aria-hidden className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+        <span>{SCENARIO_DISCLAIMER}</span>
+      </div>
+
+      <div className="grid gap-6 p-5 lg:grid-cols-2">
+        {/* Heatmap */}
+        <div>
+          {map ? (
+            <figure className="relative rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
+              <svg
+                role="img"
+                aria-label="Synthetic Brampton ward workload heatmap"
+                viewBox={`0 0 ${map.width} ${map.height}`}
+                className="mx-auto block h-auto w-full"
+              >
+                {map.shapes.map((shape) => {
+                  const s = shape.wardName ? byWard.get(shape.wardName.trim().toUpperCase()) : undefined
+                  return (
+                    <path
+                      key={shape.id}
+                      d={shape.d}
+                      fill={colorForWard(shape.wardName)}
+                      fillOpacity={0.72}
+                      stroke="#1e3a5f"
+                      strokeWidth={1}
+                      strokeLinejoin="round"
+                    >
+                      <title>
+                        {shape.label} — SYNTHETIC scenario (not operational data)
+                        {s
+                          ? `\nComplaint volume: ${num(s.complaint_volume)}` +
+                            `\nOpen cases: ${num(s.open_cases)}` +
+                            `\nIn progress: ${num(s.in_progress_cases)}` +
+                            `\nClosed: ${num(s.closed_cases)}` +
+                            `\nEscalations: ${num(s.escalations)}` +
+                            `\nTop category: ${s.top_category}` +
+                            `\nEst. hours saved: ${num(Number(s.estimated_hours_saved))}`
+                          : '\nNo scenario data'}
+                      </title>
+                    </path>
+                  )
+                })}
+                {map.shapes.map((shape) => (
+                  <text
+                    key={`hl-${shape.id}`}
+                    x={shape.cx}
+                    y={shape.cy}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    className="fill-navy-900"
+                    style={{ fontSize: map.labelSize, fontWeight: 700, paintOrder: 'stroke' }}
+                    stroke="#ffffff"
+                    strokeWidth={map.labelSize / 3.5}
+                  >
+                    {shape.short}
+                  </text>
+                ))}
+              </svg>
+
+              {/* Legend */}
+              <figcaption className="relative mt-3">
+                <div className="flex items-center gap-3 text-[11px] text-ink-subtle">
+                  <span>Lower volume</span>
+                  <span
+                    className="h-2 flex-1 rounded-full"
+                    style={{
+                      background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
+                    }}
+                  />
+                  <span>Higher volume</span>
+                </div>
+                <div className="mt-1 flex justify-between text-[10px] text-ink-subtle tabular-nums">
+                  <span>{num(min)}</span>
+                  <span>{num(max)}</span>
+                </div>
+              </figcaption>
+            </figure>
+          ) : (
+            <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-ink-subtle">
+              Ward geometry unavailable for the heatmap.
+            </div>
+          )}
+        </div>
+
+        {/* Scenario metric cards */}
+        <div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {sortedScenarios.map((s) => (
+              <div key={s.id} className="rounded-lg border border-slate-200 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-navy-900">{s.ward}</span>
+                  <span
+                    aria-hidden
+                    className="inline-block h-3 w-3 rounded-full"
+                    style={{ backgroundColor: heatColor(norm(s.complaint_volume)) }}
+                  />
+                </div>
+                <div className="mt-1 text-lg font-semibold text-navy-900 tabular-nums">{num(s.complaint_volume)}</div>
+                <div className="text-[10px] uppercase tracking-wider text-ink-subtle">complaint volume</div>
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-ink-muted">
+                  <div className="flex justify-between"><dt>Open</dt><dd className="tabular-nums">{num(s.open_cases)}</dd></div>
+                  <div className="flex justify-between"><dt>Active</dt><dd className="tabular-nums">{num(s.in_progress_cases)}</dd></div>
+                  <div className="flex justify-between"><dt>Closed</dt><dd className="tabular-nums">{num(s.closed_cases)}</dd></div>
+                  <div className="flex justify-between"><dt>Escal.</dt><dd className="tabular-nums">{num(s.escalations)}</dd></div>
+                </dl>
+                <div className="mt-2 flex items-center justify-between text-[11px]">
+                  <span className="text-ink-subtle">Top: <span className="text-ink">{s.top_category}</span></span>
+                  <span className="text-ink-subtle">{num(Number(s.estimated_hours_saved))} hrs saved</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Totals */}
+          <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs text-ink-muted">
+            <span className="font-semibold text-navy-900">Scenario totals:</span>{' '}
+            {num(totals.complaint_volume)} complaints · {num(totals.open_cases)} open ·{' '}
+            {num(totals.in_progress_cases)} active · {num(totals.closed_cases)} closed ·{' '}
+            {num(totals.escalations)} escalations · {num(totals.estimated_hours_saved)} est. hours saved
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-3">
@@ -290,6 +520,7 @@ type WardShape = {
   id: string
   label: string
   short: string
+  wardName: string | null
   d: string
   cx: number
   cy: number
@@ -418,7 +649,7 @@ function buildWardMap(wards: WardBoundary[]): WardMap | null {
 
     const label = ward.ward || `Ward ${ward.objectid ?? ward.id}`
     const short = shortLabel(ward)
-    return { id: String(ward.id ?? idx), label, short, d, cx: fmt(cx), cy: fmt(cy) }
+    return { id: String(ward.id ?? idx), label, short, wardName: ward.ward ?? null, d, cx: fmt(cx), cy: fmt(cy) }
   })
 
   const labelSize = Math.max(9, Math.min(16, width / 48))

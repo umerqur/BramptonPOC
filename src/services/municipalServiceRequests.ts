@@ -83,6 +83,7 @@ export type ComplaintFilters = {
   department?: string
   category?: string
   ward?: string
+  workflowStage?: string
   search?: string
   sort?: 'submitted_at' | 'priority' | 'status'
   limit?: number
@@ -213,6 +214,7 @@ export async function getMunicipalComplaints(filters: ComplaintFilters = {}): Pr
     department,
     category,
     ward,
+    workflowStage,
     search,
     sort = 'submitted_at',
     limit = 500,
@@ -225,6 +227,7 @@ export async function getMunicipalComplaints(filters: ComplaintFilters = {}): Pr
   if (department && department !== 'All') query = query.eq('assigned_department', department)
   if (category && category !== 'All') query = query.eq('ai_category', category)
   if (ward && ward !== 'All') query = query.eq('ward_or_area', ward)
+  if (workflowStage && workflowStage !== 'All') query = query.eq('workflow_stage', workflowStage)
 
   const trimmed = search?.trim()
   if (trimmed) {
@@ -309,6 +312,109 @@ export async function getBramptonWardBoundaries(): Promise<WardBoundary[]> {
 
   if (error) throw error
   return (data ?? []) as WardBoundary[]
+}
+
+// ---------------------------------------------------------------------------
+// Operations Workflow Console
+// ---------------------------------------------------------------------------
+
+export type WorkflowStageCount = {
+  workflow_stage: string
+  case_count: number
+  high_priority_count: number
+  in_progress_count: number
+  closed_count: number
+}
+
+/** Live counts by workflow_stage, from the v_workflow_stage_counts view. */
+export async function getWorkflowStageCounts(): Promise<WorkflowStageCount[]> {
+  const client = requireClient()
+  const { data, error } = await client.from('v_workflow_stage_counts').select('*')
+  if (error) throw error
+  return (data ?? []) as WorkflowStageCount[]
+}
+
+/** Most recent staff workflow events, from the v_recent_workflow_events view. */
+export async function getRecentWorkflowEvents(limit = 15): Promise<WorkflowEvent[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_recent_workflow_events')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? []) as WorkflowEvent[]
+}
+
+export type StaffActionSummary = {
+  event_type: string
+  event_label: string
+  count: number
+}
+
+/**
+ * Summary of recorded staff actions, aggregated client-side from the workflow
+ * events audit trail. Used by the console's "Staff action summary" panel.
+ */
+export async function getStaffActionSummary(): Promise<{ total: number; actors: number; actions: StaffActionSummary[] }> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKFLOW_EVENTS_TABLE)
+    .select('event_type, event_label, actor_type')
+    .limit(2000)
+  if (error) throw error
+
+  const rows = (data ?? []) as Array<{ event_type: string; event_label: string | null; actor_type: string | null }>
+  const byType = new Map<string, StaffActionSummary>()
+  const actors = new Set<string>()
+  for (const r of rows) {
+    if (r.actor_type) actors.add(r.actor_type)
+    const key = r.event_type
+    const entry = byType.get(key) ?? { event_type: key, event_label: r.event_label || key, count: 0 }
+    entry.count += 1
+    byType.set(key, entry)
+  }
+  return {
+    total: rows.length,
+    actors: actors.size,
+    actions: Array.from(byType.values()).sort((a, b) => b.count - a.count),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic Brampton ward workload scenario overlay
+// ---------------------------------------------------------------------------
+
+/**
+ * A row in public.brampton_ward_workload_scenarios. SYNTHETIC, illustrative
+ * workload keyed by Brampton ward name — NOT Brampton operational complaint
+ * data. Used only to demonstrate the ward heatmap. Toronto 311 benchmark
+ * records are never plotted onto Brampton wards.
+ */
+export type WardWorkloadScenario = {
+  id: number
+  ward: string
+  scenario_name: string
+  complaint_volume: number
+  open_cases: number
+  in_progress_cases: number
+  closed_cases: number
+  escalations: number
+  top_category: string
+  estimated_hours_saved: number
+  source_note: string
+}
+
+export async function getWardWorkloadScenarios(): Promise<WardWorkloadScenario[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('brampton_ward_workload_scenarios')
+    .select(
+      'id, ward, scenario_name, complaint_volume, open_cases, in_progress_cases, closed_cases, escalations, top_category, estimated_hours_saved, source_note',
+    )
+    .order('ward', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as WardWorkloadScenario[]
 }
 
 export async function addWorkflowEvent(input: {
@@ -483,6 +589,24 @@ export function mockComplaintTypes(): ComplaintTypeCount[] {
   return Array.from(byType.values())
     .sort((a, b) => b.case_count - a.case_count)
     .slice(0, 10)
+}
+
+/** Mock workflow_stage counts derived from the bundled sample cases. */
+export function mockWorkflowStageCounts(): WorkflowStageCount[] {
+  const rows = mockComplaintRows()
+  const byStage = new Map<string, WorkflowStageCount>()
+  for (const r of rows) {
+    const key = r.workflowStage || 'Needs review'
+    const entry =
+      byStage.get(key) ??
+      { workflow_stage: key, case_count: 0, high_priority_count: 0, in_progress_count: 0, closed_count: 0 }
+    entry.case_count += 1
+    if (r.priority === 'High') entry.high_priority_count += 1
+    if (r.status === 'In Progress') entry.in_progress_count += 1
+    if (r.status === 'Closed' || r.status === 'Completed') entry.closed_count += 1
+    byStage.set(key, entry)
+  }
+  return Array.from(byStage.values()).sort((a, b) => b.case_count - a.case_count)
 }
 
 /** Client-side equivalent of the server filters, for the mock fallback path. */

@@ -15,6 +15,7 @@ export type CaseQueueFilters = {
   department: string
   category: string
   ward: string
+  workflowStage: string
   sortKey: SortKey
 }
 
@@ -28,6 +29,9 @@ type CaseQueueViewProps = {
   filters: CaseQueueFilters
   onChange: (patch: Partial<CaseQueueFilters>) => void
   statusSlot?: React.ReactNode
+  /** Active workflow-stage deep-link filter (rendered as a removable chip). */
+  activeStage?: string
+  onClearStage?: () => void
 }
 
 const COLUMN_COUNT = 11
@@ -46,6 +50,8 @@ export default function CaseQueueView({
   filters,
   onChange,
   statusSlot,
+  activeStage,
+  onClearStage,
 }: CaseQueueViewProps) {
   const statusOptions = useMemo(() => ['All', ...options.statuses], [options.statuses])
   const priorityOptions = useMemo(() => ['All', ...options.priorities], [options.priorities])
@@ -63,6 +69,22 @@ export default function CaseQueueView({
           <p className="mt-1 text-sm text-ink-subtle">
             {loading ? 'Loading…' : `${rows.length.toLocaleString()} records shown`}
           </p>
+          {activeStage && (
+            <div className="mt-2">
+              <span className="inline-flex items-center gap-2 rounded-full bg-navy-900/5 px-3 py-1 text-xs font-medium text-navy-900">
+                Workflow stage: {activeStage}
+                {onClearStage && (
+                  <button
+                    onClick={onClearStage}
+                    className="text-ink-subtle hover:text-navy-900"
+                    aria-label="Clear workflow stage filter"
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
         </div>
         {statusSlot}
       </div>
