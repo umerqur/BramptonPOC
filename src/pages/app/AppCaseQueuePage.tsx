@@ -1,12 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import CaseQueueView, { type CaseQueueFilters, type SortKey } from '../../components/cases/CaseQueueView'
+import CaseQueueConsole from '../../components/cases/CaseQueueConsole'
+import type { CaseQueueFilters, SortKey } from '../../components/cases/CaseQueueView'
 import {
-  filterMockComplaints,
   getComplaintFilterOptions,
   getMunicipalComplaints,
-  mockComplaintFilterOptions,
-  mockComplaintRows,
   type ComplaintFilterOptions,
   type ComplaintFilters,
   type ComplaintRow,
@@ -52,26 +50,10 @@ const EMPTY_OPTIONS: ComplaintFilterOptions = {
   wards: [],
 }
 
-/** True when no filter narrows the result set (so an empty result is unexpected). */
-function isDefaultFilters(f: CaseQueueFilters): boolean {
-  return (
-    !f.query.trim() &&
-    f.status === 'All' &&
-    f.priority === 'All' &&
-    f.department === 'All' &&
-    f.category === 'All' &&
-    f.ward === 'All' &&
-    f.workflowStage === 'All'
-  )
-}
-
-function hasAnyOption(o: ComplaintFilterOptions): boolean {
-  return Boolean(o.statuses.length || o.priorities.length || o.departments.length || o.categories.length || o.wards.length)
-}
-
-// Authenticated live case queue. Server-side filtering against Supabase
-// (municipal_complaints). If the query fails — or returns no rows while no
-// filter is applied — it falls back to bundled mock data.
+// Authenticated live case queue — the staff work queue for individual
+// complaints. Server-side filtering against Supabase (municipal_complaints).
+// Live data only: no mock fallback. A failed query surfaces an explicit error
+// state with retry instead of silently swapping in sample cases.
 export default function AppCaseQueuePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   // Seed filter state from the URL once so console deep links (e.g.
@@ -80,24 +62,24 @@ export default function AppCaseQueuePage() {
   const [rows, setRows] = useState<ComplaintRow[]>([])
   const [options, setOptions] = useState<ComplaintFilterOptions>(EMPTY_OPTIONS)
   const [loading, setLoading] = useState(true)
-  const [fallback, setFallback] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Bumped by the Retry button to re-run the loaders.
+  const [reloadKey, setReloadKey] = useState(0)
 
-  // Load filter dropdown options once, falling back to mock options.
+  // Load filter dropdown options (live only). A failure here is non-fatal — the
+  // selects simply stay empty — so it does not trigger the page error state.
   useEffect(() => {
     let active = true
     getComplaintFilterOptions()
-      .then((opts) => {
-        if (!active) return
-        setOptions(hasAnyOption(opts) ? opts : mockComplaintFilterOptions())
-      })
+      .then((opts) => active && setOptions(opts))
       .catch((err) => {
-        console.error('Failed to load filter options, using mock options:', err)
-        if (active) setOptions(mockComplaintFilterOptions())
+        console.error('Failed to load filter options:', err)
+        if (active) setOptions(EMPTY_OPTIONS)
       })
     return () => {
       active = false
     }
-  }, [])
+  }, [reloadKey])
 
   // Load (and re-load) rows whenever a filter changes. Search is debounced.
   useEffect(() => {
@@ -113,25 +95,19 @@ export default function AppCaseQueuePage() {
       sort: filters.sortKey,
     }
 
-    function useMock() {
-      setRows(filterMockComplaints(mockComplaintRows(), requestFilters))
-      setFallback(true)
-    }
-
     async function load() {
       setLoading(true)
-      setFallback(false)
       try {
         const data = await getMunicipalComplaints(requestFilters)
         if (!active) return
-        if (data.length === 0 && isDefaultFilters(filters)) {
-          useMock()
-        } else {
-          setRows(data)
-        }
+        setRows(data)
+        setError(null)
       } catch (err) {
-        console.error('Failed to load live case queue data, falling back to mock:', err)
-        if (active) useMock()
+        console.error('Failed to load live case queue data:', err)
+        if (active) {
+          setRows([])
+          setError(errorMessage(err))
+        }
       } finally {
         if (active) setLoading(false)
       }
@@ -142,7 +118,7 @@ export default function AppCaseQueuePage() {
       active = false
       clearTimeout(timer)
     }
-  }, [filters])
+  }, [filters, reloadKey])
 
   // Keep the URL in sync with the active filters so the view is shareable and
   // back/forward navigation works. Replace (not push) to avoid history spam.
@@ -154,28 +130,32 @@ export default function AppCaseQueuePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
 
+  const handleRetry = useCallback(() => setReloadKey((k) => k + 1), [])
+
   return (
-    <CaseQueueView
+    <CaseQueueConsole
       eyebrow="Live Case Queue"
       casesPath="/app/cases"
       rows={rows}
       options={options}
       loading={loading}
+      error={error}
+      onRetry={handleRetry}
       filters={filters}
       onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))}
-      statusSlot={<SourceBadge fallback={fallback} loading={loading} />}
+      statusSlot={<SourceBadge loading={loading} error={error} />}
       activeStage={filters.workflowStage !== 'All' ? filters.workflowStage : undefined}
       onClearStage={() => setFilters((f) => ({ ...f, workflowStage: 'All' }))}
     />
   )
 }
 
-function SourceBadge({ fallback, loading }: { fallback: boolean; loading: boolean }) {
-  if (fallback) {
+function SourceBadge({ loading, error }: { loading: boolean; error: string | null }) {
+  if (error) {
     return (
-      <div className="flex items-center gap-2 text-xs text-amber-700">
-        <span className="h-2 w-2 rounded-full bg-amber-500" />
-        Sample data · Supabase unavailable
+      <div className="flex items-center gap-2 text-xs text-red-700">
+        <span className="h-2 w-2 rounded-full bg-red-500" />
+        Supabase unavailable
       </div>
     )
   }
@@ -185,4 +165,23 @@ function SourceBadge({ fallback, loading }: { fallback: boolean; loading: boolea
       {loading ? 'Loading…' : 'Live data · Supabase'}
     </div>
   )
+}
+
+function errorMessage(err: unknown): string {
+  if (err == null) return 'Unknown error'
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    const parts = [e.message, e.details, e.hint, e.code].filter(
+      (p): p is string => typeof p === 'string' && p.length > 0,
+    )
+    if (parts.length > 0) return parts.join(' — ')
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return String(err)
+    }
+  }
+  return String(err)
 }
