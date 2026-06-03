@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import StatCard from '../../components/StatCard'
 import SectionHeading from '../../components/SectionHeading'
-import { PriorityBadge, StatusBadge } from '../../components/cases/CaseQueueView'
+import { PriorityBadge } from '../../components/cases/CaseQueueView'
+import { CaseQueueSplit } from '../../components/cases/CaseQueuePanel'
 import {
   DATA_POSITIONING,
   getComplaintKpis,
@@ -86,7 +87,7 @@ export default function AppWorkflowPage() {
   const kpis = useSection(getComplaintKpis)
   const cases = useSection(async () => {
     const [recent, triage] = await Promise.all([
-      getMunicipalComplaints({ sort: 'submitted_at', limit: 8 }),
+      getMunicipalComplaints({ sort: 'submitted_at', limit: 12 }),
       getMunicipalComplaints({ workflowStage: TRIAGE_STAGE, sort: 'priority', limit: 6 }),
     ])
     return { recent, triage }
@@ -103,9 +104,13 @@ export default function AppWorkflowPage() {
         <div>
           <div className="section-eyebrow">Live Operations</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            Operations Workflow Console
+            Workflow console
           </h1>
-          <p className="mt-2 text-sm text-ink-muted max-w-3xl">{DATA_POSITIONING}</p>
+          <p className="mt-2 text-sm text-ink-muted max-w-3xl">
+            The main staff workspace: what needs attention, what stage each complaint is in, which cases to open next,
+            what action to take, and what has been closed.
+          </p>
+          <p className="mt-1 text-sm text-ink-subtle max-w-3xl">{DATA_POSITIONING}</p>
         </div>
         <div className="flex items-center gap-2 text-xs text-ink-subtle">
           <span className="h-2 w-2 rounded-full bg-accent-500" />
@@ -204,61 +209,38 @@ export default function AppWorkflowPage() {
         )}
       </div>
 
-      {/* Recent cases + triage queue */}
-      <div className="mt-10 grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 card overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h3 className="text-sm font-semibold text-navy-900">Recent cases</h3>
-            <Link to="/app/cases" className="text-xs font-medium text-navy-700 hover:text-navy-900">
-              Open full queue →
-            </Link>
-          </div>
+      {/* Staff work queue — which cases to open next */}
+      <div className="mt-10">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <SectionHeading eyebrow="Work Queue" title="Staff work queue" />
+          <Link to="/app/cases" className="text-xs font-medium text-navy-700 hover:text-navy-900">
+            Open full filtered queue →
+          </Link>
+        </div>
+        <p className="mt-2 text-sm text-ink-muted max-w-3xl">
+          Which cases to open next. Select a case to preview it, then open the full record to review the rule-based POC
+          triage and record a staff action.
+        </p>
+        <div className="mt-5">
           {cases.error ? (
-            <SectionError className="m-5" label="recent cases" error={cases.error} />
+            <SectionError label="staff work queue" error={cases.error} />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-ink-subtle">
-                  <tr className="text-left">
-                    <Th>Case ID</Th>
-                    <Th>Submitted</Th>
-                    <Th>Type</Th>
-                    <Th>Stage</Th>
-                    <Th>Status</Th>
-                    <Th>Priority</Th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(cases.data?.recent ?? []).map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-2.5">
-                        <Link to={`/app/cases/${encodeURIComponent(c.id)}`} className="font-medium text-navy-900 hover:underline">
-                          {c.id}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-2.5 text-ink-muted tabular-nums whitespace-nowrap">{formatDate(c.submittedAt)}</td>
-                      <td className="px-4 py-2.5">{c.complaintType}</td>
-                      <td className="px-4 py-2.5 text-ink-muted">{c.workflowStage}</td>
-                      <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
-                      <td className="px-4 py-2.5"><PriorityBadge priority={c.priority} /></td>
-                    </tr>
-                  ))}
-                  {cases.loading && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-ink-subtle">Loading recent cases…</td></tr>
-                  )}
-                  {!cases.loading && (cases.data?.recent.length ?? 0) === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-ink-subtle">No recent cases.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <CaseQueueSplit
+              rows={cases.data?.recent ?? []}
+              casesPath="/app/cases"
+              loading={cases.loading}
+              emptyMessage="No recent cases."
+            />
           )}
         </div>
+      </div>
 
-        {/* Triage queue preview */}
+      {/* What needs attention + audit trail */}
+      <div className="mt-10 grid gap-6 lg:grid-cols-3">
+        {/* Triage queue — what needs attention */}
         <div className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h3 className="text-sm font-semibold text-navy-900">Triage queue</h3>
+            <h3 className="text-sm font-semibold text-navy-900">What needs attention</h3>
             <span className="badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200">Needs review</span>
           </div>
           {cases.error ? (
@@ -301,10 +283,8 @@ export default function AppWorkflowPage() {
             </p>
           </div>
         </div>
-      </div>
 
-      {/* Recent workflow events + staff action summary */}
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        {/* Recent workflow events */}
         <div className="card p-6">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-navy-900">Recent workflow events</h3>
@@ -344,6 +324,7 @@ export default function AppWorkflowPage() {
           )}
         </div>
 
+        {/* Staff action summary */}
         <div className="card p-6">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-navy-900">Staff action summary</h3>
@@ -383,6 +364,7 @@ export default function AppWorkflowPage() {
           )}
         </div>
       </div>
+
     </div>
   )
 }
@@ -406,19 +388,9 @@ function SectionError({ label, error, className = '' }: { label: string; error: 
   )
 }
 
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">{children}</th>
-}
-
 function fmt(value: number | undefined, loading: boolean): string {
   if (loading || value === undefined) return '—'
   return value.toLocaleString()
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '—'
-  const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString()
 }
 
 function formatDateTime(value: string | null): string | null {
