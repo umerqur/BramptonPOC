@@ -68,11 +68,13 @@ export type ComplaintRow = {
   status: string
   workflowStage: string
   priority: string
+  aiPriority: string
   aiCategory: string
   assignedDepartment: string
   departmentUnit: string
   wardOrArea: string
   address: string
+  description: string
   aiSummary: string
   recommendedAction: string
 }
@@ -151,11 +153,13 @@ function mapComplaintRow(row: MunicipalComplaintRow): ComplaintRow {
     status: row.status || 'Unknown',
     workflowStage: row.workflow_stage || 'Needs review',
     priority: row.priority || 'Low',
+    aiPriority: row.ai_priority || '',
     aiCategory: row.ai_category || 'General municipal service',
     assignedDepartment: row.assigned_department || 'Unassigned',
     departmentUnit: row.department_unit || 'Unassigned',
     wardOrArea: row.ward_or_area || row.fsa_or_area || 'Unknown',
     address: row.address_or_location || row.fsa_or_area || 'Location not recorded',
+    description: row.description || '',
     aiSummary: row.ai_summary || 'No AI summary available.',
     recommendedAction: row.ai_recommended_action || 'Validate details and assign to the responsible team.',
   }
@@ -522,11 +526,13 @@ export function mockComplaintRows(): ComplaintRow[] {
     status: mockStatus(c, i),
     workflowStage: c.status,
     priority: mockPriority(c),
+    aiPriority: c.priority,
     aiCategory: c.category,
     assignedDepartment: DEPARTMENT_BY_CATEGORY[c.category] ?? 'General Municipal Services',
     departmentUnit: `${c.ward} unit`,
     wardOrArea: c.ward,
     address: c.address,
+    description: c.summary,
     aiSummary: c.summary,
     recommendedAction: c.recommendedAction,
   }))
