@@ -144,10 +144,20 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
         <AdvisoryNotice />
       </div>
 
+      {/*
+        Investigation workspace. On desktop: the left two columns hold the case
+        record (original complaint, rule based triage, then resident draft and
+        similar cases), and the right column is a sticky staff command panel with
+        the AI assisted staff review at the top. The command column spans both
+        left rows and is placed explicitly so that, when the grid collapses on
+        mobile, the source order is: case details → AI review → supporting record
+        — i.e. the AI review appears immediately under the case details, never
+        buried at the bottom.
+      */}
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
-        {/* Left column */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* 1. Original complaint */}
+        {/* Case record (left, top) */}
+        <div className="space-y-6 lg:col-span-2 lg:col-start-1 lg:row-start-1">
+          {/* Original complaint */}
           <Card title="Original complaint">
             <p className="text-sm text-ink leading-relaxed">
               {row.description || 'No complaint description recorded for this case.'}
@@ -162,8 +172,8 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
             </dl>
           </Card>
 
-          {/* 2. AI-assisted triage */}
-          <Card title="AI-assisted triage" advisory>
+          {/* Rule based triage (existing POC triage — distinct from the AI review) */}
+          <Card title="Rule based triage" advisory>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <Field label="AI category" value={row.ai_category} />
               <Field label="AI priority" value={row.ai_priority} />
@@ -184,38 +194,85 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
               <AdvisoryNotice variant="inline" />
             </div>
           </Card>
+        </div>
 
-          {/* AI assisted staff review — optional, on-demand, single case only */}
-          <CaseAiReview input={aiReviewInput} />
+        {/* Staff command column (right, sticky). Scrolls internally if it grows
+            past the viewport so the AI review result stays reachable. */}
+        <div className="lg:col-start-3 lg:row-start-1 lg:row-span-2">
+          <div className="space-y-6 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:pr-1">
+            {/* AI assisted staff review — top of the command column, on-demand */}
+            <CaseAiReview input={aiReviewInput} />
 
-          {/* 3. Human review */}
-          <Card title="Human review" hint="records a workflow event">
-            <p className="text-sm text-ink-muted">
-              Staff reviewed decision support. Recording a decision adds a workflow event to the audit trail; it does
-              not automatically change the complaint status in this POC.
-            </p>
-            {row.human_decision && (
-              <div className="mt-3 text-sm">
-                <span className="text-ink-subtle">Latest recorded decision: </span>
-                <span className="font-medium text-navy-900">{row.human_decision}</span>
+            {/* Human review actions */}
+            <Card title="Human review" hint="records a workflow event">
+              <p className="text-sm text-ink-muted">
+                Staff reviewed decision support. Recording a decision adds a workflow event to the audit trail; it does
+                not automatically change the complaint status in this POC.
+              </p>
+              {row.human_decision && (
+                <div className="mt-3 text-sm">
+                  <span className="text-ink-subtle">Latest recorded decision: </span>
+                  <span className="font-medium text-navy-900">{row.human_decision}</span>
+                </div>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {REVIEW_ACTIONS.map((action) => (
+                  <button
+                    key={action.eventType}
+                    onClick={() => handleAction(action)}
+                    disabled={pendingAction !== null}
+                    className="btn-secondary text-sm py-1.5 px-3 disabled:opacity-50"
+                  >
+                    {pendingAction === action.eventType ? 'Recording…' : action.label}
+                  </button>
+                ))}
               </div>
-            )}
-            <div className="mt-4 flex flex-wrap gap-2">
-              {REVIEW_ACTIONS.map((action) => (
-                <button
-                  key={action.eventType}
-                  onClick={() => handleAction(action)}
-                  disabled={pendingAction !== null}
-                  className="btn-secondary text-sm py-1.5 px-3 disabled:opacity-50"
-                >
-                  {pendingAction === action.eventType ? 'Recording…' : action.label}
-                </button>
-              ))}
-            </div>
-            {actionNote && <div className="mt-3 text-xs text-ink-muted">{actionNote}</div>}
-          </Card>
+              {actionNote && <div className="mt-3 text-xs text-ink-muted">{actionNote}</div>}
+            </Card>
 
-          {/* 5. Resident response draft */}
+            {/* Assignment summary */}
+            <Card title="Assignment">
+              <dl className="space-y-2 text-sm">
+                <Field label="Department" value={row.assigned_department} />
+                <Field label="Unit" value={row.department_unit} />
+                <Field label="Priority" value={row.priority} />
+              </dl>
+            </Card>
+
+            {/* Audit trail */}
+            <Card title="Audit trail" hint={eventsLoading ? 'loading…' : `${events.length}`}>
+              {eventsLoading ? (
+                <div className="text-sm text-ink-subtle">Loading workflow events…</div>
+              ) : events.length === 0 ? (
+                <div className="text-sm text-ink-subtle">No workflow events recorded yet.</div>
+              ) : (
+                <ul className="space-y-3 text-xs">
+                  {events.map((e) => (
+                    <li key={e.id} className="flex items-start gap-3">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+                      <div className="flex-1">
+                        <div className="text-ink">{e.event_label || e.event_type}</div>
+                        {(e.from_status || e.to_status) && (
+                          <div className="text-ink-subtle">
+                            {[e.from_status, e.to_status].filter(Boolean).join(' → ')}
+                          </div>
+                        )}
+                        {e.notes && <div className="text-ink-subtle">{e.notes}</div>}
+                        <div className="text-ink-subtle">
+                          {(e.actor_type || 'staff')} · {formatDateTime(e.created_at)}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        </div>
+
+        {/* Supporting record (left, below the case details) */}
+        <div className="space-y-6 lg:col-span-2 lg:col-start-1 lg:row-start-2">
+          {/* Resident response draft */}
           <Card title="Resident response draft" aiGenerated>
             <p className="text-xs text-ink-subtle">
               Generated locally from the complaint type, status, assigned department, and AI triage. Staff must review
@@ -225,11 +282,8 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
               {residentDraft}
             </pre>
           </Card>
-        </div>
 
-        {/* Right column */}
-        <div className="space-y-6">
-          {/* 4. Similar cases */}
+          {/* Similar cases */}
           <Card title="Similar cases" hint={similarLoading ? 'loading…' : `${similar.length}`}>
             <p className="text-[11px] text-ink-subtle">
               Same complaint type and ward or area, excluding this case.
@@ -248,44 +302,6 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
                     <span className="text-[11px] text-ink-subtle">
                       {[s.status, formatDate(s.submitted_at)].filter(Boolean).join(' · ')}
                     </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          {/* Assignment summary */}
-          <Card title="Assignment">
-            <dl className="space-y-2 text-sm">
-              <Field label="Department" value={row.assigned_department} />
-              <Field label="Unit" value={row.department_unit} />
-              <Field label="Priority" value={row.priority} />
-            </dl>
-          </Card>
-
-          {/* 6. Audit trail */}
-          <Card title="Audit trail" hint={eventsLoading ? 'loading…' : `${events.length}`}>
-            {eventsLoading ? (
-              <div className="text-sm text-ink-subtle">Loading workflow events…</div>
-            ) : events.length === 0 ? (
-              <div className="text-sm text-ink-subtle">No workflow events recorded yet.</div>
-            ) : (
-              <ul className="space-y-3 text-xs">
-                {events.map((e) => (
-                  <li key={e.id} className="flex items-start gap-3">
-                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
-                    <div className="flex-1">
-                      <div className="text-ink">{e.event_label || e.event_type}</div>
-                      {(e.from_status || e.to_status) && (
-                        <div className="text-ink-subtle">
-                          {[e.from_status, e.to_status].filter(Boolean).join(' → ')}
-                        </div>
-                      )}
-                      {e.notes && <div className="text-ink-subtle">{e.notes}</div>}
-                      <div className="text-ink-subtle">
-                        {(e.actor_type || 'staff')} · {formatDateTime(e.created_at)}
-                      </div>
-                    </div>
                   </li>
                 ))}
               </ul>
