@@ -154,7 +154,7 @@ export default function CaseQueueConsole({
               aria-label="Sort by"
             >
               <option value="submitted_at">Sort: Submitted</option>
-              <option value="priority">Sort: Priority</option>
+              <option value="operational_priority">Sort: Priority rank</option>
               <option value="status">Sort: Status</option>
             </select>
             <button

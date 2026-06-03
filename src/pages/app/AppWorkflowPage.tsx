@@ -27,6 +27,16 @@ const STAGE_ORDER = [
   'Cancelled',
 ]
 
+/**
+ * Case-queue deep link for a workflow stage. The triage stage ("Needs review")
+ * opens with operational priority ordering so staff see the cases to handle
+ * first; other stages keep the queue's default ordering.
+ */
+function stageQueueHref(stage: string): string {
+  const base = `/app/cases?stage=${encodeURIComponent(stage)}`
+  return stage === TRIAGE_STAGE ? `${base}&sort=operational_priority` : base
+}
+
 function stageAccent(stage: string): string {
   const s = stage.toLowerCase()
   if (s.includes('need')) return 'bg-amber-500'
@@ -88,7 +98,7 @@ export default function AppWorkflowPage() {
   const cases = useSection(async () => {
     const [recent, triage] = await Promise.all([
       getMunicipalComplaints({ sort: 'submitted_at', limit: 12 }),
-      getMunicipalComplaints({ workflowStage: TRIAGE_STAGE, sort: 'priority', limit: 6 }),
+      getMunicipalComplaints({ workflowStage: TRIAGE_STAGE, sort: 'operational_priority', limit: 6 }),
     ])
     return { recent, triage }
   })
@@ -129,7 +139,7 @@ export default function AppWorkflowPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
-            to={`/app/cases?stage=${encodeURIComponent(TRIAGE_STAGE)}`}
+            to={stageQueueHref(TRIAGE_STAGE)}
             className="btn bg-white text-navy-900 hover:bg-slate-100 text-sm py-2 px-4"
           >
             Open triage queue
@@ -153,7 +163,7 @@ export default function AppWorkflowPage() {
             {orderedStages.map((s) => (
               <Link
                 key={s.workflow_stage}
-                to={`/app/cases?stage=${encodeURIComponent(s.workflow_stage)}`}
+                to={stageQueueHref(s.workflow_stage)}
                 className="card card-hover p-5 group"
               >
                 <div className="flex items-center gap-2">
@@ -272,7 +282,7 @@ export default function AppWorkflowPage() {
           )}
           <div className="border-t border-slate-100 px-5 py-3">
             <Link
-              to={`/app/cases?stage=${encodeURIComponent(TRIAGE_STAGE)}`}
+              to={stageQueueHref(TRIAGE_STAGE)}
               className="text-xs font-medium text-navy-700 hover:text-navy-900"
             >
               Open triage queue →

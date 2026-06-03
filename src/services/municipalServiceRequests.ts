@@ -88,7 +88,10 @@ export type ComplaintFilters = {
   ward?: string
   workflowStage?: string
   search?: string
-  sort?: 'submitted_at' | 'priority' | 'status'
+  // 'operational_priority' ranks High → Medium → Low → unknown (the order staff
+  // should work a triage queue in). 'priority' is kept as a legacy alias and is
+  // treated identically. Plain 'submitted_at'/'status' order by that column.
+  sort?: 'submitted_at' | 'priority' | 'status' | 'operational_priority'
   limit?: number
 }
 
@@ -251,11 +254,18 @@ export async function getMunicipalComplaints(filters: ComplaintFilters = {}): Pr
     }
   }
 
-  const ascending = sort === 'submitted_at' ? false : true
-  const { data, error } = await query.order(sort, { ascending, nullsFirst: false }).limit(limit)
+  // PostgREST cannot ORDER BY a derived priority rank, so operational priority
+  // is ranked client-side. Fetch newest-first from the server, then re-rank;
+  // the tie-break on submitted_at keeps newest-first within each priority tier.
+  // All server-side filters above are unaffected.
+  const rankByPriority = sort === 'operational_priority' || sort === 'priority'
+  const serverSort = rankByPriority ? 'submitted_at' : sort
+  const ascending = serverSort === 'submitted_at' ? false : true
+  const { data, error } = await query.order(serverSort, { ascending, nullsFirst: false }).limit(limit)
 
   if (error) throw error
-  return ((data ?? []) as MunicipalComplaintRow[]).map(mapComplaintRow)
+  const mapped = ((data ?? []) as MunicipalComplaintRow[]).map(mapComplaintRow)
+  return rankByPriority ? sortByOperationalPriority(mapped) : mapped
 }
 
 export async function getComplaintByCaseId(caseId: string): Promise<MunicipalComplaintRow | null> {
@@ -639,16 +649,37 @@ export function filterMockComplaints(rows: ComplaintRow[], filters: ComplaintFil
       )
     })
     .sort((a, b) => {
-      if (sort === 'priority') return priorityRank(b.priority) - priorityRank(a.priority)
+      if (sort === 'priority' || sort === 'operational_priority') return compareByOperationalPriority(a, b)
       if (sort === 'status') return a.status.localeCompare(b.status)
       // submitted_at — newest first
       return (b.submittedAt ?? '').localeCompare(a.submittedAt ?? '')
     })
 }
 
-function priorityRank(priority: string): number {
-  const order: Record<string, number> = { High: 3, Medium: 2, Low: 1 }
-  return order[priority] ?? 0
+/**
+ * Operational triage rank for a priority value: High first (0), then Medium (1),
+ * then Low (2), then anything unknown or blank (3). This is the order municipal
+ * staff should work a triage queue in — not the alphabetical order of the raw
+ * priority text column.
+ */
+export function operationalPriorityRank(priority: string | null | undefined): number {
+  const p = (priority ?? '').toLowerCase()
+  if (p.includes('high') || p.includes('urgent') || p === 'p1') return 0
+  if (p.includes('medium') || p === 'p2' || p === 'p3') return 1
+  if (p.includes('low') || p === 'p4') return 2
+  return 3
+}
+
+/** Compare two rows by operational priority, newest-first within the same tier. */
+function compareByOperationalPriority(a: ComplaintRow, b: ComplaintRow): number {
+  const rank = operationalPriorityRank(a.priority) - operationalPriorityRank(b.priority)
+  if (rank !== 0) return rank
+  return (b.submittedAt ?? '').localeCompare(a.submittedAt ?? '')
+}
+
+/** Stable operational-priority ordering for an already-fetched set of rows. */
+function sortByOperationalPriority(rows: ComplaintRow[]): ComplaintRow[] {
+  return [...rows].sort(compareByOperationalPriority)
 }
 
 // ---------------------------------------------------------------------------
