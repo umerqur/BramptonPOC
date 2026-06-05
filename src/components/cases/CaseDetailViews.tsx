@@ -127,12 +127,6 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
             {[row.complaint_type, row.ward_or_area, address].filter(Boolean).join(' · ')}
           </p>
         </div>
-        {row.source_dataset && (
-          <div className="text-xs text-ink-subtle">
-            Source dataset
-            <div className="mt-0.5 font-medium text-navy-900">{row.source_dataset}</div>
-          </div>
-        )}
       </div>
 
       <div className="mt-3 text-[11px] text-ink-subtle">
@@ -168,20 +162,19 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
               <Field label="Location" value={address} />
               <Field label="Ward or area" value={row.ward_or_area} />
               <Field label="Source channel" value={row.source_channel} />
-              <Field label="Source city" value={row.source_city} />
             </dl>
           </Card>
 
           {/* Rule based triage (existing POC triage — distinct from the AI review) */}
           <Card title="Rule based triage" advisory>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-              <Field label="AI category" value={row.ai_category} />
-              <Field label="AI priority" value={row.ai_priority} />
+              <Field label="Category" value={row.ai_category} />
+              <Field label="Priority" value={row.ai_priority} />
             </dl>
             <div className="mt-4">
-              <div className="text-[10px] uppercase tracking-wider text-ink-subtle">AI summary</div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-subtle">Triage summary</div>
               <p className="mt-1 text-sm text-ink leading-relaxed">
-                {row.ai_summary || 'No AI summary available.'}
+                {row.ai_summary || 'No triage summary available.'}
               </p>
             </div>
             <div className="mt-4">
