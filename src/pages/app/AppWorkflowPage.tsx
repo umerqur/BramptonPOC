@@ -298,7 +298,7 @@ export default function AppWorkflowPage() {
         )}
       </div>
 
-      {/* 2 + 3. Pick a case → review it in the command panel */}
+      {/* 2 + 3. Pick a case → open the full ticket */}
       <div id="worklist" className="mt-10 scroll-mt-24">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <SectionHeading eyebrow="Pick a case" title="Triage queue — your worklist" />
@@ -307,8 +307,8 @@ export default function AppWorkflowPage() {
           </Link>
         </div>
         <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-          Highest-priority cases needing review first. Select a case to load it into the command panel on the right,
-          review the details and rule based triage, then open the full record to record a staff decision.
+          Highest-priority cases needing review first. Click a case to open its full ticket. On desktop, the side panel
+          shows a compact preview of the highlighted case; AI assisted staff review lives on the full case detail page.
         </p>
         <div className="mt-5">
           {triage.error ? (
@@ -320,6 +320,8 @@ export default function AppWorkflowPage() {
               loading={triage.loading}
               emptyMessage="No cases currently need review."
               getAttention={getAttention}
+              cardOpensDetail
+              showPanelAiReview={false}
             />
           )}
         </div>

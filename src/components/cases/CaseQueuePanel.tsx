@@ -96,6 +96,13 @@ export function AttentionChips({ flags }: { flags: AttentionFlag[] }) {
  * preview panel. Used as the primary case interface inside the Workflow console
  * and on the live case queue page — never a horizontal-scrolling table. On
  * mobile it collapses to stacked cards (the preview panel is desktop-only).
+ *
+ * Two modes:
+ * - Default (live case queue): clicking a card selects it into the preview panel.
+ * - `cardOpensDetail` (Workflow worklist): the card is a worklist link that opens
+ *   the full ticket on click; hovering/focusing a card updates the desktop
+ *   preview. In this mode `showPanelAiReview` is set false so the on-demand AI
+ *   review stays on the full case detail page, not in the worklist side panel.
  */
 export function CaseQueueSplit({
   rows,
@@ -103,6 +110,8 @@ export function CaseQueueSplit({
   loading,
   emptyMessage = 'No cases match the current view.',
   getAttention,
+  cardOpensDetail = false,
+  showPanelAiReview = true,
 }: {
   rows: ComplaintRow[]
   casesPath: string
@@ -110,6 +119,10 @@ export function CaseQueueSplit({
   emptyMessage?: string
   /** Optional per-row attention chips (Workflow console). Omitted elsewhere. */
   getAttention?: (row: ComplaintRow) => AttentionFlag[]
+  /** Workflow worklist: card click opens the full ticket; preview follows hover/focus. */
+  cardOpensDetail?: boolean
+  /** Render the on-demand AI review inside the preview panel (default true). */
+  showPanelAiReview?: boolean
 }) {
   // Selected case for the desktop preview panel. Keep the selection valid as the
   // result set changes; default to the first row.
@@ -142,13 +155,14 @@ export function CaseQueueSplit({
                   selected={c.id === selectedId}
                   onSelect={() => setSelectedId(c.id)}
                   attention={getAttention?.(c)}
+                  asLink={cardOpensDetail}
                 />
-                {/* Mobile: the staff command panel (incl. AI review) appears
-                    directly under the selected card — no horizontal scroll and
-                    no hidden result. The desktop sticky panel is hidden here. */}
-                {c.id === selectedId && (
+                {/* Mobile: in select mode the command panel appears under the
+                    selected card. In cardOpensDetail mode a tap navigates
+                    straight to the ticket, so no inline panel is shown. */}
+                {!cardOpensDetail && c.id === selectedId && (
                   <div className="mt-3 lg:hidden">
-                    <PreviewPanel row={c} casesPath={casesPath} />
+                    <PreviewPanel row={c} casesPath={casesPath} showAiReview={showPanelAiReview} />
                   </div>
                 )}
               </li>
@@ -157,56 +171,58 @@ export function CaseQueueSplit({
         )}
       </div>
 
-      {/* Right: selected case — sticky staff command panel (desktop only). The
-          panel scrolls internally if it grows past the viewport so the AI
-          review result stays reachable without scrolling the whole page. */}
+      {/* Right: selected case — sticky preview panel (desktop only). */}
       <aside className="hidden lg:col-span-5 lg:block">
         <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-1">
-          <PreviewPanel row={selected} casesPath={casesPath} />
+          <PreviewPanel row={selected} casesPath={casesPath} showAiReview={showPanelAiReview} />
         </div>
       </aside>
     </div>
   )
 }
 
-/** Single complaint card in the staff queue list. */
+/**
+ * Single complaint card in the staff queue list.
+ *
+ * - Default: a role="button" that selects the case into the preview panel, with
+ *   the case id linking to the full ticket.
+ * - `asLink` (Workflow worklist): the whole card is a worklist link that opens
+ *   the full ticket on click; hovering/focusing it updates the preview panel.
+ *   The id renders as plain text to avoid a nested anchor.
+ */
 export function QueueCard({
   row,
   casesPath,
   selected,
   onSelect,
   attention,
+  asLink = false,
 }: {
   row: ComplaintRow
   casesPath: string
   selected: boolean
   onSelect: () => void
   attention?: AttentionFlag[]
+  asLink?: boolean
 }) {
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect()
-        }
-      }}
-      className={`card card-hover cursor-pointer p-4 ${
-        selected ? 'border-accent-300 ring-2 ring-accent-200' : ''
-      }`}
-    >
+  const detailPath = `${casesPath}/${encodeURIComponent(row.id)}`
+  const className = `card card-hover p-4 block ${selected ? 'border-accent-300 ring-2 ring-accent-200' : ''}`
+
+  const inner = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link
-            to={`${casesPath}/${encodeURIComponent(row.id)}`}
-            onClick={(e) => e.stopPropagation()}
-            className="font-semibold text-navy-900 hover:underline"
-          >
-            {row.id}
-          </Link>
+          {asLink ? (
+            <div className="font-semibold text-navy-900">{row.id}</div>
+          ) : (
+            <Link
+              to={detailPath}
+              onClick={(e) => e.stopPropagation()}
+              className="font-semibold text-navy-900 hover:underline"
+            >
+              {row.id}
+            </Link>
+          )}
           <div className="mt-0.5 truncate text-sm text-ink">{row.complaintType}</div>
         </div>
         <div className="shrink-0 text-right text-xs text-ink-subtle tabular-nums">{formatDate(row.submittedAt)}</div>
@@ -239,18 +255,55 @@ export function QueueCard({
       {row.aiSummary && row.aiSummary !== 'No AI summary available.' && (
         <p className="mt-2 line-clamp-2 text-sm text-ink-muted">{row.aiSummary}</p>
       )}
+    </>
+  )
+
+  // Workflow worklist: the card itself opens the full ticket; hover/focus drives
+  // the desktop preview so the panel stays in sync without a click.
+  if (asLink) {
+    return (
+      <Link to={detailPath} onMouseEnter={onSelect} onFocus={onSelect} className={className}>
+        {inner}
+      </Link>
+    )
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className={`${className} cursor-pointer`}
+    >
+      {inner}
     </div>
   )
 }
 
 /**
- * Selected-case staff command panel. This is the primary place the AI review is
- * surfaced: case context up top, the rule based triage, then the on-demand AI
- * assisted staff review, and finally the link to the full record. The AI review
- * result renders inside this visible panel, so staff never have to scroll a long
- * page to find it.
+ * Selected-case preview panel: case context up top, the rule based triage, then
+ * the link to the full record.
+ *
+ * When `showAiReview` is true (live case queue) the on-demand AI assisted staff
+ * review renders inside this panel. The Workflow worklist sets it false so the
+ * panel stays a compact preview — the AI review lives on the full case detail
+ * page, where staff review the whole case.
  */
-export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; casesPath: string }) {
+export function PreviewPanel({
+  row,
+  casesPath,
+  showAiReview = true,
+}: {
+  row: ComplaintRow | null
+  casesPath: string
+  showAiReview?: boolean
+}) {
   if (!row) {
     return (
       <div className="card p-6 text-center text-sm text-ink-subtle">
@@ -291,7 +344,7 @@ export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; cas
 
           {row.description && (
             <Block label="Complaint description">
-              <p className="text-sm text-ink-muted">{row.description}</p>
+              <p className={`text-sm text-ink-muted ${showAiReview ? '' : 'line-clamp-3'}`}>{row.description}</p>
             </Block>
           )}
 
@@ -314,8 +367,16 @@ export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; cas
       </div>
 
       {/* AI assisted staff review for the selected case only — on staff click.
-          Keyed to the case so it resets when the selection changes. */}
-      <CaseAiReview key={row.id} input={caseAiReviewInputFromRow(row)} compact />
+          Keyed to the case so it resets when the selection changes. On the
+          Workflow worklist this is replaced by a short note: the review lives on
+          the full case detail page to keep the worklist panel a compact preview. */}
+      {showAiReview ? (
+        <CaseAiReview key={row.id} input={caseAiReviewInputFromRow(row)} compact />
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-ink-subtle">
+          AI review is available on the full case detail page.
+        </div>
+      )}
 
       <Link to={`${casesPath}/${encodeURIComponent(row.id)}`} className="btn-secondary w-full">
         Open full case detail
