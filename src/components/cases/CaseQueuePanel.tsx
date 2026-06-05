@@ -373,9 +373,7 @@ export function PreviewPanel({
       {showAiReview ? (
         <CaseAiReview key={row.id} input={caseAiReviewInputFromRow(row)} compact />
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-ink-subtle">
-          AI review is available on the full case detail page.
-        </div>
+        <p className="text-[11px] text-ink-subtle">AI review lives on full ticket.</p>
       )}
 
       <Link to={`${casesPath}/${encodeURIComponent(row.id)}`} className="btn-secondary w-full">

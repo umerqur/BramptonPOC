@@ -13,7 +13,6 @@ import {
 import WorkflowLifecycle from '../../components/workflow/WorkflowLifecycle'
 import WorkflowRoadmap from '../../components/workflow/WorkflowRoadmap'
 import {
-  DATA_POSITIONING,
   getAgingOpenComplaints,
   getComplaintKpis,
   getMunicipalComplaints,
@@ -175,9 +174,8 @@ export default function AppWorkflowPage() {
             Operations Workflow Console
           </h1>
           <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-            Start here to triage complaints, review priority cases, and prepare staff action.
+            Start with the cases that need attention, then open a ticket for staff review.
           </p>
-          <p className="mt-1 text-sm text-ink-subtle max-w-3xl">{DATA_POSITIONING}</p>
         </div>
         <div className="flex flex-col items-start gap-3 sm:items-end">
           <div className="flex items-center gap-2 text-xs text-ink-subtle">
@@ -190,32 +188,16 @@ export default function AppWorkflowPage() {
         </div>
       </div>
 
-      {/* Demo framing — who you are, what this is, what it is not */}
-      <div className="mt-6 card p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="max-w-2xl">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200">Demo workspace</span>
-              <span className="badge bg-navy-900/5 text-navy-900">Decision support</span>
-            </div>
-            <p className="mt-3 text-sm text-ink leading-relaxed">
-              You are viewing a Brampton compatible enforcement workflow demo using benchmark complaint data. This is not
-              Brampton operational data and does not perform real enforcement actions.
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3 lg:max-w-xl">
-            <FrameItem
-              label="Your demo role"
-              value="Municipal enforcement supervisor / authorized project reviewer"
-            />
-            <FrameItem
-              label="Purpose"
-              value="Review complaint workload, triage priority cases, prepare staff action"
-            />
-            <FrameItem
-              label="Boundaries"
-              value="Supports staff decisions — it does not make enforcement decisions, and is not connected to Brampton case systems yet"
-            />
+      {/* Demo guardrail — compact single line + tiny chips */}
+      <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-amber-900">
+            Demo workflow using public benchmark municipal service request data. Not Brampton operational data. Staff
+            decisions required.
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="badge bg-white/70 text-amber-900 ring-1 ring-inset ring-amber-200">Decision support only</span>
+            <span className="badge bg-white/70 text-amber-900 ring-1 ring-inset ring-amber-200">Staff review required</span>
           </div>
         </div>
       </div>
@@ -225,7 +207,7 @@ export default function AppWorkflowPage() {
         <SectionHeading
           eyebrow="Start of day"
           title="What needs attention now"
-          description="Your operational workload at a glance. Counts are live from Supabase; open any card to work that part of the queue."
+          description="Live workload by review stage."
         />
         {kpis.error && stages.error ? (
           <SectionError className="mt-5" label="workload summary" error={kpis.error} />
@@ -301,15 +283,12 @@ export default function AppWorkflowPage() {
       {/* 2 + 3. Pick a case → open the full ticket */}
       <div id="worklist" className="mt-10 scroll-mt-24">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <SectionHeading eyebrow="Pick a case" title="Triage queue — your worklist" />
+          <SectionHeading eyebrow="Pick a case" title="Triage queue" />
           <Link to={stageQueueHref(TRIAGE_STAGE)} className="text-xs font-medium text-navy-700 hover:text-navy-900">
             Open full triage queue →
           </Link>
         </div>
-        <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-          Highest-priority cases needing review first. Click a case to open its full ticket. On desktop, the side panel
-          shows a compact preview of the highlighted case; AI assisted staff review lives on the full case detail page.
-        </p>
+        <p className="mt-2 text-sm text-ink-muted">Click a case to open the full ticket.</p>
         <div className="mt-5">
           {triage.error ? (
             <SectionError label="triage worklist" error={triage.error} />
@@ -583,15 +562,6 @@ function PriorityCard({
     <Link to={href} className={className}>
       {body}
     </Link>
-  )
-}
-
-function FrameItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
-      <div className="mt-1 text-xs leading-relaxed text-ink">{value}</div>
-    </div>
   )
 }
 
