@@ -73,9 +73,10 @@ export default function CaseAiReview({
       </div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Optional Claude assistance for this one case. It does not replace the rule based POC triage and does not make
-        any final enforcement or closure decision — authorized municipal staff review and decide every case. This uses
-        benchmark/demonstration data, not Brampton operational complaint data.
+        Optional. Runs only when you click Generate AI review, and only for this one case. It prepares a staff briefing —
+        it does not assign, close, enforce, or send anything. It does not replace the rule based POC triage, and
+        authorized municipal staff review and decide every case. Uses benchmark demonstration data, not Brampton
+        operational complaint data.
       </p>
 
       <button

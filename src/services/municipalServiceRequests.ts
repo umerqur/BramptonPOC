@@ -268,6 +268,27 @@ export async function getMunicipalComplaints(filters: ComplaintFilters = {}): Pr
   return rankByPriority ? sortByOperationalPriority(mapped) : mapped
 }
 
+/**
+ * Oldest still-open complaints (workflow_stage not Closed/Cancelled), ordered by
+ * submitted date ascending so the longest-waiting cases surface first. Used by
+ * the Workflow console to flag aging / stale cases. Read-only over existing
+ * columns — no schema change. "Aging" is judged dataset-relative in the UI (vs.
+ * the newest submission in the loaded set), since the benchmark data is a
+ * historical snapshot rather than live wall-clock intake.
+ */
+export async function getAgingOpenComplaints(limit = 15): Promise<ComplaintRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(COMPLAINTS_TABLE)
+    .select(LIST_COLUMNS)
+    .not('workflow_stage', 'in', '("Closed","Cancelled")')
+    .order('submitted_at', { ascending: true, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return ((data ?? []) as MunicipalComplaintRow[]).map(mapComplaintRow)
+}
+
 export async function getComplaintByCaseId(caseId: string): Promise<MunicipalComplaintRow | null> {
   const client = requireClient()
   const { data, error } = await client

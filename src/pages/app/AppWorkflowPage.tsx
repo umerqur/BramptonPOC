@@ -1,26 +1,50 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import StatCard from '../../components/StatCard'
 import SectionHeading from '../../components/SectionHeading'
-import { PriorityBadge } from '../../components/cases/CaseQueueView'
-import { CaseQueueSplit } from '../../components/cases/CaseQueuePanel'
+import { PriorityBadge, StatusBadge } from '../../components/cases/CaseQueueView'
+import {
+  AttentionChips,
+  CaseQueueSplit,
+  WorkflowStageBadge,
+  deriveAttention,
+  displayAttention,
+  formatDate,
+} from '../../components/cases/CaseQueuePanel'
 import WorkflowLifecycle from '../../components/workflow/WorkflowLifecycle'
 import WorkflowRoadmap from '../../components/workflow/WorkflowRoadmap'
 import {
   DATA_POSITIONING,
+  getAgingOpenComplaints,
   getComplaintKpis,
   getMunicipalComplaints,
   getRecentWorkflowEvents,
   getStaffActionSummary,
   getWorkflowStageCounts,
-  type ComplaintKpis,
+  operationalPriorityRank,
+  type ComplaintRow,
   type WorkflowStageCount,
 } from '../../services/municipalServiceRequests'
 
 const TRIAGE_STAGE = 'Needs review'
+const TRIAGE_LIMIT = 18
+const AGING_LIMIT = 15
+
+// Illustrative staff decision options shown in the Human decision section. These
+// are labelled demo-only on this overview; real decisions (assignment,
+// inspection, closure, …) are recorded as workflow events from the case detail
+// page. Nothing here triggers a backend action.
+const DECISION_OPTIONS = [
+  'Assign to officer',
+  'Schedule inspection',
+  'Merge duplicate',
+  'Escalate',
+  'Request more information',
+  'Prepare closure',
+  'Close case',
+]
 
 // Lifecycle ordering + presentation for the workflow stages. Counts are live;
-// this only controls the order and accent of the stage rail.
+// this only controls the order and accent of the stage strip.
 const STAGE_ORDER = [
   'Needs review',
   'Intake and validation',
@@ -64,9 +88,9 @@ type AsyncState<T> = { data: T | null; loading: boolean; error: string | null }
 
 /**
  * Loads one section independently. Each section owns its own loading/error
- * state so a single failing query (e.g. a view that has not been created yet)
- * only degrades that section — it never takes down the whole console and never
- * silently substitutes mock data into the authenticated app.
+ * state so a single failing query only degrades that section — it never takes
+ * down the whole console and never silently substitutes mock data into the
+ * authenticated app.
  */
 function useSection<T>(loader: () => Promise<T>): AsyncState<T> {
   const [state, setState] = useState<AsyncState<T>>({ data: null, loading: true, error: null })
@@ -88,76 +112,394 @@ function useSection<T>(loader: () => Promise<T>): AsyncState<T> {
 }
 
 /**
- * Operations Workflow Console — a live operational view over the NYC 311
- * benchmark workflow data in municipal_complaints / workflow_events. Each panel
- * loads independently from live Supabase; on failure a panel shows an inline
- * warning rather than falling back to sample data, so no mock cases or fake
- * addresses ever appear inside the authenticated app.
+ * Operations Workflow Console — the authenticated staff command centre. It walks
+ * an authorized project reviewer through a guided municipal enforcement flow over
+ * the NYC 311 benchmark data in municipal_complaints / workflow_events: see what
+ * needs attention, pick a case from the triage worklist, review it in the command
+ * panel, optionally generate an on-demand AI staff briefing, decide the next
+ * action, and log it. Every panel loads independently from live Supabase; on
+ * failure a panel shows an inline warning rather than falling back to sample data.
+ * This is decision support only — it never makes or performs an enforcement action.
  */
 export default function AppWorkflowPage() {
   const stages = useSection(getWorkflowStageCounts)
   const kpis = useSection(getComplaintKpis)
-  const cases = useSection(async () => {
-    const [recent, triage] = await Promise.all([
-      getMunicipalComplaints({ sort: 'submitted_at', limit: 12 }),
-      getMunicipalComplaints({ workflowStage: TRIAGE_STAGE, sort: 'operational_priority', limit: 6 }),
-    ])
-    return { recent, triage }
-  })
-  const events = useSection(() => getRecentWorkflowEvents(12))
+  const triage = useSection(() =>
+    getMunicipalComplaints({ workflowStage: TRIAGE_STAGE, sort: 'operational_priority', limit: TRIAGE_LIMIT }),
+  )
+  const aging = useSection(() => getAgingOpenComplaints(AGING_LIMIT))
+  const events = useSection(() => getRecentWorkflowEvents(10))
   const staff = useSection(getStaffActionSummary)
 
   const orderedStages = stages.data ? orderStages(stages.data) : []
-  const program = deriveProgramMetrics(kpis.data)
-  // Live triage backlog for the lifecycle rail: prefer the "Needs review" stage
-  // count, falling back to the KPI new/initiated count.
-  const triageCount =
+
+  // Dataset-relative "now" used to judge aging / recency on a historical
+  // benchmark snapshot: the newest submission across the loaded worklists.
+  const loadedRows: ComplaintRow[] = [...(triage.data ?? []), ...(aging.data ?? [])]
+  const referenceDate =
+    loadedRows.reduce((max, r) => {
+      const t = r.submittedAt ? new Date(r.submittedAt).getTime() : NaN
+      return Number.isFinite(t) && t > max ? t : max
+    }, 0) || null
+
+  const getAttention = (row: ComplaintRow) => displayAttention(deriveAttention(row, referenceDate))
+
+  // Staff priority card values (live aggregates where available; aging is derived
+  // from the oldest-open worklist relative to the dataset).
+  const needsReviewCount =
     stages.data?.find((s) => s.workflow_stage === TRIAGE_STAGE)?.case_count ?? kpis.data?.new_or_initiated_cases
+  const highPriorityCount = stages.data
+    ? stages.data.reduce((n, s) => n + s.high_priority_count, 0)
+    : undefined
+  const inProgressCount = kpis.data?.in_progress_cases
+  const closedCount = kpis.data?.closed_or_completed_cases
+
+  const agingRows = (aging.data ?? []).filter((r) =>
+    deriveAttention(r, referenceDate).some((f) => f.key === 'aging'),
+  )
+  const agingValue = aging.loading
+    ? '—'
+    : `${agingRows.length}${agingRows.length === AGING_LIMIT ? '+' : ''}`
+
+  const highLabel = loadedRows.find((r) => operationalPriorityRank(r.priority) === 0)?.priority ?? 'High'
+  const inProgressStage = stages.data?.find((s) => /assigned|under review|progress/i.test(s.workflow_stage))?.workflow_stage
+  const closedStage = stages.data?.find((s) => /closed|complete/i.test(s.workflow_stage))?.workflow_stage
 
   return (
     <div className="container-page py-10">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+      {/* Hero */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="section-eyebrow">Live Operations</div>
+          <div className="section-eyebrow">Staff Workspace</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            Workflow console
+            Operations Workflow Console
           </h1>
           <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-            The main staff workspace: what needs attention, what stage each complaint is in, which cases to open next,
-            what action to take, and what has been closed.
+            Start here to triage complaints, review priority cases, and prepare staff action.
           </p>
           <p className="mt-1 text-sm text-ink-subtle max-w-3xl">{DATA_POSITIONING}</p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-ink-subtle">
-          <span className="h-2 w-2 rounded-full bg-accent-500" />
-          Live data · Supabase
+        <div className="flex flex-col items-start gap-3 sm:items-end">
+          <div className="flex items-center gap-2 text-xs text-ink-subtle">
+            <span className="h-2 w-2 rounded-full bg-accent-500" />
+            Live data · Supabase
+          </div>
+          <Link to={stageQueueHref(TRIAGE_STAGE)} className="btn-primary text-sm py-2 px-4">
+            Open Needs review queue
+          </Link>
         </div>
       </div>
 
-      {/* CTA banner */}
-      <div className="mt-6 flex flex-col gap-3 rounded-xl border border-navy-100 bg-gradient-to-r from-navy-900 to-navy-800 px-5 py-4 text-white sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="text-sm font-semibold">Work a case and record an action</div>
-          <div className="mt-0.5 text-xs text-white/70">
-            Open a case from the triage queue, review the rule-based POC triage, and log a staff decision to the audit
-            trail.
+      {/* Demo framing — who you are, what this is, what it is not */}
+      <div className="mt-6 card p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200">Demo workspace</span>
+              <span className="badge bg-navy-900/5 text-navy-900">Decision support</span>
+            </div>
+            <p className="mt-3 text-sm text-ink leading-relaxed">
+              You are viewing a Brampton compatible enforcement workflow demo using benchmark complaint data. This is not
+              Brampton operational data and does not perform real enforcement actions.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 lg:max-w-xl">
+            <FrameItem
+              label="Your demo role"
+              value="Municipal enforcement supervisor / authorized project reviewer"
+            />
+            <FrameItem
+              label="Purpose"
+              value="Review complaint workload, triage priority cases, prepare staff action"
+            />
+            <FrameItem
+              label="Boundaries"
+              value="Supports staff decisions — it does not make enforcement decisions, and is not connected to Brampton case systems yet"
+            />
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            to={stageQueueHref(TRIAGE_STAGE)}
-            className="btn bg-white text-navy-900 hover:bg-slate-100 text-sm py-2 px-4"
-          >
-            Open triage queue
+      </div>
+
+      {/* 1. Start of day — what needs attention now */}
+      <div className="mt-10">
+        <SectionHeading
+          eyebrow="Start of day"
+          title="What needs attention now"
+          description="Your operational workload at a glance. Counts are live from Supabase; open any card to work that part of the queue."
+        />
+        {kpis.error && stages.error ? (
+          <SectionError className="mt-5" label="workload summary" error={kpis.error} />
+        ) : (
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <PriorityCard
+              label="Needs review"
+              value={fmt(needsReviewCount, stages.loading && kpis.loading)}
+              hint="awaiting triage"
+              tone="amber"
+              href={stageQueueHref(TRIAGE_STAGE)}
+              cta="Open triage queue"
+            />
+            <PriorityCard
+              label="High priority"
+              value={fmt(highPriorityCount, stages.loading)}
+              hint="across all stages"
+              tone="red"
+              href={`/app/cases?priority=${encodeURIComponent(highLabel)}&sort=operational_priority`}
+              cta="View high priority"
+            />
+            <PriorityCard
+              label="Aging or stale"
+              value={agingValue}
+              hint="open longest"
+              tone="orange"
+              href="#aging"
+              cta="View aging cases"
+            />
+            <PriorityCard
+              label="In progress"
+              value={fmt(inProgressCount, kpis.loading)}
+              hint="active workflow"
+              tone="sky"
+              href={inProgressStage ? stageQueueHref(inProgressStage) : '/app/cases'}
+              cta="View in progress"
+            />
+            <PriorityCard
+              label="Closed or completed"
+              value={fmt(closedCount, kpis.loading)}
+              hint="resolved"
+              tone="accent"
+              href={closedStage ? stageQueueHref(closedStage) : '/app/cases'}
+              cta="View closed"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Stage workload strip — what stage is the workload in */}
+      <div className="mt-6">
+        {stages.error ? (
+          <SectionError label="workflow stage counts" error={stages.error} />
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-ink-subtle">Workload by stage:</span>
+            {orderedStages.map((s) => (
+              <Link
+                key={s.workflow_stage}
+                to={stageQueueHref(s.workflow_stage)}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-navy-900 transition hover:border-slate-300 hover:bg-slate-50"
+              >
+                <span className={`h-2 w-2 rounded-full ${stageAccent(s.workflow_stage)}`} />
+                {s.workflow_stage}
+                <span className="font-semibold tabular-nums">{s.case_count.toLocaleString()}</span>
+              </Link>
+            ))}
+            {stages.loading && <span className="text-xs text-ink-subtle">Loading stages…</span>}
+          </div>
+        )}
+      </div>
+
+      {/* 2 + 3. Pick a case → review it in the command panel */}
+      <div id="worklist" className="mt-10 scroll-mt-24">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <SectionHeading eyebrow="Pick a case" title="Triage queue — your worklist" />
+          <Link to={stageQueueHref(TRIAGE_STAGE)} className="text-xs font-medium text-navy-700 hover:text-navy-900">
+            Open full triage queue →
           </Link>
-          <Link to="/app/cases" className="btn border border-white/30 text-white hover:bg-white/10 text-sm py-2 px-4">
-            Full case queue
-          </Link>
+        </div>
+        <p className="mt-2 text-sm text-ink-muted max-w-3xl">
+          Highest-priority cases needing review first. Select a case to load it into the command panel on the right,
+          review the details and rule based triage, then open the full record to record a staff decision.
+        </p>
+        <div className="mt-5">
+          {triage.error ? (
+            <SectionError label="triage worklist" error={triage.error} />
+          ) : (
+            <CaseQueueSplit
+              rows={triage.data ?? []}
+              casesPath="/app/cases"
+              loading={triage.loading}
+              emptyMessage="No cases currently need review."
+              getAttention={getAttention}
+            />
+          )}
         </div>
       </div>
 
-      {/* Intake → Triage → Staff review → Closure lifecycle */}
+      {/* Aging / longest-open cases */}
+      <div id="aging" className="mt-10 scroll-mt-24">
+        <SectionHeading
+          eyebrow="Aging"
+          title="Aging & longest-open cases"
+          description="Open cases that have been waiting longest. Aging is judged relative to the most recent submission in this benchmark dataset, not wall-clock time."
+        />
+        {aging.error ? (
+          <SectionError className="mt-5" label="aging cases" error={aging.error} />
+        ) : aging.loading ? (
+          <div className="mt-5 card p-8 text-center text-sm text-ink-subtle">Loading oldest-open cases…</div>
+        ) : (aging.data?.length ?? 0) === 0 ? (
+          <div className="mt-5 card p-8 text-center text-sm text-ink-subtle">No open cases found.</div>
+        ) : (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {aging.data!.map((c) => (
+              <Link
+                key={c.id}
+                to={`/app/cases/${encodeURIComponent(c.id)}`}
+                className="card card-hover p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-navy-900">{c.id}</div>
+                    <div className="mt-0.5 truncate text-sm text-ink">{c.complaintType}</div>
+                  </div>
+                  <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDate(c.submittedAt)}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <StatusBadge status={c.status} />
+                  <WorkflowStageBadge stage={c.workflowStage} />
+                  <PriorityBadge priority={c.priority} />
+                </div>
+                <div className="mt-2">
+                  <AttentionChips flags={displayAttention(deriveAttention(c, referenceDate))} />
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 4 note + 5. Human decision — what staff decide next */}
       <div className="mt-10">
+        <SectionHeading
+          eyebrow="Human decision"
+          title="What staff decide next"
+          description="After reviewing a case — and optionally generating an AI staff briefing — an authorized staff member chooses the next action. The system records the decision; it never decides, assigns, closes, enforces, or sends anything on its own."
+        />
+        <div className="mt-5 card p-5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold text-navy-900">Staff action options</span>
+            <span className="badge bg-slate-100 text-slate-600">Demo · illustrative</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {DECISION_OPTIONS.map((o) => (
+              <button
+                key={o}
+                type="button"
+                disabled
+                title="Demo only — staff record decisions from the case detail page"
+                className="btn-secondary text-sm py-1.5 px-3 cursor-not-allowed opacity-70"
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+            These options are illustrative on this overview and are not wired to backend actions here. Open a case to
+            record a real staff decision (mark reviewed, assign, inspection required, close case, …) to the case audit
+            trail.
+          </p>
+          <div className="mt-3">
+            <Link to={stageQueueHref(TRIAGE_STAGE)} className="text-xs font-medium text-navy-700 hover:text-navy-900">
+              Open a case to record a decision →
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* 6. Audit trail framing */}
+      <div className="mt-10">
+        <SectionHeading
+          eyebrow="Audit trail"
+          title="Decisions are logged and reviewable"
+          description="Every staff decision should be recorded and auditable. Recorded workflow events and a summary of the decisions taken so far appear here."
+        />
+        <div className="mt-5 grid gap-6 lg:grid-cols-2">
+          {/* Recent workflow events */}
+          <div className="card p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-navy-900">Recent workflow events</h3>
+              <span className="text-xs text-ink-subtle">
+                {events.data?.length ? `${events.data.length} latest` : 'audit trail'}
+              </span>
+            </div>
+            {events.error ? (
+              <SectionError className="mt-4" label="workflow events" error={events.error} />
+            ) : events.loading ? (
+              <p className="mt-4 text-sm text-ink-subtle">Loading workflow events…</p>
+            ) : (events.data?.length ?? 0) === 0 ? (
+              <p className="mt-4 text-sm text-ink-subtle">
+                No workflow events recorded yet. Open a case and record a staff decision to populate the audit trail.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-3 text-xs">
+                {events.data!.map((e) => (
+                  <li key={e.id} className="flex items-start gap-3">
+                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+                    <div className="flex-1">
+                      <div className="text-ink">
+                        <Link
+                          to={`/app/cases/${encodeURIComponent(e.case_id)}`}
+                          className="font-medium text-navy-900 hover:underline"
+                        >
+                          {e.case_id}
+                        </Link>
+                        <span className="mx-1.5 text-ink-subtle">·</span>
+                        {e.event_label || e.event_type}
+                      </div>
+                      {(e.from_status || e.to_status) && (
+                        <div className="text-ink-subtle">{[e.from_status, e.to_status].filter(Boolean).join(' → ')}</div>
+                      )}
+                      <div className="text-ink-subtle">{(e.actor_type || 'staff')} · {formatDateTime(e.created_at)}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Staff action summary */}
+          <div className="card p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-navy-900">Staff action summary</h3>
+              {staff.data && (
+                <span className="text-xs text-ink-subtle">
+                  {staff.data.total.toLocaleString()} actions · {staff.data.actors.toLocaleString()} actor
+                  {staff.data.actors === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+            {staff.error ? (
+              <SectionError className="mt-4" label="staff action summary" error={staff.error} />
+            ) : staff.loading ? (
+              <p className="mt-4 text-sm text-ink-subtle">Loading staff actions…</p>
+            ) : (staff.data?.actions.length ?? 0) === 0 ? (
+              <p className="mt-4 text-sm text-ink-subtle">
+                No staff actions recorded yet. Recorded decisions (reviews, assignments, inspections, tickets, closures)
+                are summarized here.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {staff.data!.actions.map((a) => {
+                  const max = Math.max(...staff.data!.actions.map((x) => x.count), 1)
+                  return (
+                    <li key={a.event_type}>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-ink">{a.event_label}</span>
+                        <span className="font-medium text-navy-900 tabular-nums">{a.count.toLocaleString()}</span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                        <div className="h-full bg-navy-700" style={{ width: `${(a.count / max) * 100}%` }} />
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Supporting: intake → closure lifecycle */}
+      <div className="mt-12">
         <SectionHeading
           eyebrow="Workflow"
           title="Intake to triage to staff review to closure"
@@ -166,240 +508,15 @@ export default function AppWorkflowPage() {
         <div className="mt-6">
           <WorkflowLifecycle
             intakeTotal={kpis.data?.total_cases}
-            triageCount={triageCount}
-            closedCount={kpis.data?.closed_or_completed_cases}
+            triageCount={needsReviewCount}
+            closedCount={closedCount}
             triageHref={stageQueueHref(TRIAGE_STAGE)}
             queueHref="/app/cases"
           />
         </div>
       </div>
 
-      {/* Live counts by workflow stage */}
-      <div className="mt-10">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-navy-900">Live counts by workflow stage</h2>
-          <span className="text-xs text-ink-subtle">Click a stage to open it in the case queue</span>
-        </div>
-        {stages.error ? (
-          <SectionError className="mt-4" label="workflow stage counts" error={stages.error} />
-        ) : (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {orderedStages.map((s) => (
-              <Link
-                key={s.workflow_stage}
-                to={stageQueueHref(s.workflow_stage)}
-                className="card card-hover p-5 group"
-              >
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${stageAccent(s.workflow_stage)}`} />
-                  <span className="text-xs font-medium text-ink-muted">{s.workflow_stage}</span>
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-navy-900 tabular-nums">
-                  {s.case_count.toLocaleString()}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-subtle">
-                  <span>{s.high_priority_count.toLocaleString()} high</span>
-                  <span>{s.in_progress_count.toLocaleString()} active</span>
-                  <span>{s.closed_count.toLocaleString()} closed</span>
-                </div>
-                <div className="mt-3 text-xs font-medium text-navy-700 group-hover:text-navy-900">Open in queue →</div>
-              </Link>
-            ))}
-            {stages.loading && <div className="card p-5 text-sm text-ink-subtle">Loading stages…</div>}
-          </div>
-        )}
-      </div>
-
-      {/* Program success metrics */}
-      <div className="mt-10">
-        <SectionHeading eyebrow="Program Success" title="Program success metrics" />
-        <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-          Operational outcomes computed live from the workflow data — the measures a municipal complaint program is
-          tracked on over time.
-        </p>
-        {kpis.error ? (
-          <SectionError className="mt-5" label="program metrics" error={kpis.error} />
-        ) : (
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <StatCard label="Total cases" value={fmt(kpis.data?.total_cases, kpis.loading)} hint="all complaints" />
-            <StatCard label="Open backlog" value={fmt(program.backlog, kpis.loading)} hint="not yet closed" />
-            <StatCard label="In progress" value={fmt(kpis.data?.in_progress_cases, kpis.loading)} hint="active workflow" />
-            <StatCard
-              label="Closed or completed"
-              value={fmt(kpis.data?.closed_or_completed_cases, kpis.loading)}
-              hint="resolved"
-            />
-            <StatCard
-              label="Closure rate"
-              value={kpis.loading || program.closureRate === null ? '—' : `${program.closureRate}%`}
-              hint="closed ÷ total"
-            />
-            <StatCard
-              label="Awaiting triage"
-              value={fmt(kpis.data?.new_or_initiated_cases, kpis.loading)}
-              hint="needs review"
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Staff work queue — which cases to open next */}
-      <div className="mt-10">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <SectionHeading eyebrow="Work Queue" title="Staff work queue" />
-          <Link to="/app/cases" className="text-xs font-medium text-navy-700 hover:text-navy-900">
-            Open full filtered queue →
-          </Link>
-        </div>
-        <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-          Which cases to open next. Select a case to preview it, then open the full record to review the rule-based POC
-          triage and record a staff action.
-        </p>
-        <div className="mt-5">
-          {cases.error ? (
-            <SectionError label="staff work queue" error={cases.error} />
-          ) : (
-            <CaseQueueSplit
-              rows={cases.data?.recent ?? []}
-              casesPath="/app/cases"
-              loading={cases.loading}
-              emptyMessage="No recent cases."
-            />
-          )}
-        </div>
-      </div>
-
-      {/* What needs attention + audit trail */}
-      <div className="mt-10 grid gap-6 lg:grid-cols-3">
-        {/* Triage queue — what needs attention */}
-        <div className="card overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h3 className="text-sm font-semibold text-navy-900">What needs attention</h3>
-            <span className="badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200">Needs review</span>
-          </div>
-          {cases.error ? (
-            <SectionError className="m-5" label="triage queue" error={cases.error} />
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {(cases.data?.triage ?? []).map((c) => (
-                <li key={c.id} className="px-5 py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <Link to={`/app/cases/${encodeURIComponent(c.id)}`} className="font-medium text-navy-900 hover:underline text-sm">
-                      {c.id}
-                    </Link>
-                    <PriorityBadge priority={c.priority} />
-                  </div>
-                  <div className="mt-0.5 text-xs text-ink-muted truncate">{c.complaintType} · {c.wardOrArea}</div>
-                  <Link
-                    to={`/app/cases/${encodeURIComponent(c.id)}`}
-                    className="mt-1 inline-block text-xs font-medium text-accent-700 hover:text-accent-800"
-                  >
-                    Open &amp; record action →
-                  </Link>
-                </li>
-              ))}
-              {cases.loading && <li className="px-5 py-6 text-sm text-ink-subtle">Loading triage queue…</li>}
-              {!cases.loading && (cases.data?.triage.length ?? 0) === 0 && (
-                <li className="px-5 py-6 text-sm text-ink-subtle">No cases currently need review.</li>
-              )}
-            </ul>
-          )}
-          <div className="border-t border-slate-100 px-5 py-3">
-            <Link
-              to={stageQueueHref(TRIAGE_STAGE)}
-              className="text-xs font-medium text-navy-700 hover:text-navy-900"
-            >
-              Open triage queue →
-            </Link>
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
-              Priority is rule-based POC triage generated from complaint type, division, and status. It is not machine
-              learning and not a risk prediction.
-            </p>
-          </div>
-        </div>
-
-        {/* Recent workflow events */}
-        <div className="card p-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-navy-900">Recent workflow events</h3>
-            <span className="text-xs text-ink-subtle">
-              {events.data?.length ? `${events.data.length} latest` : 'audit trail'}
-            </span>
-          </div>
-          {events.error ? (
-            <SectionError className="mt-4" label="workflow events" error={events.error} />
-          ) : events.loading ? (
-            <p className="mt-4 text-sm text-ink-subtle">Loading workflow events…</p>
-          ) : (events.data?.length ?? 0) === 0 ? (
-            <p className="mt-4 text-sm text-ink-subtle">
-              No workflow events recorded yet. Open a case and record an action to populate the audit trail.
-            </p>
-          ) : (
-            <ul className="mt-4 space-y-3 text-xs">
-              {events.data!.map((e) => (
-                <li key={e.id} className="flex items-start gap-3">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
-                  <div className="flex-1">
-                    <div className="text-ink">
-                      <Link to={`/app/cases/${encodeURIComponent(e.case_id)}`} className="font-medium text-navy-900 hover:underline">
-                        {e.case_id}
-                      </Link>
-                      <span className="mx-1.5 text-ink-subtle">·</span>
-                      {e.event_label || e.event_type}
-                    </div>
-                    {(e.from_status || e.to_status) && (
-                      <div className="text-ink-subtle">{[e.from_status, e.to_status].filter(Boolean).join(' → ')}</div>
-                    )}
-                    <div className="text-ink-subtle">{(e.actor_type || 'staff')} · {formatDateTime(e.created_at)}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Staff action summary */}
-        <div className="card p-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-navy-900">Staff action summary</h3>
-            {staff.data && (
-              <span className="text-xs text-ink-subtle">
-                {staff.data.total.toLocaleString()} actions · {staff.data.actors.toLocaleString()} actor
-                {staff.data.actors === 1 ? '' : 's'}
-              </span>
-            )}
-          </div>
-          {staff.error ? (
-            <SectionError className="mt-4" label="staff action summary" error={staff.error} />
-          ) : staff.loading ? (
-            <p className="mt-4 text-sm text-ink-subtle">Loading staff actions…</p>
-          ) : (staff.data?.actions.length ?? 0) === 0 ? (
-            <p className="mt-4 text-sm text-ink-subtle">
-              No staff actions recorded yet. Recorded decisions (reviews, assignments, inspections, tickets, closures)
-              are summarized here.
-            </p>
-          ) : (
-            <ul className="mt-4 space-y-3">
-              {staff.data!.actions.map((a) => {
-                const max = Math.max(...staff.data!.actions.map((x) => x.count), 1)
-                return (
-                  <li key={a.event_type}>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-ink">{a.event_label}</span>
-                      <span className="font-medium text-navy-900 tabular-nums">{a.count.toLocaleString()}</span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                      <div className="h-full bg-navy-700" style={{ width: `${(a.count / max) * 100}%` }} />
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-      </div>
-
-      {/* Phased roadmap — sets expectations about future phases */}
+      {/* Supporting: phased roadmap */}
       <div className="mt-12">
         <SectionHeading
           eyebrow="Roadmap"
@@ -410,19 +527,70 @@ export default function AppWorkflowPage() {
           <WorkflowRoadmap />
         </div>
       </div>
-
     </div>
   )
 }
 
-function deriveProgramMetrics(kpis: ComplaintKpis | null): {
-  backlog: number | undefined
-  closureRate: number | null
-} {
-  if (!kpis) return { backlog: undefined, closureRate: null }
-  const backlog = Math.max(kpis.total_cases - kpis.closed_or_completed_cases - kpis.cancelled_cases, 0)
-  const closureRate = kpis.total_cases > 0 ? Math.round((kpis.closed_or_completed_cases / kpis.total_cases) * 100) : null
-  return { backlog, closureRate }
+type Tone = 'amber' | 'red' | 'orange' | 'sky' | 'accent'
+
+const TONE_DOT: Record<Tone, string> = {
+  amber: 'bg-amber-500',
+  red: 'bg-red-500',
+  orange: 'bg-orange-500',
+  sky: 'bg-sky-500',
+  accent: 'bg-accent-500',
+}
+
+/**
+ * Operational priority card. Links to a filtered queue view (or an on-page
+ * anchor for aging). Built to feel like a work target, not a marketing stat.
+ */
+function PriorityCard({
+  label,
+  value,
+  hint,
+  tone,
+  href,
+  cta,
+}: {
+  label: string
+  value: string
+  hint: string
+  tone: Tone
+  href: string
+  cta: string
+}) {
+  const isAnchor = href.startsWith('#')
+  const className = 'card card-hover p-5 group block'
+  const body = (
+    <>
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${TONE_DOT[tone]}`} />
+        <span className="text-xs font-medium text-ink-muted">{label}</span>
+      </div>
+      <div className="mt-2 text-2xl font-semibold text-navy-900 tabular-nums">{value}</div>
+      <div className="mt-1 text-[11px] text-ink-subtle">{hint}</div>
+      <div className="mt-3 text-xs font-medium text-navy-700 group-hover:text-navy-900">{cta} →</div>
+    </>
+  )
+  return isAnchor ? (
+    <a href={href} className={className}>
+      {body}
+    </a>
+  ) : (
+    <Link to={href} className={className}>
+      {body}
+    </Link>
+  )
+}
+
+function FrameItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-1 text-xs leading-relaxed text-ink">{value}</div>
+    </div>
+  )
 }
 
 function SectionError({ label, error, className = '' }: { label: string; error: string; className?: string }) {

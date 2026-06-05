@@ -1,8 +1,95 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { caseAiReviewInputFromRow, type ComplaintRow } from '../../services/municipalServiceRequests'
+import {
+  caseAiReviewInputFromRow,
+  operationalPriorityRank,
+  type ComplaintRow,
+} from '../../services/municipalServiceRequests'
 import { PriorityBadge, StatusBadge } from './CaseQueueView'
 import CaseAiReview from './CaseAiReview'
+
+// ---------------------------------------------------------------------------
+// Case attention logic — derived purely from existing complaint fields. No new
+// backend data: each flag is computed from priority, workflow stage, status and
+// the submitted date. "Aging" / "Recently submitted" are judged relative to a
+// reference date (the newest submission in the loaded set) so the signal stays
+// meaningful on a historical benchmark snapshot rather than wall-clock time.
+// ---------------------------------------------------------------------------
+
+export type AttentionTone = 'red' | 'amber' | 'orange' | 'sky' | 'slate'
+
+export type AttentionFlag = { key: string; label: string; tone: AttentionTone }
+
+const ATTENTION_TONE: Record<AttentionTone, string> = {
+  red: 'bg-red-50 text-red-700 ring-red-200',
+  amber: 'bg-amber-50 text-amber-800 ring-amber-200',
+  orange: 'bg-orange-50 text-orange-800 ring-orange-200',
+  sky: 'bg-sky-50 text-sky-800 ring-sky-200',
+  slate: 'bg-slate-100 text-slate-600 ring-slate-200',
+}
+
+const DAY_MS = 86_400_000
+
+function isOpen(row: ComplaintRow): boolean {
+  const stage = row.workflowStage.toLowerCase()
+  const status = row.status.toLowerCase()
+  return !(
+    stage.includes('closed') ||
+    stage.includes('cancel') ||
+    status.includes('closed') ||
+    status.includes('complete') ||
+    status.includes('cancel')
+  )
+}
+
+/**
+ * Full set of attention flags for a case. `referenceDate` is the dataset-relative
+ * "now" (ms) used to judge aging/recency; pass null to skip date-based flags.
+ */
+export function deriveAttention(row: ComplaintRow, referenceDate: number | null): AttentionFlag[] {
+  const flags: AttentionFlag[] = []
+  const stage = row.workflowStage.toLowerCase()
+  const status = row.status.toLowerCase()
+  const open = isOpen(row)
+  const submitted = row.submittedAt ? new Date(row.submittedAt).getTime() : null
+  const age = referenceDate && submitted ? referenceDate - submitted : null
+
+  if (operationalPriorityRank(row.priority) === 0) flags.push({ key: 'high', label: 'High priority', tone: 'red' })
+  if (stage.includes('need')) flags.push({ key: 'review', label: 'Needs review', tone: 'amber' })
+  if (open && age !== null && age >= 30 * DAY_MS) flags.push({ key: 'aging', label: 'Aging', tone: 'orange' })
+  if (open && age !== null && age <= 7 * DAY_MS) flags.push({ key: 'new', label: 'Recently submitted', tone: 'sky' })
+  if (status.includes('progress') || stage.includes('assigned') || stage.includes('under review'))
+    flags.push({ key: 'progress', label: 'In progress', tone: 'slate' })
+  if (stage.includes('need') && (!row.aiSummary || row.aiSummary === 'No AI summary available.'))
+    flags.push({ key: 'missing', label: 'Missing triage', tone: 'amber' })
+
+  return flags
+}
+
+/**
+ * Card-facing subset: the value-add signals that aren't already obvious from the
+ * status / stage / priority badges (aging, recency, missing triage). Capped so
+ * cards stay clean.
+ */
+export function displayAttention(flags: AttentionFlag[]): AttentionFlag[] {
+  return flags.filter((f) => f.key === 'aging' || f.key === 'new' || f.key === 'missing').slice(0, 3)
+}
+
+export function AttentionChips({ flags }: { flags: AttentionFlag[] }) {
+  if (flags.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {flags.map((f) => (
+        <span
+          key={f.key}
+          className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${ATTENTION_TONE[f.tone]}`}
+        >
+          {f.label}
+        </span>
+      ))}
+    </div>
+  )
+}
 
 /**
  * Shared staff work-queue UI: a queue list of case cards plus a selected-case
@@ -15,11 +102,14 @@ export function CaseQueueSplit({
   casesPath,
   loading,
   emptyMessage = 'No cases match the current view.',
+  getAttention,
 }: {
   rows: ComplaintRow[]
   casesPath: string
   loading: boolean
   emptyMessage?: string
+  /** Optional per-row attention chips (Workflow console). Omitted elsewhere. */
+  getAttention?: (row: ComplaintRow) => AttentionFlag[]
 }) {
   // Selected case for the desktop preview panel. Keep the selection valid as the
   // result set changes; default to the first row.
@@ -51,6 +141,7 @@ export function CaseQueueSplit({
                   casesPath={casesPath}
                   selected={c.id === selectedId}
                   onSelect={() => setSelectedId(c.id)}
+                  attention={getAttention?.(c)}
                 />
                 {/* Mobile: the staff command panel (incl. AI review) appears
                     directly under the selected card — no horizontal scroll and
@@ -84,11 +175,13 @@ export function QueueCard({
   casesPath,
   selected,
   onSelect,
+  attention,
 }: {
   row: ComplaintRow
   casesPath: string
   selected: boolean
   onSelect: () => void
+  attention?: AttentionFlag[]
 }) {
   return (
     <div
@@ -124,6 +217,12 @@ export function QueueCard({
         <WorkflowStageBadge stage={row.workflowStage} />
         <PriorityBadge priority={row.priority} />
       </div>
+
+      {attention && attention.length > 0 && (
+        <div className="mt-2">
+          <AttentionChips flags={attention} />
+        </div>
+      )}
 
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-ink-subtle">
         <span className="truncate">{row.assignedDepartment}</span>
@@ -162,12 +261,12 @@ export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; cas
 
   return (
     <div className="space-y-4">
-      {/* Case context */}
+      {/* Selected case command panel */}
       <div className="card overflow-hidden">
         <div className="border-b border-slate-100 px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-wide text-ink-subtle">Case preview</div>
+              <div className="text-xs font-medium uppercase tracking-wide text-ink-subtle">Selected case</div>
               <div className="mt-0.5 text-lg font-semibold text-navy-900">{row.id}</div>
               <div className="text-sm text-ink">{row.complaintType}</div>
             </div>
@@ -182,31 +281,35 @@ export function PreviewPanel({ row, casesPath }: { row: ComplaintRow | null; cas
 
         <div className="px-5 py-4">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+            <Field label="Complaint type" value={row.complaintType} />
+            <Field label="Priority" value={row.priority} />
+            <Field label="Workflow stage" value={row.workflowStage} />
             <Field label="Department" value={row.assignedDepartment} />
             <Field label="Ward or area" value={row.wardOrArea} />
             <Field label="Submitted" value={formatDate(row.submittedAt)} />
           </dl>
 
           {row.description && (
-            <Block label="Description">
+            <Block label="Complaint description">
               <p className="text-sm text-ink-muted">{row.description}</p>
             </Block>
           )}
 
-          {/* Existing rule based triage (distinct from the Claude AI review below). */}
-          <Block label="Rule based AI category">
-            <p className="text-sm text-ink-muted">{row.aiCategory}</p>
-          </Block>
-
-          <Block label="Rule based AI summary">
-            <p className="text-sm text-ink-muted">{row.aiSummary}</p>
-          </Block>
-
-          {row.recommendedAction && (
-            <Block label="Rule based recommended action">
-              <p className="text-sm text-ink-muted">{row.recommendedAction}</p>
-            </Block>
-          )}
+          {/* Rule based triage (POC) — distinct from the optional Claude AI review below. */}
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-navy-900">Rule based triage</span>
+              <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                POC · not ML
+              </span>
+            </div>
+            <div className="mt-2.5 space-y-2.5">
+              <PanelLine label="Category" value={row.aiCategory} />
+              <PanelLine label="Triage summary" value={row.aiSummary} />
+              {row.recommendedAction && <PanelLine label="Recommended action" value={row.recommendedAction} emphasis />}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -226,6 +329,15 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="min-w-0">
       <dt className="text-xs font-medium uppercase tracking-wide text-ink-subtle">{label}</dt>
       <dd className="mt-0.5 text-ink">{value || '—'}</dd>
+    </div>
+  )
+}
+
+function PanelLine({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
+  return (
+    <div>
+      <div className="text-xs font-medium uppercase tracking-wide text-ink-subtle">{label}</div>
+      <p className={`mt-0.5 text-sm ${emphasis ? 'font-medium text-navy-900' : 'text-ink-muted'}`}>{value || '—'}</p>
     </div>
   )
 }
