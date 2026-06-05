@@ -37,14 +37,14 @@ export default function MethodologyPage() {
 
           <Section id="data" title="2. Data sources">
             <ul className="space-y-2 list-disc pl-5">
-              <li><strong>Toronto 311 public benchmark complaint data:</strong> actual open municipal 311 complaint records used to demonstrate the complaint workflow — real intake volume, categories, and complaint patterns.</li>
+              <li><strong>NYC 311 public benchmark complaint data:</strong> actual open municipal 311 complaint records used to demonstrate the complaint workflow — real intake volume, categories, and complaint patterns.</li>
               <li><strong>Normalized municipal complaint schema:</strong> the 311 data is cleaned and mapped into a standardized, Brampton compatible complaint workflow schema so records can be compared and processed consistently.</li>
               <li><strong>Brampton GeoHub ward boundaries:</strong> real Brampton ward and electoral area boundary data providing local geographic context. Benchmark complaints are not geographically joined to Brampton wards yet.</li>
               <li><strong>Synthetic placeholders for non public internal records:</strong> used only where data is not publicly available — patrol logs, ticket history, officer notes, and internal closure workflow.</li>
             </ul>
             <p className="mt-3 text-sm text-ink-muted">No private City data is required for this phase. City provided data can be integrated later under privacy and cybersecurity controls.</p>
             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-ink-muted">
-              <span className="font-semibold text-navy-900">Current dataset:</span> Toronto 311 public benchmark complaints used to demonstrate the complaint workflow. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data.
+              <span className="font-semibold text-navy-900">Current dataset:</span> NYC 311 public benchmark complaints used to demonstrate the complaint workflow. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data.
             </div>
           </Section>
 
@@ -90,7 +90,7 @@ export default function MethodologyPage() {
 
           <Section id="limits" title="7. Known limitations">
             <ul className="space-y-2 list-disc pl-5">
-              <li>Toronto 311 benchmark data reflects real municipal complaint patterns, but it is not Brampton operational complaint data. Brampton specific calibration requires City provided complaints, tickets, patrol logs, closure outcomes, and case management data.</li>
+              <li>NYC 311 benchmark data reflects real municipal complaint patterns, but it is not Brampton operational complaint data. Brampton specific calibration requires City provided complaints, tickets, patrol logs, closure outcomes, and case management data.</li>
               <li>Rules based scoring is intentionally simple; production deployment would benefit from ML calibration on labeled outcomes.</li>
               <li>Geospatial clustering uses simplified distance heuristics in the POC.</li>
               <li>The POC does not address multilingual intake; this would be added in a production scope.</li>

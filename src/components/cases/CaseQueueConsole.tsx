@@ -25,11 +25,11 @@ type CaseQueueConsoleProps = {
   onClearStage?: () => void
 }
 
-// POC storytelling lines shown above the queue. Kept factual: Toronto 311 public
+// POC storytelling lines shown above the queue. Kept factual: NYC 311 public
 // benchmark data demonstrating the workflow, with Brampton ward context handled
 // separately — never implying these are Brampton operational complaints.
 const POC_NOTES = [
-  'Toronto 311 public benchmark data',
+  'NYC 311 public benchmark data',
   'Brampton ward context is used separately',
   'Not Brampton operational complaint data',
 ]

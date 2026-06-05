@@ -54,7 +54,7 @@ export default function LandingPage() {
             </div>
 
             <p className="mt-5 text-sm text-white/75">
-              Built with public 311 style data for the POC. No private City data required.
+              Built with public NYC 311 benchmark data for the POC. Not Brampton operational data. No private City data required.
             </p>
             <p className="mt-2 text-sm text-white/65">
               Decision support only. Human review required.
@@ -101,14 +101,14 @@ export default function LandingPage() {
             title="An assistive layer over existing intake and enforcement workflows"
           />
           <p className="mt-4 max-w-3xl text-ink-muted">
-            The system combines real public 311 service request data normalized into an enforcement schema,
+            The system combines real public NYC 311 service request data normalized into an enforcement schema,
             synthetic records for missing internal workflow fields, rules based risk scoring, machine learning ready
             features, and AI generated case summaries to support faster triage and better operational visibility.
           </p>
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {[
-              { title: 'Real public 311 data layer', body: 'Toronto 311 public benchmark complaint data is normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for missing internal workflow fields. Brampton GeoHub ward boundaries provide real local context.' },
+              { title: 'Real public NYC 311 data layer', body: 'NYC 311 public benchmark complaint data is normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for missing internal workflow fields. Brampton GeoHub ward boundaries provide real local context.' },
               { title: 'Transparent scoring', body: 'A rules based risk score with explainable drivers and ML ready feature design.' },
               { title: 'Officer ready outputs', body: 'Case summaries, recommended actions, and briefing notes designed for staff review.' },
             ].map((c) => (

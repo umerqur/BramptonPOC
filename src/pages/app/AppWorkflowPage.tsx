@@ -4,6 +4,8 @@ import StatCard from '../../components/StatCard'
 import SectionHeading from '../../components/SectionHeading'
 import { PriorityBadge } from '../../components/cases/CaseQueueView'
 import { CaseQueueSplit } from '../../components/cases/CaseQueuePanel'
+import WorkflowLifecycle from '../../components/workflow/WorkflowLifecycle'
+import WorkflowRoadmap from '../../components/workflow/WorkflowRoadmap'
 import {
   DATA_POSITIONING,
   getComplaintKpis,
@@ -86,7 +88,7 @@ function useSection<T>(loader: () => Promise<T>): AsyncState<T> {
 }
 
 /**
- * Operations Workflow Console — a live operational view over the Toronto 311
+ * Operations Workflow Console — a live operational view over the NYC 311
  * benchmark workflow data in municipal_complaints / workflow_events. Each panel
  * loads independently from live Supabase; on failure a panel shows an inline
  * warning rather than falling back to sample data, so no mock cases or fake
@@ -107,6 +109,10 @@ export default function AppWorkflowPage() {
 
   const orderedStages = stages.data ? orderStages(stages.data) : []
   const program = deriveProgramMetrics(kpis.data)
+  // Live triage backlog for the lifecycle rail: prefer the "Needs review" stage
+  // count, falling back to the KPI new/initiated count.
+  const triageCount =
+    stages.data?.find((s) => s.workflow_stage === TRIAGE_STAGE)?.case_count ?? kpis.data?.new_or_initiated_cases
 
   return (
     <div className="container-page py-10">
@@ -150,8 +156,26 @@ export default function AppWorkflowPage() {
         </div>
       </div>
 
+      {/* Intake → Triage → Staff review → Closure lifecycle */}
+      <div className="mt-10">
+        <SectionHeading
+          eyebrow="Workflow"
+          title="Intake to triage to staff review to closure"
+          description="How a complaint moves through the console: received and normalized, risk scored and routed, opened and reviewed by staff with optional AI assistance on click, then closed or escalated to the audit trail. Stage counts are live; the AI review is on demand only and a human decides every case."
+        />
+        <div className="mt-6">
+          <WorkflowLifecycle
+            intakeTotal={kpis.data?.total_cases}
+            triageCount={triageCount}
+            closedCount={kpis.data?.closed_or_completed_cases}
+            triageHref={stageQueueHref(TRIAGE_STAGE)}
+            queueHref="/app/cases"
+          />
+        </div>
+      </div>
+
       {/* Live counts by workflow stage */}
-      <div className="mt-8">
+      <div className="mt-10">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-navy-900">Live counts by workflow stage</h2>
           <span className="text-xs text-ink-subtle">Click a stage to open it in the case queue</span>
@@ -372,6 +396,18 @@ export default function AppWorkflowPage() {
               })}
             </ul>
           )}
+        </div>
+      </div>
+
+      {/* Phased roadmap — sets expectations about future phases */}
+      <div className="mt-12">
+        <SectionHeading
+          eyebrow="Roadmap"
+          title="Where this goes next"
+          description="The POC is Phase 1 today. Later phases describe the intended direction only — they are not built yet."
+        />
+        <div className="mt-6">
+          <WorkflowRoadmap />
         </div>
       </div>
 
