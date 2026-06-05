@@ -78,7 +78,8 @@ export default function LoginPage() {
             ))}
           </ul>
           <p className="mt-10 text-xs text-white/70">
-            Looking for the public preview? The demo dashboard is open to everyone and uses sample data.
+            Not a reviewer yet? The public site explains the POC, how it works, and our data and governance approach —
+            the Workflow Console and case data stay behind login.
           </p>
         </div>
       </div>

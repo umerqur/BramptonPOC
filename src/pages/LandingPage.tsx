@@ -44,12 +44,12 @@ export default function LandingPage() {
             </p>
 
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
-              <Link to="/dashboard" className="btn-accent">
-                View Demo Dashboard
+              <Link to="/login" className="btn-accent">
+                Sign in to Workflow Console
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
               </Link>
-              <Link to="/methodology" className="btn-secondary bg-white/5 text-white border-white/20 hover:bg-white/10 hover:border-white/40">
-                See Methodology
+              <Link to="/how-it-works" className="btn-secondary bg-white/5 text-white border-white/20 hover:bg-white/10 hover:border-white/40">
+                How It Works
               </Link>
             </div>
 

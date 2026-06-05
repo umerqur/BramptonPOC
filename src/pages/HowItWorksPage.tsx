@@ -97,7 +97,7 @@ export default function HowItWorksPage() {
       </div>
 
       <div className="mt-12 flex flex-col sm:flex-row gap-3">
-        <Link to="/dashboard" className="btn-primary">See the demo dashboard</Link>
+        <Link to="/login" className="btn-primary">Sign in to Workflow Console</Link>
         <Link to="/methodology" className="btn-secondary">Read the methodology</Link>
       </div>
     </div>

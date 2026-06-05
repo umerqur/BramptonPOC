@@ -18,9 +18,8 @@ export default function Footer() {
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-subtle">Product</h4>
           <ul className="mt-3 space-y-2 text-sm">
-            <li><Link to="/dashboard" className="link-quiet">Demo Dashboard</Link></li>
-            <li><Link to="/cases" className="link-quiet">Case Queue</Link></li>
             <li><Link to="/how-it-works" className="link-quiet">How It Works</Link></li>
+            <li><Link to="/login" className="link-quiet">Authorized staff login</Link></li>
           </ul>
         </div>
         <div>

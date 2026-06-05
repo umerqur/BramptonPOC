@@ -2,9 +2,6 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import LandingPage from './pages/LandingPage'
-import DashboardPage from './pages/DashboardPage'
-import CaseQueuePage from './pages/CaseQueuePage'
-import CaseDetailPage from './pages/CaseDetailPage'
 import MethodologyPage from './pages/MethodologyPage'
 import PrivacyPage from './pages/PrivacyPage'
 import LoginPage from './pages/LoginPage'
@@ -19,16 +16,19 @@ import AppWardContextPage from './pages/app/AppWardContextPage'
 export default function App() {
   return (
     <Routes>
-      {/* Public marketing + demo (mock data only) */}
+      {/* Public marketing site — explains the POC and routes authorized
+          reviewers to login. No public operational data demo. */}
       <Route element={<Layout />}>
         <Route path="/" element={<LandingPage />} />
         <Route path="/how-it-works" element={<HowItWorksPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/cases" element={<CaseQueuePage />} />
-        <Route path="/cases/:id" element={<CaseDetailPage />} />
         <Route path="/methodology" element={<MethodologyPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/login" element={<LoginPage />} />
+        {/* The dashboard / case demo is no longer public — route any old
+            public links to login. The live versions live under /app. */}
+        <Route path="/dashboard" element={<Navigate to="/login" replace />} />
+        <Route path="/cases" element={<Navigate to="/login" replace />} />
+        <Route path="/cases/:id" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
 
