@@ -191,6 +191,8 @@ export default function CaseQueueConsole({
             casesPath={casesPath}
             loading={loading}
             emptyMessage="No complaints match the current filters."
+            cardOpensDetail
+            showPanelAiReview={false}
           />
         </div>
       )}
