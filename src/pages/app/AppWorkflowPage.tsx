@@ -114,7 +114,7 @@ function useSection<T>(loader: () => Promise<T>): AsyncState<T> {
 /**
  * Operations Workflow Console — the authenticated staff command centre. It walks
  * an authorized project reviewer through a guided municipal enforcement flow over
- * the NYC 311 benchmark data in municipal_complaints / workflow_events: see what
+ * the public benchmark data in municipal_complaints / workflow_events: see what
  * needs attention, pick a case from the triage worklist, review it in the command
  * panel, optionally generate an on-demand AI staff briefing, decide the next
  * action, and log it. Every panel loads independently from live Supabase; on

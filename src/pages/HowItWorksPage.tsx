@@ -5,7 +5,7 @@ const steps = [
   {
     n: '01',
     title: 'Ingest',
-    body: 'Pulls NYC 311 public benchmark complaint data and Brampton GeoHub ward boundaries into a unified case model, using synthetic placeholders only for non public internal fields such as patrol logs and ticket history.',
+    body: 'Pulls public benchmark municipal service request data and Brampton ward boundaries into a unified case model, using synthetic placeholders only for non public internal fields such as patrol logs and ticket history.',
   },
   {
     n: '02',
@@ -106,7 +106,7 @@ export default function HowItWorksPage() {
 
 function PipelineDiagram() {
   const nodes = [
-    { x: 30, label: 'Public 311 data' },
+    { x: 30, label: 'Public benchmark data' },
     { x: 175, label: 'Synthetic records' },
     { x: 320, label: 'Geospatial data' },
   ]

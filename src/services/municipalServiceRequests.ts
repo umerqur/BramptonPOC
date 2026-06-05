@@ -2,9 +2,10 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
 
 // Primary data source for the authenticated Brampton complaint workflow app.
-// NYC 311 public benchmark complaints are loaded into `municipal_complaints`
-// to demonstrate the complaint workflow; Brampton GeoHub ward boundaries provide
-// real local context. This is not Brampton operational complaint data.
+// Public benchmark municipal service request data is loaded into
+// `municipal_complaints` to demonstrate the complaint workflow; Brampton ward
+// boundaries provide real local context. This is not Brampton operational
+// complaint data.
 export const COMPLAINTS_TABLE = 'municipal_complaints'
 export const WARDS_TABLE = 'brampton_ward_boundaries'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
@@ -21,7 +22,7 @@ export const TRIAGE_ADVISORY =
 
 /** Product positioning note used across the authenticated app. */
 export const DATA_POSITIONING =
-  'NYC 311 public benchmark data is used to demonstrate the complaint workflow. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data.'
+  'Public benchmark municipal service request data is used to demonstrate the complaint workflow. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data.'
 
 /**
  * Shape of a row in the Supabase `municipal_complaints` table.
@@ -424,8 +425,8 @@ export async function getStaffActionSummary(): Promise<{ total: number; actors: 
 /**
  * A row in public.brampton_ward_workload_scenarios. SYNTHETIC, illustrative
  * workload keyed by Brampton ward name — NOT Brampton operational complaint
- * data. Used only to demonstrate the ward heatmap. NYC 311 benchmark
- * records are never plotted onto Brampton wards.
+ * data. Used only to demonstrate the ward heatmap. Public benchmark
+ * complaint records are never plotted onto Brampton wards.
  */
 export type WardWorkloadScenario = {
   id: number

@@ -22,7 +22,7 @@ const PHASES: Phase[] = [
   {
     n: 2,
     title: 'Brampton data integration',
-    body: 'Replace the public NYC 311 benchmark stand-in with Brampton operational complaint, ticket, patrol, and closure data, integrated under City privacy and cybersecurity controls.',
+    body: 'Replace the public benchmark data stand-in with Brampton operational complaint, ticket, patrol, and closure data, integrated under City privacy and cybersecurity controls.',
   },
   {
     n: 3,

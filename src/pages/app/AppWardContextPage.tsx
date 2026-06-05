@@ -11,10 +11,10 @@ const SCENARIO_DISCLAIMER =
   'Synthetic Brampton ward workload scenario. Not Brampton operational complaint data.'
 
 // Longer-form context for the scenario, kept as supporting fine print. Wording is
-// workload intensity (not risk) and never implies NYC 311 benchmark records
-// were plotted onto Brampton wards.
+// workload intensity (not risk) and never implies public benchmark complaint
+// records were plotted onto Brampton wards.
 const SCENARIO_CONTEXT =
-  'Real Brampton GeoHub ward boundaries are shaded by an invented workload scenario to preview how a ward-level workload view will look once Brampton provides operational complaint data. Wards are shaded by complaint volume to show workload intensity — higher complaint volume means higher workload intensity. These are illustrative scenario values only, not a risk prediction, and NYC 311 benchmark records are never plotted onto Brampton wards.'
+  'Real Brampton GeoHub ward boundaries are shaded by an invented workload scenario to preview how a ward-level workload view will look once Brampton provides operational complaint data. Wards are shaded by complaint volume to show workload intensity — higher complaint volume means higher workload intensity. These are illustrative scenario values only, not a risk prediction, and public benchmark complaint records are never plotted onto Brampton wards.'
 
 // Authenticated Brampton geographic context. The real GeoHub ward boundary
 // geometry is used as the BASE layer of a single workload-context map, shaded by
