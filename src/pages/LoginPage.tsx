@@ -18,7 +18,7 @@ export default function LoginPage() {
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
 
   // Already authenticated — go straight to the app.
-  if (ready && session) return <Navigate to="/app/dashboard" replace />
+  if (ready && session) return <Navigate to="/app/workflow" replace />
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -99,7 +99,7 @@ export default function LoginPage() {
               <div className="font-medium">Check your email</div>
               <p className="mt-1">
                 We sent a magic link to <span className="font-medium">{email.trim().toLowerCase()}</span>. Open it on this
-                device to sign in. You&apos;ll land on the live dashboard.
+                device to sign in. You&apos;ll land on the live Workflow console.
               </p>
             </div>
           ) : (

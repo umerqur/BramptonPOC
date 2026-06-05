@@ -13,5 +13,5 @@ export function getAppBaseUrl() {
 }
 
 export function getAuthRedirectUrl() {
-  return `${getAppBaseUrl()}/app/dashboard`
+  return `${getAppBaseUrl()}/app/workflow`
 }

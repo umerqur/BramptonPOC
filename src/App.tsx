@@ -34,7 +34,7 @@ export default function App() {
 
       {/* Authenticated app (live Supabase data) */}
       <Route path="/app" element={<ProtectedRoute />}>
-        <Route index element={<Navigate to="/app/dashboard" replace />} />
+        <Route index element={<Navigate to="/app/workflow" replace />} />
         <Route path="dashboard" element={<AppDashboardPage />} />
         <Route path="workflow" element={<AppWorkflowPage />} />
         <Route path="wards" element={<AppWardContextPage />} />
