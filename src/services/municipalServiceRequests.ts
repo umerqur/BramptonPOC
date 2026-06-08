@@ -13,6 +13,7 @@ export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
 export const WORKLOAD_INSIGHTS_TABLE = 'workload_insights_v1'
+export const WORKFLOW_ML_PREDICTIONS_TABLE = 'workflow_ml_predictions'
 
 /**
  * Standard advisory disclaimer for AI-assisted triage. The current POC triage is
@@ -582,6 +583,56 @@ export async function getWorkloadInsightsV1(): Promise<WorkloadInsightRow[]> {
 
   if (error) throw error
   return (data ?? []) as WorkloadInsightRow[]
+}
+
+// ---------------------------------------------------------------------------
+// V2 workflow ML predictions (read-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * A row in public.workflow_ml_predictions — one V2 model-scored complaint over
+ * the Toronto 311 benchmark. `needs_attention_score` / `attention_tier` are the
+ * "Needs Attention" handling-path ranking (relative, decision support only).
+ * `predicted_department` / `routing_confidence` are RESEARCH ONLY (Toronto routing
+ * mostly learned complaint_type -> department). Not Brampton operational data and
+ * not automated enforcement.
+ */
+export type WorkflowMlPrediction = {
+  source_record_id: string | null
+  complaint_type: string | null
+  ward_or_area: string | null
+  status: string | null
+  assigned_department: string | null
+  predicted_department: string | null
+  routing_confidence: number | null
+  needs_attention_score: number | null
+  attention_tier: string | null
+  attention_rank: number | null
+  model_version: string
+  advisory: string
+}
+
+const WORKFLOW_ML_PREDICTION_COLUMNS =
+  'source_record_id, complaint_type, ward_or_area, status, assigned_department, predicted_department, routing_confidence, needs_attention_score, attention_tier, attention_rank, model_version, advisory'
+
+/**
+ * Reads V2 workflow ML predictions from public.workflow_ml_predictions, highest
+ * Needs Attention rank first. `limit` keeps the payload small (the table holds the
+ * full scored benchmark). Any Supabase/RLS error is thrown so the caller can
+ * surface it. Decision-support benchmark data — never Brampton operational
+ * complaint data and never an automated decision.
+ */
+export async function getWorkflowMlPredictionsV2(limit = 50): Promise<WorkflowMlPrediction[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKFLOW_ML_PREDICTIONS_TABLE)
+    .select(WORKFLOW_ML_PREDICTION_COLUMNS)
+    .eq('prediction_type', 'needs_attention')
+    .order('needs_attention_score', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data ?? []) as WorkflowMlPrediction[]
 }
 
 export async function addWorkflowEvent(input: {
