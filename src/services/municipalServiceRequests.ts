@@ -11,6 +11,7 @@ export const WARDS_TABLE = 'brampton_ward_boundaries'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
+export const WORKLOAD_INSIGHTS_TABLE = 'workload_insights_v1'
 
 /**
  * Standard advisory disclaimer for AI-assisted triage. The current POC triage is
@@ -440,6 +441,58 @@ export type WardWorkloadScenario = {
   top_category: string
   estimated_hours_saved: number
   source_note: string
+}
+
+// ---------------------------------------------------------------------------
+// Workload Insights (v1 model outputs)
+// ---------------------------------------------------------------------------
+
+/**
+ * A row in public.workload_insights_v1 — one scored location per model run.
+ *
+ * These are OUTPUTS of the v1 workload-density model over Toronto 311 public
+ * benchmark data. They are NOT Brampton operational complaint data, and never a
+ * final enforcement decision. Provenance (source_city/source_dataset/
+ * model_version/feature_window/scoring_period) and the advisory text travel with
+ * every row so the UI can label them honestly.
+ */
+export type WorkloadInsightRow = {
+  source_city: string
+  source_dataset: string
+  model: string
+  model_version: string
+  feature_set_version: string
+  feature_window: string
+  scoring_period: string
+  location_unit: string
+  location_id: string
+  workload_score: number
+  predicted_tier: string
+  prior_complaint_count: number | null
+  actual_volume: number | null
+  high_workload_area_true: boolean | null
+  top_factors: string[] | null
+  advisory: string
+  generated_at: string
+}
+
+const WORKLOAD_INSIGHTS_COLUMNS =
+  'source_city, source_dataset, model, model_version, feature_set_version, feature_window, scoring_period, location_unit, location_id, workload_score, predicted_tier, prior_complaint_count, actual_volume, high_workload_area_true, top_factors, advisory, generated_at'
+
+/**
+ * Reads the v1 workload insights from public.workload_insights_v1, highest
+ * workload score first. Any Supabase/RLS error is thrown so the caller can
+ * decide whether to fall back to the bundled static artifact.
+ */
+export async function getWorkloadInsightsV1(): Promise<WorkloadInsightRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKLOAD_INSIGHTS_TABLE)
+    .select(WORKLOAD_INSIGHTS_COLUMNS)
+    .order('workload_score', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as WorkloadInsightRow[]
 }
 
 export async function getWardWorkloadScenarios(): Promise<WardWorkloadScenario[]> {

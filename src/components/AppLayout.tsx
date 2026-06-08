@@ -36,6 +36,7 @@ export default function AppLayout() {
             <StaffLink to="/app/workflow">Workflow</StaffLink>
             <StaffLink to="/app/dashboard">Dashboard</StaffLink>
             <StaffLink to="/app/wards">Ward Context</StaffLink>
+            <StaffLink to="/app/insights">Workload Insights</StaffLink>
             {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
             <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
               Sign out
@@ -59,6 +60,7 @@ export default function AppLayout() {
               <StaffLink to="/app/workflow" onClick={() => setOpen(false)}>Workflow</StaffLink>
               <StaffLink to="/app/dashboard" onClick={() => setOpen(false)}>Dashboard</StaffLink>
               <StaffLink to="/app/wards" onClick={() => setOpen(false)}>Ward Context</StaffLink>
+              <StaffLink to="/app/insights" onClick={() => setOpen(false)}>Workload Insights</StaffLink>
               <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
             </div>
           </div>
