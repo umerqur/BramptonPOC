@@ -1,0 +1,27 @@
+column,inferred_type,missing_count,missing_pct,empty_string_count,n_distinct,example_values
+case_id,text/high-cardinality,0,0.0,0,190511,TOR311-F8DC675F05FB | TOR311-1B518FF4A834 | TOR311-9689DA8B691C
+source_city,categorical,0,0.0,0,1,Toronto
+source_dataset,categorical,0,0.0,0,1,Toronto 311 Customer Initiated Service R
+source_channel,categorical,0,0.0,0,1,Public 311 benchmark
+submitted_at,datetime,0,0.0,0,187334,2026-01-01 00:21:51.0000000 | 2026-01-01 00:24:48.0000000 | 2026-01-01 00:27:38.0000000
+status,categorical,0,0.0,0,6,Completed | Closed | In Progress
+resolution_status,categorical,0,0.0,0,6,Completed | Closed | In Progress
+workflow_stage,categorical,0,0.0,0,5,Closed | Assigned and under review | Intake and validation
+fsa_or_area,categorical,0,0.0,0,100,M4L | M1C | Intersection
+intersection_street_1,text/high-cardinality,145899,76.58,145899,4613,Leslie St | Lawrence Ave E | Frederick St
+intersection_street_2,text/high-cardinality,146177,76.73,146177,4236,Finch Ave E | Greencrest Crct | The Esplanade
+address_or_location,text/high-cardinality,0,0.0,0,10169,FSA M4L | FSA M1C | Leslie St & Finch Ave E
+ward_or_area,categorical,0,0.0,0,26,Beaches-East York (19) | Scarborough-Rouge Park (25) | Don Valley North (17)
+complaint_type,text/high-cardinality,3,0.0,3,532,Stray - Confined | Property Standards and Maintenance Viola | Clean up Debris on Road
+assigned_department,categorical,0,0.0,0,8,Municipal Licensing & Standards | Transportation Services | Toronto Water
+department_unit,categorical,0,0.0,0,24,Toronto Animal Services | Investigation Services | Road Operations
+priority,categorical,0,0.0,0,3,Low | Medium | High
+ai_category,categorical,0,0.0,0,6,Bylaw and enforcement | Roads and transportation | Water and drainage
+ai_priority,categorical,0,0.0,0,3,Low | Medium | High
+ai_summary,text/high-cardinality,0,0.0,0,533,Low priority bylaw and enforcement case  | Medium priority bylaw and enforcement ca | Low priority roads and transportation ca
+ai_recommended_action,categorical,0,0.0,0,6,"Review completed case record and use out | Validate details, check for similar case | Route to transportation review, check ne"
+human_decision,categorical,190511,100.0,190511,0,
+closed_at,datetime,190511,100.0,190511,0,
+latitude,float,190511,100.0,190511,0,
+longitude,float,190511,100.0,190511,0,
+description,text/high-cardinality,0,0.0,0,50752,Customer initiated 311 service request f | Customer initiated 311 service request f | Customer initiated 311 service request f

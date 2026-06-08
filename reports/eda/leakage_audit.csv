@@ -1,0 +1,13 @@
+column,leakage_type,evidence_metric,evidence_value,verdict,reason
+ai_category,derived from complaint_type,P(value = mode | complaint_type),1.0,LEAKAGE,Machine-generated from complaint_type; near-deterministic mapping.
+ai_priority,derived from complaint_type,P(value = mode | complaint_type),1.0,LEAKAGE,Machine-generated from complaint_type; near-deterministic mapping.
+ai_summary,derived from complaint_type,P(value = mode | complaint_type),1.0,LEAKAGE,Machine-generated from complaint_type; near-deterministic mapping.
+ai_recommended_action,derived from complaint_type,P(value = mode | complaint_type),0.8198,REVIEW,Mostly determined by complaint_type; treat as derived.
+priority,derived from complaint_type,P(value = mode | complaint_type),1.0,LEAKAGE,Machine-generated from complaint_type; near-deterministic mapping.
+status,post-outcome / resolution state,domain reasoning,,LEAKAGE,Known only after the case progresses/closes; leaks resolution outcome.
+resolution_status,post-outcome / resolution state,domain reasoning,,LEAKAGE,Known only after the case progresses/closes; leaks resolution outcome.
+workflow_stage,post-outcome / resolution state,domain reasoning,,LEAKAGE,Known only after the case progresses/closes; leaks resolution outcome.
+closed_at,post-outcome / resolution state,domain reasoning,,LEAKAGE,Known only after the case progresses/closes; leaks resolution outcome.
+human_decision,post-outcome / resolution state,domain reasoning,,LEAKAGE,Known only after the case progresses/closes; leaks resolution outcome.
+case_id,identifier / templated free text,domain reasoning,,EXCLUDE,Row id or templated text that restates the label phrases.
+description,identifier / templated free text,domain reasoning,,EXCLUDE,Row id or templated text that restates the label phrases.

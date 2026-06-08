@@ -1,0 +1,87 @@
+feature,perm_importance,perm_std
+complaint_diversity,0.14409465665853266,0.041425865499029414
+prior_complaint_count,0.046352521746179966,0.015528333066004608
+dominant_type_share,0.0,0.0
+type__Boulevard Plow Damage,0.0,0.0
+type__Catch Basin - Blocked / Flooding,0.0,0.0
+type__Clean up Illegal Dumping on City Road Allowance,0.0,0.0
+type__Driveway Blocked By Plowed Snowbank,0.0,0.0
+type__Icy Sidewalk Needs Salting,0.0,0.0
+type__Illegal Snow Dumping & Failure to Clear Snow or Ice on Public Sidewalk,0.0,0.0
+type__Injured - Wildlife,0.0,0.0
+type__Outcome of Service - Complaint - Road Operations,0.0,0.0
+type__Pick up Dead Wildlife,0.0,0.0
+type__Property Standards and Maintenance Violations,0.0,0.0
+type__Res / Garbage / Not Picked Up,0.0,0.0
+type__Res / Organic Green Bin / Not Picked Up,0.0,0.0
+type__Residential Bin Body or Handle Damaged,0.0,0.0
+type__Residential Bin Lid Damaged,0.0,0.0
+type__Road Plowing Request,0.0,0.0
+type__Road Pothole / Road Damage,0.0,0.0
+type__Sewer Service Line-Blocked,0.0,0.0
+type__Sidewalk Snow Clearing Required,0.0,0.0
+type__Snow Removal - Sightline Problem,0.0,0.0
+type__Traffic Signal Repair,0.0,0.0
+type__other,0.0,0.0
+dept__311,0.0,0.0
+"dept__Environment, Climate & Forestry",0.0,0.0
+dept__Municipal Licensing & Standards,0.0,0.0
+dept__Parks and Recreation,0.0,0.0
+dept__Solid Waste Management Services,0.0,0.0
+"dept__Solid Waste Management Services,Transfer",0.0,0.0
+dept__Toronto Water,0.0,0.0
+dept__Transportation Services,0.0,0.0
+unit__Business Licensing Enforcement,0.0,0.0
+unit__Business Operations Management,0.0,0.0
+unit__Bylaw Enforcement,0.0,0.0
+unit__Collections,0.0,0.0
+unit__Collections and Litter Operations,0.0,0.0
+unit__Disposal & Operations,0.0,0.0
+unit__District Ops,0.0,0.0
+unit__Forestry Operations,0.0,0.0
+unit__Forestry and Natural Environment Management,0.0,0.0
+unit__Investigation Services,0.0,0.0
+unit__Licensing Team,0.0,0.0
+unit__Litter Operations,0.0,0.0
+unit__Operations,0.0,0.0
+unit__Parks,0.0,0.0
+unit__Parks Enforcement,0.0,0.0
+unit__Right of Way (ROW),0.0,0.0
+unit__Road Operations,0.0,0.0
+unit__TMC,0.0,0.0
+unit__Toronto Animal Services,0.0,0.0
+unit__Traffic Management,0.0,0.0
+unit__Traffic Ops,0.0,0.0
+unit__Traffic Safety,0.0,0.0
+unit__Tree Protection and Plan Review,0.0,0.0
+unit__Waste Enforcement,0.0,0.0
+hour__night,0.0,0.0
+hour__morning,0.0,0.0
+hour__afternoon,0.0,0.0
+hour__evening,0.0,0.0
+weekend_share,0.0,0.0
+ward_Beaches-East York (19),0.0,0.0
+ward_Davenport (09),0.0,0.0
+ward_Don Valley East (16),0.0,0.0
+ward_Don Valley North (17),0.0,0.0
+ward_Don Valley West (15),0.0,0.0
+ward_Eglinton-Lawrence (08),0.0,0.0
+ward_Etobicoke Centre (02),0.0,0.0
+ward_Etobicoke North (01),0.0,0.0
+ward_Etobicoke-Lakeshore (03),0.0,0.0
+ward_Humber River-Black Creek (07),0.0,0.0
+ward_Parkdale-High Park (04),0.0,0.0
+ward_Scarborough Centre (21),0.0,0.0
+ward_Scarborough North (23),0.0,0.0
+ward_Scarborough Southwest (20),0.0,0.0
+ward_Scarborough-Agincourt (22),0.0,0.0
+ward_Scarborough-Guildwood (24),0.0,0.0
+ward_Scarborough-Rouge Park (25),0.0,0.0
+ward_Spadina-Fort York (10),0.0,0.0
+ward_Toronto Centre (13),0.0,0.0
+ward_Toronto-Danforth (14),0.0,0.0
+ward_Toronto-St. Paul's (12),0.0,0.0
+ward_University-Rosedale (11),0.0,0.0
+ward_Willowdale (18),0.0,0.0
+ward_York Centre (06),0.0,0.0
+ward_York South-Weston (05),0.0,0.0
