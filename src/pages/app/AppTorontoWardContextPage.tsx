@@ -255,11 +255,7 @@ function TorontoWardWorkloadContext({
                         {shape.label} — Toronto 311 benchmark workload (not operational data, not a risk prediction)
                         {w
                           ? `\nWorkload intensity: ${workloadTier(norm(w.complaint_volume))}` +
-                            `\nComplaint volume: ${num(w.complaint_volume)}` +
-                            `\nOpen cases: ${num(w.open_cases)}` +
-                            `\nIn progress: ${num(w.in_progress_cases)}` +
-                            `\nClosed: ${num(w.closed_cases)}` +
-                            (w.top_category ? `\nTop category: ${w.top_category}` : '')
+                            `\nComplaint volume: ${num(w.complaint_volume)}`
                           : '\nNo Toronto 311 workload data'}
                       </title>
                     </path>
@@ -388,34 +384,10 @@ function SelectedWardPanel({
       <div className="mt-3 text-2xl font-semibold text-navy-900 tabular-nums">{num(workload.complaint_volume)}</div>
       <div className="text-[10px] uppercase tracking-wider text-ink-subtle">Toronto 311 complaint volume</div>
 
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <Metric label="Open cases" value={num(workload.open_cases)} />
-        <Metric label="In progress" value={num(workload.in_progress_cases)} />
-        <Metric label="Closed" value={num(workload.closed_cases)} />
-      </dl>
-
-      {workload.top_category && (
-        <div className="mt-3 border-t border-slate-100 pt-3 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-ink-subtle">Top category</span>
-            <span className="font-medium text-navy-900">{workload.top_category}</span>
-          </div>
-        </div>
-      )}
-
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
         Real Toronto 311 benchmark complaint volume — decision support only, not a risk prediction and not Brampton
         operational complaint data.
       </p>
-    </div>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-[10px] uppercase tracking-wider text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-lg font-semibold text-navy-900 tabular-nums">{value}</dd>
     </div>
   )
 }

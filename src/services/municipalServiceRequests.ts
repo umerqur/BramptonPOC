@@ -161,18 +161,16 @@ export type TorontoWardBoundary = {
 /**
  * A row in public.v_toronto_ward_workload — REAL Toronto 311 benchmark complaint
  * volume aggregated per Toronto ward from public.municipal_complaints. Joined to
- * TorontoWardBoundary by ward_number ↔ area_short_code. This is Toronto 311
- * benchmark data — decision support only, not Brampton operational complaint
- * data, and never a final enforcement decision.
+ * TorontoWardBoundary by ward_number ↔ area_short_code. The live view exposes the
+ * ward number, label (area_desc, aliased to ward_or_area) and complaint_volume
+ * only; it does not provide per-status case counts. This is Toronto 311 benchmark
+ * data — decision support only, not Brampton operational complaint data, and never
+ * a final enforcement decision.
  */
 export type TorontoWardWorkload = {
-  ward_or_area: string
   ward_number: number
+  ward_or_area: string
   complaint_volume: number
-  open_cases: number
-  in_progress_cases: number
-  closed_cases: number
-  top_category: string | null
 }
 
 export type WorkflowEvent = {
@@ -388,42 +386,83 @@ export async function getBramptonWardBoundaries(): Promise<WardBoundary[]> {
   return (data ?? []) as WardBoundary[]
 }
 
-// Explicit column list for the Toronto City Wards base layer.
+// Real column list for the Toronto City Wards base layer, exactly as created by
+// migration 007 (no ward_name / ward_desc columns exist in the DB). We select the
+// real columns and map them to the TorontoWardBoundary view-model in TypeScript
+// below, so no Supabase query ever references ward_name / ward_desc.
 const TORONTO_WARD_COLUMNS =
-  'id, area_short_code, ward_name, ward_desc, source_city, source_dataset, geojson_geometry'
+  'id, ward_number, area_name, area_desc, area_short_code, source_city, source_dataset, geojson_geometry'
+
+// Raw shape of a public.toronto_ward_boundaries row (real DB columns).
+type TorontoWardBoundaryRow = {
+  id: number
+  ward_number: number
+  area_name: string | null
+  area_desc: string | null
+  area_short_code: string | null
+  source_city: string | null
+  source_dataset: string | null
+  geojson_geometry: unknown
+}
+
+// Raw shape of a public.v_toronto_ward_workload row (real view columns).
+type TorontoWardWorkloadRow = {
+  ward_number: number
+  area_name: string | null
+  area_desc: string | null
+  area_short_code: string | null
+  complaint_volume: number
+}
 
 /**
  * Reads the 25 City of Toronto ward polygons from public.toronto_ward_boundaries,
  * ordered by ward number. Real Toronto City Wards geometry — the geographic base
- * layer of the Toronto ward workload context map. Any Supabase/RLS error is
- * thrown so the caller can surface it.
+ * layer of the Toronto ward workload context map. The real DB columns are mapped
+ * into the TorontoWardBoundary view-model here (area_name -> ward_name,
+ * area_desc -> ward_desc, ward_number -> the numeric join code area_short_code).
+ * Any Supabase/RLS error is thrown so the caller can surface it.
  */
 export async function getTorontoWardBoundaries(): Promise<TorontoWardBoundary[]> {
   const client = requireClient()
   const { data, error } = await client
     .from(TORONTO_WARDS_TABLE)
     .select(TORONTO_WARD_COLUMNS)
-    .order('area_short_code', { ascending: true })
+    .order('ward_number', { ascending: true })
 
   if (error) throw error
-  return (data ?? []) as TorontoWardBoundary[]
+  return ((data ?? []) as TorontoWardBoundaryRow[]).map((r) => ({
+    id: r.id,
+    area_short_code: r.ward_number,
+    ward_name: r.area_name ?? '',
+    ward_desc: r.area_desc ?? '',
+    source_city: r.source_city,
+    source_dataset: r.source_dataset,
+    geojson_geometry: r.geojson_geometry,
+  }))
 }
 
 /**
  * Reads the real Toronto 311 benchmark per-ward complaint workload from
  * public.v_toronto_ward_workload (aggregated over municipal_complaints), highest
- * volume first. This is decision-support benchmark data — never Brampton
- * operational complaint data.
+ * volume first. The live view exposes ward_number, area_name, area_desc,
+ * area_short_code and complaint_volume (joined by ward_number); it does not carry
+ * per-status case counts. area_desc is mapped to the ward_or_area label in
+ * TypeScript. This is decision-support benchmark data — never Brampton operational
+ * complaint data.
  */
 export async function getTorontoWardWorkload(): Promise<TorontoWardWorkload[]> {
   const client = requireClient()
   const { data, error } = await client
     .from('v_toronto_ward_workload')
-    .select('ward_or_area, ward_number, complaint_volume, open_cases, in_progress_cases, closed_cases, top_category')
+    .select('ward_number, area_name, area_desc, area_short_code, complaint_volume')
     .order('complaint_volume', { ascending: false })
 
   if (error) throw error
-  return (data ?? []) as TorontoWardWorkload[]
+  return ((data ?? []) as TorontoWardWorkloadRow[]).map((r) => ({
+    ward_number: r.ward_number,
+    ward_or_area: r.area_desc ?? r.area_name ?? `Ward ${r.ward_number}`,
+    complaint_volume: r.complaint_volume,
+  }))
 }
 
 // ---------------------------------------------------------------------------
