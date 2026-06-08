@@ -14,6 +14,7 @@ import AppWorkflowPage from './pages/app/AppWorkflowPage'
 import AppTorontoWardContextPage from './pages/app/AppTorontoWardContextPage'
 import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
 import AppV2MlResultsPage from './pages/app/AppV2MlResultsPage'
+import AppClosureReviewPage from './pages/app/AppClosureReviewPage'
 
 export default function App() {
   return (
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="wards" element={<AppTorontoWardContextPage />} />
         <Route path="insights" element={<AppWorkloadInsightsPage />} />
         <Route path="v2-ml" element={<AppV2MlResultsPage />} />
+        <Route path="closure-review" element={<AppClosureReviewPage />} />
         <Route path="cases" element={<AppCaseQueuePage />} />
         <Route path="cases/:id" element={<AppCaseDetailPage />} />
       </Route>
