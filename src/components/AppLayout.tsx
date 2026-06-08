@@ -4,8 +4,8 @@ import Logo from './Logo'
 import Footer from './Footer'
 import { useAuth } from '../lib/auth'
 
-// Authenticated app shell. Shows the staff header (Workflow, Dashboard, Ward
-// Context, Sign out) instead of the public marketing nav. Cases is intentionally
+// Authenticated app shell. Shows the staff header (Workflow, Dashboard, Toronto
+// Ward Context, Sign out) instead of the public marketing nav. Cases is intentionally
 // not a top-level tab — the staff work queue lives inside the Workflow console,
 // and individual cases open via /app/cases/:id deep links.
 export default function AppLayout() {
@@ -35,7 +35,7 @@ export default function AppLayout() {
           <nav className="hidden lg:flex items-center gap-2">
             <StaffLink to="/app/workflow">Workflow</StaffLink>
             <StaffLink to="/app/dashboard">Dashboard</StaffLink>
-            <StaffLink to="/app/wards">Ward Context</StaffLink>
+            <StaffLink to="/app/wards">Toronto Ward Context</StaffLink>
             <StaffLink to="/app/insights">Workload Insights</StaffLink>
             {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
             <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
@@ -59,7 +59,7 @@ export default function AppLayout() {
             <div className="container-page py-3 flex flex-col gap-1">
               <StaffLink to="/app/workflow" onClick={() => setOpen(false)}>Workflow</StaffLink>
               <StaffLink to="/app/dashboard" onClick={() => setOpen(false)}>Dashboard</StaffLink>
-              <StaffLink to="/app/wards" onClick={() => setOpen(false)}>Ward Context</StaffLink>
+              <StaffLink to="/app/wards" onClick={() => setOpen(false)}>Toronto Ward Context</StaffLink>
               <StaffLink to="/app/insights" onClick={() => setOpen(false)}>Workload Insights</StaffLink>
               <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
             </div>
