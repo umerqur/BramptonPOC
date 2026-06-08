@@ -1,0 +1,436 @@
+{
+  "311": [
+    {
+      "feature": "complaint_type_Publication Request - Solid Waste",
+      "coef": 5.822477180667416
+    },
+    {
+      "feature": "complaint_type_Lead Water Testing Kit Registration",
+      "coef": 4.262319979348002
+    },
+    {
+      "feature": "complaint_type_Accessibility / Disability - Complaint - 311 Toronto",
+      "coef": 2.611494837613727
+    },
+    {
+      "feature": "complaint_type_Staff Service - Complaint - 311 Toronto",
+      "coef": 2.459265849020406
+    },
+    {
+      "feature": "311 toronto",
+      "coef": 2.1876815924850144
+    },
+    {
+      "feature": "toronto near",
+      "coef": 2.1876815924850144
+    },
+    {
+      "feature": "complaint_type_Staff Service - Compliment - 311 Toronto",
+      "coef": 2.18228153705174
+    },
+    {
+      "feature": "complaint_type_Comment - 311 Toronto",
+      "coef": 1.8975561350749057
+    },
+    {
+      "feature": "publication",
+      "coef": 1.6131260191666381
+    },
+    {
+      "feature": "for publication",
+      "coef": 1.6131260191666381
+    },
+    {
+      "feature": "request solid",
+      "coef": 1.6131260191666381
+    },
+    {
+      "feature": "publication request",
+      "coef": 1.6131260191666381
+    },
+    {
+      "feature": "waste near",
+      "coef": 1.5822621186695218
+    },
+    {
+      "feature": "john st",
+      "coef": 1.5752464953644627
+    },
+    {
+      "feature": "st john",
+      "coef": 1.541180558875061
+    }
+  ],
+  "Environment, Climate & Forestry": [
+    {
+      "feature": "tree",
+      "coef": 5.225469712929827
+    },
+    {
+      "feature": "complaint_type_General Pruning",
+      "coef": 4.201944811745114
+    },
+    {
+      "feature": "complaint_type_Tree Emergency Clean-Up",
+      "coef": 3.600708768985156
+    },
+    {
+      "feature": "complaint_type_Dangerous Private Tree Investigation",
+      "coef": 3.1274331444698764
+    },
+    {
+      "feature": "complaint_type_Residential or Park Tree Removal",
+      "coef": 2.9773052931664985
+    },
+    {
+      "feature": "complaint_type_New Tree Planting",
+      "coef": 2.9179840220586533
+    },
+    {
+      "feature": "complaint_type_General Tree Maintenance",
+      "coef": 2.9147382750450994
+    },
+    {
+      "feature": "complaint_type_Stump Removal",
+      "coef": 2.847145842276888
+    },
+    {
+      "feature": "complaint_type_Integrated Pest Management Inspection",
+      "coef": 2.8371688846343583
+    },
+    {
+      "feature": "complaint_type_Unauthorized Tree Injury or Removal",
+      "coef": 2.806725437875765
+    },
+    {
+      "feature": "complaint_type_Pit Cover/Paver Maintenance",
+      "coef": 2.794685799575242
+    },
+    {
+      "feature": "complaint_type_Tree Brush Pick-up",
+      "coef": 2.503266541133713
+    },
+    {
+      "feature": "complaint_type_TPPR Request for Letter of Clearance",
+      "coef": 2.479356461055957
+    },
+    {
+      "feature": "removal near",
+      "coef": 2.269258960862582
+    },
+    {
+      "feature": "commercial tree",
+      "coef": 1.9960429728513354
+    }
+  ],
+  "Municipal Licensing & Standards": [
+    {
+      "feature": "complaint_type_Injured - Wildlife",
+      "coef": 4.371041690478706
+    },
+    {
+      "feature": "complaint_type_Property Standards and Maintenance Violations",
+      "coef": 4.2817893743605016
+    },
+    {
+      "feature": "complaint_type_Signs",
+      "coef": 3.5855654352816484
+    },
+    {
+      "feature": "complaint_type_Adequate Heat",
+      "coef": 3.417522059722865
+    },
+    {
+      "feature": "for investigate",
+      "coef": 3.3732033543668583
+    },
+    {
+      "feature": "investigate",
+      "coef": 3.3732033543668583
+    },
+    {
+      "feature": "complaint_type_Injured - Domestic",
+      "coef": 3.3593657073265453
+    },
+    {
+      "feature": "complaint_type_Pick up Dead Wildlife",
+      "coef": 3.3330521503302206
+    },
+    {
+      "feature": "noise",
+      "coef": 3.029280380094983
+    },
+    {
+      "feature": "noise near",
+      "coef": 3.029280380094983
+    },
+    {
+      "feature": "complaint_type_Zoning Regulations Violations",
+      "coef": 3.02920536239374
+    },
+    {
+      "feature": "complaint_type_Business Complaint",
+      "coef": 2.9308179482452696
+    },
+    {
+      "feature": "complaint_type_Waste Set Out - Wrong Location / Time/ Day",
+      "coef": 2.928793489643947
+    },
+    {
+      "feature": "animal",
+      "coef": 2.8300889396298743
+    },
+    {
+      "feature": "complaint_type_Postering City Property / Structures",
+      "coef": 2.74177344526015
+    }
+  ],
+  "Parks and Recreation": [
+    {
+      "feature": "for park",
+      "coef": 5.831559192149311
+    },
+    {
+      "feature": "park",
+      "coef": 3.406169233638804
+    },
+    {
+      "feature": "complaint_type_River and Ravine Dumping",
+      "coef": 3.30499290593755
+    },
+    {
+      "feature": "complaint_type_Park Litter and Garbage",
+      "coef": 2.906460789078104
+    },
+    {
+      "feature": "complaint_type_Park Property Snow and Ice Clearing",
+      "coef": 2.808692948535791
+    },
+    {
+      "feature": "maintenance near",
+      "coef": 2.703867154253133
+    },
+    {
+      "feature": "complaint_type_Park Graffiti Removal",
+      "coef": 2.5347283506894214
+    },
+    {
+      "feature": "complaint_type_Park Lighting Maintenance",
+      "coef": 2.324078394446814
+    },
+    {
+      "feature": "complaint_type_Park Pathways and Trails Maintenance",
+      "coef": 2.28071948279661
+    },
+    {
+      "feature": "complaint_type_Suggestions about Signs in Parks",
+      "coef": 2.198211932288171
+    },
+    {
+      "feature": "complaint_type_Park General Maintenance",
+      "coef": 2.1876311725413764
+    },
+    {
+      "feature": "complaint_type_Park Dog Off-leash Area Repair Request",
+      "coef": 2.1102004172283353
+    },
+    {
+      "feature": "complaint_type_Grass and Sports Field Maintenance in Parks",
+      "coef": 2.0536889412158867
+    },
+    {
+      "feature": "maintenance",
+      "coef": 1.9164903957647776
+    },
+    {
+      "feature": "complaint_type_Park Playground Repairs",
+      "coef": 1.8747671770080805
+    }
+  ],
+  "Solid Waste Management Services": [
+    {
+      "feature": "complaint_type_Hazardous Waste Pick-up",
+      "coef": 6.695669272957676
+    },
+    {
+      "feature": "bin",
+      "coef": 6.499008058641741
+    },
+    {
+      "feature": "residential",
+      "coef": 5.123637795575102
+    },
+    {
+      "feature": "for residential",
+      "coef": 4.344721650868897
+    },
+    {
+      "feature": "up",
+      "coef": 4.327532869593455
+    },
+    {
+      "feature": "complaint_type_Residential Bin Lid Damaged",
+      "coef": 4.079347848538418
+    },
+    {
+      "feature": "up near",
+      "coef": 3.650853363957695
+    },
+    {
+      "feature": "garbage",
+      "coef": 3.5137809081445597
+    },
+    {
+      "feature": "complaint_type_Clean up Illegal Dumping on City Road Allowance",
+      "coef": 3.5082822342142634
+    },
+    {
+      "feature": "waste",
+      "coef": 3.4548878371306384
+    },
+    {
+      "feature": "complaint_type_Bin Investigation Request",
+      "coef": 3.299444882990488
+    },
+    {
+      "feature": "complaint_type_Clean up Litter on Sidewalks and Boulevards",
+      "coef": 3.189978363212696
+    },
+    {
+      "feature": "picked",
+      "coef": 3.014115461049433
+    },
+    {
+      "feature": "not picked",
+      "coef": 3.014115461049433
+    },
+    {
+      "feature": "not",
+      "coef": 3.014115461049433
+    }
+  ],
+  "Toronto Water": [
+    {
+      "feature": "complaint_type_Pollution Spill & Illegal Dumping Response",
+      "coef": 6.798016924843483
+    },
+    {
+      "feature": "complaint_type_Watermain-Possible Break",
+      "coef": 6.767941954243537
+    },
+    {
+      "feature": "water",
+      "coef": 6.459788463847586
+    },
+    {
+      "feature": "complaint_type_Sewer Service Line-Blocked",
+      "coef": 4.302192002289542
+    },
+    {
+      "feature": "water service",
+      "coef": 3.5305784563971607
+    },
+    {
+      "feature": "complaint_type_Sink Hole",
+      "coef": 3.4954762664445442
+    },
+    {
+      "feature": "toronto water",
+      "coef": 3.441884335270817
+    },
+    {
+      "feature": "complaint_type_Restoration Related",
+      "coef": 3.3816723362329975
+    },
+    {
+      "feature": "complaint_type_Hydrant-Damage",
+      "coef": 3.2612458604299297
+    },
+    {
+      "feature": "complaint_type_Maintenance Hole-Damage",
+      "coef": 3.238148380000494
+    },
+    {
+      "feature": "complaint_type_Catch basin (Storm)-Overflowing",
+      "coef": 3.1909086877255732
+    },
+    {
+      "feature": "water near",
+      "coef": 3.000720309581449
+    },
+    {
+      "feature": "for water",
+      "coef": 2.959571420468663
+    },
+    {
+      "feature": "service line",
+      "coef": 2.82636198682986
+    },
+    {
+      "feature": "hole",
+      "coef": 2.7553376504002554
+    }
+  ],
+  "Transportation Services": [
+    {
+      "feature": "complaint_type_Road Plowing Request",
+      "coef": 6.282356879344568
+    },
+    {
+      "feature": "complaint_type_Sidewalk Snow Clearing Required",
+      "coef": 6.273245985951296
+    },
+    {
+      "feature": "complaint_type_Road Pothole / Road Damage",
+      "coef": 5.145208675668046
+    },
+    {
+      "feature": "road",
+      "coef": 4.466279083990229
+    },
+    {
+      "feature": "complaint_type_Report an Encroachment on City Property",
+      "coef": 3.312471411625493
+    },
+    {
+      "feature": "complaint_type_Contractor Complaint",
+      "coef": 3.257246946402033
+    },
+    {
+      "feature": "complaint_type_Driveway Blocked By Plowed Snowbank",
+      "coef": 3.1825750871578746
+    },
+    {
+      "feature": "damaged",
+      "coef": 2.807685695056338
+    },
+    {
+      "feature": "complaint_type_Clean up Debris on Road",
+      "coef": 2.7522931169745624
+    },
+    {
+      "feature": "for road",
+      "coef": 2.7522055711638433
+    },
+    {
+      "feature": "complaint_type_Snow Removal - Sightline Problem",
+      "coef": 2.7195964908749777
+    },
+    {
+      "feature": "sidewalk",
+      "coef": 2.7075753539212495
+    },
+    {
+      "feature": "complaint_type_Boulevard Plow Damage",
+      "coef": 2.6734765197285486
+    },
+    {
+      "feature": "snow",
+      "coef": 2.656201245332944
+    },
+    {
+      "feature": "complaint_type_Catch Basin - Blocked / Flooding",
+      "coef": 2.6481482293870497
+    }
+  ]
+}

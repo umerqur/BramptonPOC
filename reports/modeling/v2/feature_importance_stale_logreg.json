@@ -1,0 +1,166 @@
+{
+  "toward_open": [
+    {
+      "feature": "complaint_type_Street Furniture Request",
+      "coef": 7.4710809885685805
+    },
+    {
+      "feature": "complaint_type_Business Complaint",
+      "coef": 5.774172737854407
+    },
+    {
+      "feature": "complaint_type_Taxi|| Limo Complaint",
+      "coef": 4.302050036456471
+    },
+    {
+      "feature": "complaint_type_Dog Off-Leash on School Property",
+      "coef": 4.2728798819245375
+    },
+    {
+      "feature": "complaint_type_Public Spaces Complaint",
+      "coef": 4.1391450937329335
+    },
+    {
+      "feature": "complaint_type_Vehicle Traffic Signal Issue",
+      "coef": 2.7834218618222337
+    },
+    {
+      "feature": "complaint_type_Laneway Needs Salting",
+      "coef": 2.6328706885383286
+    },
+    {
+      "feature": "complaint_type_Park Garbage Bin Overflowing",
+      "coef": 2.5377189306696644
+    },
+    {
+      "feature": "complaint_type_Traffic Calming Measures",
+      "coef": 2.3912993970968084
+    },
+    {
+      "feature": "ave bathurst",
+      "coef": 2.218594993531667
+    },
+    {
+      "feature": "complaint near",
+      "coef": 2.1957633459676607
+    },
+    {
+      "feature": "complaint",
+      "coef": 2.147046218255059
+    },
+    {
+      "feature": "complaint_type_Service/Staff - Complaint - Toronto Animal Services",
+      "coef": 2.096434122173592
+    },
+    {
+      "feature": "business complaint",
+      "coef": 2.090855313106482
+    },
+    {
+      "feature": "for business",
+      "coef": 2.090855313106482
+    },
+    {
+      "feature": "business",
+      "coef": 2.0705763391205148
+    },
+    {
+      "feature": "complaint_type_New Pedestrian Crossover",
+      "coef": 1.9978224352918104
+    },
+    {
+      "feature": "complaint_type_Traffic Signal Information Requests",
+      "coef": 1.997079061067125
+    },
+    {
+      "feature": "complaint_type_Accessibility / Disability - Complaint - 311 Toronto",
+      "coef": 1.9621095094374883
+    },
+    {
+      "feature": "complaint_type_Property Standards and Maintenance Violations",
+      "coef": 1.9359425493901328
+    }
+  ],
+  "toward_resolved": [
+    {
+      "feature": "complaint_type_Pick up Dead Wildlife",
+      "coef": -4.079320259117575
+    },
+    {
+      "feature": "complaint_type_Toronto Water Service Card Request",
+      "coef": -3.836553664273288
+    },
+    {
+      "feature": "complaint_type_Publication Request - Solid Waste",
+      "coef": -3.565463447648565
+    },
+    {
+      "feature": "assigned_department_Solid Waste Management Services",
+      "coef": -2.8280601092007047
+    },
+    {
+      "feature": "complaint_type_Road Salting Request",
+      "coef": -2.790377704003079
+    },
+    {
+      "feature": "complaint_type_Complaint - Crossing Guard Conduct",
+      "coef": -2.653060497722085
+    },
+    {
+      "feature": "complaint_type_Stray - Confined",
+      "coef": -2.6228779092880923
+    },
+    {
+      "feature": "complaint_type_Traffic Signal Equipment - Graffiti Complaint",
+      "coef": -2.6027117563860593
+    },
+    {
+      "feature": "complaint_type_Lead Water Pipes Record Search",
+      "coef": -2.577809463582369
+    },
+    {
+      "feature": "complaint_type_Dog Off-Leash",
+      "coef": -2.5553516664394844
+    },
+    {
+      "feature": "complaint_type_Icy Sidewalk Needs Salting",
+      "coef": -2.451136548978417
+    },
+    {
+      "feature": "complaint_type_Icy Bridge Needs Salting",
+      "coef": -2.4313425339502333
+    },
+    {
+      "feature": "complaint_type_Animal Noise",
+      "coef": -2.36308325719477
+    },
+    {
+      "feature": "complaint_type_Pedestrian Crossover (PXO) Maintenance",
+      "coef": -2.3318081766330097
+    },
+    {
+      "feature": "complaint_type_Postering City Property / Structures",
+      "coef": -2.269869965670489
+    },
+    {
+      "feature": "complaint_type_Stray - At Large",
+      "coef": -2.241387308322844
+    },
+    {
+      "feature": "complaint_type_Dog Off-Leash in a City Park",
+      "coef": -2.22330868528886
+    },
+    {
+      "feature": "complaint_type_Injured - Wildlife",
+      "coef": -2.1757861406392394
+    },
+    {
+      "feature": "complaint_type_Moving Motor Vehicle Noise",
+      "coef": -2.1234951249982243
+    },
+    {
+      "feature": "investigate",
+      "coef": -2.0430168901985173
+    }
+  ]
+}
