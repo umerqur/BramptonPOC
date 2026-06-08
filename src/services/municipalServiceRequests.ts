@@ -600,6 +600,7 @@ export async function getWorkloadInsightsV1(): Promise<WorkloadInsightRow[]> {
 export type WorkflowMlPrediction = {
   source_record_id: string | null
   complaint_type: string | null
+  description: string | null
   ward_or_area: string | null
   status: string | null
   assigned_department: string | null
@@ -613,7 +614,7 @@ export type WorkflowMlPrediction = {
 }
 
 const WORKFLOW_ML_PREDICTION_COLUMNS =
-  'source_record_id, complaint_type, ward_or_area, status, assigned_department, predicted_department, routing_confidence, needs_attention_score, attention_tier, attention_rank, model_version, advisory'
+  'source_record_id, complaint_type, description, ward_or_area, status, assigned_department, predicted_department, routing_confidence, needs_attention_score, attention_tier, attention_rank, model_version, advisory'
 
 /**
  * Reads V2 workflow ML predictions from public.workflow_ml_predictions, highest
@@ -623,6 +624,27 @@ const WORKFLOW_ML_PREDICTION_COLUMNS =
  * complaint data and never an automated decision.
  */
 export async function getWorkflowMlPredictionsV2(limit = 50): Promise<WorkflowMlPrediction[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKFLOW_ML_PREDICTIONS_TABLE)
+    .select(WORKFLOW_ML_PREDICTION_COLUMNS)
+    .eq('prediction_type', 'needs_attention')
+    .order('needs_attention_score', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data ?? []) as WorkflowMlPrediction[]
+}
+
+/**
+ * Reads the V2 Needs Attention predictions for the Closure Review Workflow,
+ * highest `needs_attention_score` first, so the case queue surfaces the files
+ * staff should review first. Same table and `needs_attention` slice as
+ * getWorkflowMlPredictionsV2 — the closure/review workflow layers deterministic,
+ * client-side rules on top of these rows (no Supabase writes). Decision support
+ * only — never Brampton operational data and never an automated decision.
+ */
+export async function getClosureReviewCases(limit = 60): Promise<WorkflowMlPrediction[]> {
   const client = requireClient()
   const { data, error } = await client
     .from(WORKFLOW_ML_PREDICTIONS_TABLE)

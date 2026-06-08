@@ -53,8 +53,10 @@ export default function AppV2MlResultsPage() {
         V2 Workflow ML Results
       </h1>
       <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-        Benchmark results for two workflow ML baselines trained on Toronto 311 data. The Needs Attention ranking is read
-        live from Supabase; routing is shown for research context only and is not wired into operational case handling.
+        The hero result is the <span className="font-medium text-navy-900">Needs Attention</span> queue ranking, read
+        live from Supabase — a workload-intelligence signal that helps staff decide which open complaint files to review
+        first. The department field is treated as source system context where available. The ML value shown here is queue
+        attention ranking and workload intelligence, not automated routing.
       </p>
 
       <div role="note" className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -62,37 +64,12 @@ export default function AppV2MlResultsPage() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        {/* Card 1 — Routing classifier */}
-        <section className="card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-navy-900">Routing classifier</h2>
-            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-ink-muted">
-              Research only — not wired
-            </span>
-          </div>
-          <p className="mt-2 text-xs text-ink-muted">
-            Suggests which department should handle a complaint. Trained two ways to test how much it relied on the
-            existing <code>complaint_type</code> label.
-          </p>
-          <dl className="mt-4 grid grid-cols-2 gap-3">
-            <MiniStat label="With complaint_type" value={ROUTING_WITH_TYPE_MACRO_F1.toFixed(3)} hint="macro F1" />
-            <MiniStat label="Without complaint_type" value={ROUTING_NO_TYPE_MACRO_F1.toFixed(3)} hint="macro F1" />
-          </dl>
-          <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
-            With <code>complaint_type</code> the model performed almost perfectly; without it, performance dropped
-            sharply — so it mostly learned a <code>complaint_type</code> → department lookup rather than independent
-            signal. It would add little beyond information a case already carries, so it is{' '}
-            <span className="font-medium">not wired into the case queue</span>. Its real value appears later on free-text
-            intake where the type is not pre-assigned.
-          </p>
-        </section>
-
-        {/* Card 2 — Needs Attention */}
+        {/* Card 1 — Needs Attention (hero) */}
         <section className="card p-5">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-navy-900">Needs Attention model</h2>
             <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
-              Better candidate
+              Primary POC signal
             </span>
           </div>
           <p className="mt-2 text-xs text-ink-muted">
@@ -109,6 +86,31 @@ export default function AppV2MlResultsPage() {
             <span className="font-medium">{pct(STALE_BASE_RATE)} base rate</span> — roughly{' '}
             <span className="font-medium">{STALE_LIFT}× lift</span>. Use it as a{' '}
             <span className="font-medium">relative queue ranking (Higher / Medium / Lower), not a probability</span>.
+          </p>
+        </section>
+
+        {/* Card 2 — Routing benchmark output (secondary, not the POC claim) */}
+        <section className="card p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-navy-900">Routing benchmark output</h2>
+            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-ink-muted">
+              Secondary — research only, not wired
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-ink-muted">
+            Secondary benchmark context only. The source data already carries Division/Section and{' '}
+            <code>assigned_department</code>, so routing is not the POC value — this classifier was trained two ways
+            mainly to test how much it leaned on the existing <code>complaint_type</code> label.
+          </p>
+          <dl className="mt-4 grid grid-cols-2 gap-3">
+            <MiniStat label="With complaint_type" value={ROUTING_WITH_TYPE_MACRO_F1.toFixed(3)} hint="macro F1" />
+            <MiniStat label="Without complaint_type" value={ROUTING_NO_TYPE_MACRO_F1.toFixed(3)} hint="macro F1" />
+          </dl>
+          <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
+            With <code>complaint_type</code> the model performed almost perfectly; without it, performance dropped
+            sharply — so it mostly learned a <code>complaint_type</code> → department lookup rather than independent
+            signal. It is <span className="font-medium">not wired into the case queue</span> and is not an operational
+            routing recommendation.
           </p>
         </section>
       </div>
@@ -139,25 +141,28 @@ export default function AppV2MlResultsPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-ink-subtle">
                 <tr className="text-left">
+                  <Th>Attention</Th>
                   <Th>Case</Th>
                   <Th>Complaint type</Th>
-                  <Th>Predicted dept (research)</Th>
-                  <Th className="text-right">Routing conf.</Th>
                   <Th>Status</Th>
-                  <Th>Attention</Th>
+                  <Th>Assigned dept (source)</Th>
+                  <Th className="text-ink-subtle">Routing benchmark output</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((r, i) => (
                   <tr key={r.source_record_id ?? i} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5"><AttentionChip tier={r.attention_tier} /></td>
                     <td className="px-4 py-2.5 font-mono text-xs text-ink-muted">{r.source_record_id ?? '—'}</td>
                     <td className="px-4 py-2.5 text-navy-900">{r.complaint_type ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-ink-muted">{r.predicted_department ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-ink-muted">
-                      {r.routing_confidence == null ? '—' : r.routing_confidence.toFixed(3)}
-                    </td>
                     <td className="px-4 py-2.5 text-ink-muted">{r.status ?? '—'}</td>
-                    <td className="px-4 py-2.5"><AttentionChip tier={r.attention_tier} /></td>
+                    <td className="px-4 py-2.5 text-ink-muted">{r.assigned_department ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-ink-subtle">
+                      {r.predicted_department ?? '—'}
+                      {r.routing_confidence != null && (
+                        <span className="ml-1 tabular-nums text-[11px]">({r.routing_confidence.toFixed(2)})</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
