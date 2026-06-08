@@ -11,7 +11,7 @@ import AppDashboardPage from './pages/app/AppDashboardPage'
 import AppCaseQueuePage from './pages/app/AppCaseQueuePage'
 import AppCaseDetailPage from './pages/app/AppCaseDetailPage'
 import AppWorkflowPage from './pages/app/AppWorkflowPage'
-import AppWardContextPage from './pages/app/AppWardContextPage'
+import AppTorontoWardContextPage from './pages/app/AppTorontoWardContextPage'
 import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
 
 export default function App() {
@@ -38,7 +38,7 @@ export default function App() {
         <Route index element={<Navigate to="/app/workflow" replace />} />
         <Route path="dashboard" element={<AppDashboardPage />} />
         <Route path="workflow" element={<AppWorkflowPage />} />
-        <Route path="wards" element={<AppWardContextPage />} />
+        <Route path="wards" element={<AppTorontoWardContextPage />} />
         <Route path="insights" element={<AppWorkloadInsightsPage />} />
         <Route path="cases" element={<AppCaseQueuePage />} />
         <Route path="cases/:id" element={<AppCaseDetailPage />} />

@@ -8,6 +8,7 @@ import { cases } from '../data/mockCases'
 // complaint data.
 export const COMPLAINTS_TABLE = 'municipal_complaints'
 export const WARDS_TABLE = 'brampton_ward_boundaries'
+export const TORONTO_WARDS_TABLE = 'toronto_ward_boundaries'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
@@ -137,6 +138,41 @@ export type WardBoundary = {
   source_city: string | null
   source_dataset: string | null
   geojson_geometry: unknown
+}
+
+/**
+ * A row in public.toronto_ward_boundaries — one of the 25 City of Toronto wards
+ * (current 25-ward model) from City of Toronto Open Data "City Wards". REAL
+ * Toronto ward polygons used as the geographic base layer for the Toronto ward
+ * workload context map. `area_short_code` (1–25) is the join key to the real
+ * Toronto 311 workload counts in v_toronto_ward_workload. This is Toronto
+ * geography and must never be plotted onto Brampton wards.
+ */
+export type TorontoWardBoundary = {
+  id: number
+  area_short_code: number
+  ward_name: string
+  ward_desc: string
+  source_city: string | null
+  source_dataset: string | null
+  geojson_geometry: unknown
+}
+
+/**
+ * A row in public.v_toronto_ward_workload — REAL Toronto 311 benchmark complaint
+ * volume aggregated per Toronto ward from public.municipal_complaints. Joined to
+ * TorontoWardBoundary by ward_number ↔ area_short_code. This is Toronto 311
+ * benchmark data — decision support only, not Brampton operational complaint
+ * data, and never a final enforcement decision.
+ */
+export type TorontoWardWorkload = {
+  ward_or_area: string
+  ward_number: number
+  complaint_volume: number
+  open_cases: number
+  in_progress_cases: number
+  closed_cases: number
+  top_category: string | null
 }
 
 export type WorkflowEvent = {
@@ -352,6 +388,44 @@ export async function getBramptonWardBoundaries(): Promise<WardBoundary[]> {
   return (data ?? []) as WardBoundary[]
 }
 
+// Explicit column list for the Toronto City Wards base layer.
+const TORONTO_WARD_COLUMNS =
+  'id, area_short_code, ward_name, ward_desc, source_city, source_dataset, geojson_geometry'
+
+/**
+ * Reads the 25 City of Toronto ward polygons from public.toronto_ward_boundaries,
+ * ordered by ward number. Real Toronto City Wards geometry — the geographic base
+ * layer of the Toronto ward workload context map. Any Supabase/RLS error is
+ * thrown so the caller can surface it.
+ */
+export async function getTorontoWardBoundaries(): Promise<TorontoWardBoundary[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(TORONTO_WARDS_TABLE)
+    .select(TORONTO_WARD_COLUMNS)
+    .order('area_short_code', { ascending: true })
+
+  if (error) throw error
+  return (data ?? []) as TorontoWardBoundary[]
+}
+
+/**
+ * Reads the real Toronto 311 benchmark per-ward complaint workload from
+ * public.v_toronto_ward_workload (aggregated over municipal_complaints), highest
+ * volume first. This is decision-support benchmark data — never Brampton
+ * operational complaint data.
+ */
+export async function getTorontoWardWorkload(): Promise<TorontoWardWorkload[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_toronto_ward_workload')
+    .select('ward_or_area, ward_number, complaint_volume, open_cases, in_progress_cases, closed_cases, top_category')
+    .order('complaint_volume', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as TorontoWardWorkload[]
+}
+
 // ---------------------------------------------------------------------------
 // Operations Workflow Console
 // ---------------------------------------------------------------------------
@@ -420,30 +494,6 @@ export async function getStaffActionSummary(): Promise<{ total: number; actors: 
 }
 
 // ---------------------------------------------------------------------------
-// Synthetic Brampton ward workload scenario overlay
-// ---------------------------------------------------------------------------
-
-/**
- * A row in public.brampton_ward_workload_scenarios. SYNTHETIC, illustrative
- * workload keyed by Brampton ward name — NOT Brampton operational complaint
- * data. Used only to demonstrate the ward heatmap. Public benchmark
- * complaint records are never plotted onto Brampton wards.
- */
-export type WardWorkloadScenario = {
-  id: number
-  ward: string
-  scenario_name: string
-  complaint_volume: number
-  open_cases: number
-  in_progress_cases: number
-  closed_cases: number
-  escalations: number
-  top_category: string
-  estimated_hours_saved: number
-  source_note: string
-}
-
-// ---------------------------------------------------------------------------
 // Workload Insights (v1 model outputs)
 // ---------------------------------------------------------------------------
 
@@ -493,18 +543,6 @@ export async function getWorkloadInsightsV1(): Promise<WorkloadInsightRow[]> {
 
   if (error) throw error
   return (data ?? []) as WorkloadInsightRow[]
-}
-
-export async function getWardWorkloadScenarios(): Promise<WardWorkloadScenario[]> {
-  const client = requireClient()
-  const { data, error } = await client
-    .from('brampton_ward_workload_scenarios')
-    .select(
-      'id, ward, scenario_name, complaint_volume, open_cases, in_progress_cases, closed_cases, escalations, top_category, estimated_hours_saved, source_note',
-    )
-    .order('ward', { ascending: true })
-  if (error) throw error
-  return (data ?? []) as WardWorkloadScenario[]
 }
 
 export async function addWorkflowEvent(input: {
