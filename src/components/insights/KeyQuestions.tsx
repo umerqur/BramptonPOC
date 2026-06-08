@@ -3,10 +3,10 @@
  * workload-planning support, never as discovery or enforcement.
  */
 const QUESTIONS = [
-  'Which areas (FSAs) carry the most complaint workload, and are likely to stay busy next period?',
-  'How is workload distributed across low / medium / high tiers?',
-  'Where should limited staff capacity be planned first?',
-  'How dependable is this signal, and what does it not tell us?',
+  'Where is complaint workload concentrated across areas (FSAs)?',
+  'Which queues or complaint categories create the most bottlenecks?',
+  'Which cases need staff review, and how is workload distributed across tiers?',
+  'What information helps staff close work faster?',
 ]
 
 export default function KeyQuestions() {

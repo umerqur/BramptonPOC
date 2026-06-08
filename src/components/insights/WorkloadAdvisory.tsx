@@ -18,6 +18,7 @@ export default function WorkloadAdvisory() {
             <li>It is <span className="font-semibold">not Brampton operational complaint data</span>.</li>
             <li>It is <span className="font-semibold">decision support only</span> — authorized staff review and decide.</li>
             <li>It is <span className="font-semibold">not automated enforcement</span> and not a final enforcement decision.</li>
+            <li>This is a <span className="font-semibold">supporting analytics view</span>, not the core automation workflow.</li>
           </ul>
         </div>
       </div>

@@ -79,9 +79,10 @@ export default function AppWorkloadInsightsPage() {
             Workload Insights (v1)
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-            Where complaint workload concentrates across Toronto forward-sortation areas, to support workload planning.
-            This is a benchmark model output for decision support — not Brampton operational data and not automated
-            enforcement.
+            Where complaint workload concentrates across Toronto forward-sortation areas, to support capacity planning.
+            This tab is a supporting benchmark analytics view — the core POC remains complaint workflow acceleration and
+            staff review. It is a benchmark model output for decision support, not Brampton operational data and not
+            automated enforcement.
           </p>
         </div>
         <DataSourceBadge source={source} loading={loading} count={rows.length} />

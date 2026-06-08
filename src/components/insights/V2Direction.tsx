@@ -1,20 +1,21 @@
 /**
- * Forward-looking note. Because v1 only reproduces volume persistence, the
- * valuable next step is change/emergence detection — areas rising relative to
- * their own baseline. Framed as planned future work, not a current capability.
+ * Forward-looking note. The core POC is complaint workflow intelligence —
+ * accelerating existing enforcement work and keeping staff in control. Workload
+ * analytics (this view) is supporting management context, not the core product
+ * and not predictive targeting.
  */
 const NEXT = [
   {
-    title: 'Emergence / change detection',
-    body: 'Predict areas rising relative to their own baseline, factoring out the persistence v1 already captures, to surface newly busy areas.',
+    title: 'Workflow acceleration',
+    body: 'Reduce time from complaint intake to resolution through AI-assisted classification, summaries, routing support, and closure drafting.',
   },
   {
-    title: 'Longer data horizon',
-    body: 'More months enable seasonality, multiple holdout periods, and steadier estimates than the current four-month window allows.',
+    title: 'Human review and auditability',
+    body: 'Keep staff in control with review queues, supervisor visibility, decision notes, and audit trails.',
   },
   {
-    title: 'Finer geography only when justified',
-    body: 'Move below FSA only with real complaint coordinates or reliable address geocoding — never inferred from ward boundaries.',
+    title: 'Workload analytics as support',
+    body: 'Keep workload views as management context for capacity planning, not predictive targeting or automated enforcement.',
   },
 ]
 
@@ -25,7 +26,7 @@ export default function V2Direction() {
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
           Next direction
         </span>
-        <h2 className="text-sm font-semibold text-navy-900">Where v2 goes</h2>
+        <h2 className="text-sm font-semibold text-navy-900">Where the POC goes next</h2>
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {NEXT.map((n) => (
