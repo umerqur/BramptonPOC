@@ -4,6 +4,11 @@ import {
   getClosureReviewCases,
   type WorkflowMlPrediction,
 } from '../../services/municipalServiceRequests'
+import {
+  generateAiReviewPacket,
+  type AiReviewPacketRequest,
+  type AiReviewPacketResponse,
+} from '../../services/aiReviewPacket'
 
 // Closure Review Workflow — turns the V2 "Needs Attention" model output into a
 // staff review + closure workflow. Cases are read live from Supabase
@@ -292,6 +297,7 @@ export default function AppClosureReviewPage() {
 
             {selected ? (
               <ReviewPacket
+                key={selectedId ?? 'none'}
                 row={selected}
                 controlNote={controlNote}
                 onControl={handleControl}
@@ -311,6 +317,40 @@ export default function AppClosureReviewPage() {
   )
 }
 
+/** Build the AI review packet request from the case row + deterministic context. */
+function buildPacketRequest(
+  row: WorkflowMlPrediction,
+  rules: Rule[],
+  action: WorkflowAction,
+  checks: Check[],
+): AiReviewPacketRequest {
+  return {
+    caseSnapshot: {
+      source_record_id: row.source_record_id,
+      complaint_type: row.complaint_type,
+      description: row.description,
+      ward_or_area: row.ward_or_area,
+      status: row.status,
+      assigned_department: row.assigned_department,
+    },
+    mlSignal: {
+      needs_attention_score: row.needs_attention_score,
+      attention_tier: row.attention_tier,
+      attention_rank: row.attention_rank,
+    },
+    deterministic: {
+      rulesFired: rules.map((r) => `${r.label}: ${r.detail}`),
+      recommendedAction: action,
+      missingInformationChecklist: checks.map((c) => ({
+        label: c.label,
+        status: c.ok ? 'OK' : 'Needs review',
+      })),
+    },
+  }
+}
+
+type AiState = 'idle' | 'loading' | 'success' | 'error'
+
 function ReviewPacket({
   row,
   controlNote,
@@ -325,8 +365,66 @@ function ReviewPacket({
   const checks = checklistFor(row)
   const action = recommendedAction(row)
 
+  // AI Assisted Review Packet state. This component is remounted per selected
+  // case (via key), so the AI draft never leaks across cases.
+  const [aiState, setAiState] = useState<AiState>('idle')
+  const [aiPacket, setAiPacket] = useState<AiReviewPacketResponse | null>(null)
+  const [aiError, setAiError] = useState<string | null>(null)
+
+  async function handleGenerate() {
+    setAiState('loading')
+    setAiError(null)
+    try {
+      const packet = await generateAiReviewPacket(buildPacketRequest(row, rules, action, checks))
+      setAiPacket(packet)
+      setAiState('success')
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err))
+      setAiState('error')
+    }
+  }
+
+  const generateLabel =
+    aiState === 'loading'
+      ? 'Generating packet…'
+      : aiState === 'success'
+        ? 'Regenerate AI Review Packet'
+        : 'Generate AI Review Packet'
+
   return (
     <div className="divide-y divide-slate-100">
+      {/* AI generation control — prominent but governed. Near the top of the panel. */}
+      <div className="bg-slate-50/60 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="btn-accent text-sm"
+            onClick={handleGenerate}
+            disabled={aiState === 'loading'}
+            aria-busy={aiState === 'loading'}
+          >
+            {aiState === 'loading' && (
+              <span aria-hidden className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            )}
+            {generateLabel}
+          </button>
+          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-ink-muted">
+            Draft only · Staff approval required
+          </span>
+        </div>
+        <p className="mt-2 text-[11px] text-ink-subtle">
+          AI prepares a draft only. Staff approval is required before any action.
+        </p>
+        {aiState === 'error' && (
+          <div
+            role="alert"
+            className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          >
+            <span className="font-semibold">AI review packet unavailable.</span> {aiError} The deterministic packet
+            below remains available for staff review.
+          </div>
+        )}
+      </div>
+
       {/* A. Case Snapshot */}
       <PacketSection letter="A" title="Case Snapshot">
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -379,6 +477,10 @@ function ReviewPacket({
           <span className="text-xs text-ink-subtle">Deterministic suggestion — staff confirm or override.</span>
         </div>
       </PacketSection>
+
+      {/* AI Assisted Review Packet — only after generation. Sits above the
+          deterministic drafts, which remain the governance baseline. */}
+      {aiState === 'success' && aiPacket && <AiPacketSection packet={aiPacket} />}
 
       {/* E. Missing Information Checklist */}
       <PacketSection letter="E" title="Missing Information Checklist">
@@ -438,6 +540,91 @@ function ReviewPacket({
           POC mode: no action is submitted. Staff approval would be logged in a production workflow.
         </p>
       </PacketSection>
+    </div>
+  )
+}
+
+/**
+ * AI Assisted Review Packet — the generated draft, shown only after a staff
+ * click. Premium card styling consistent with the deterministic packet. Every
+ * sub-block is a draft for staff review; nothing here is an action.
+ */
+function AiPacketSection({ packet }: { packet: AiReviewPacketResponse }) {
+  return (
+    <section className="bg-accent-50/40 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+          <span className="inline-flex h-5 items-center justify-center rounded-md bg-accent-100 px-1.5 text-[10px] font-semibold uppercase tracking-wider text-accent-700">
+            AI
+          </span>
+          AI Assisted Review Packet
+        </h3>
+        <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-ink-muted ring-1 ring-inset ring-slate-200">
+          Draft only · No action submitted
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-3">
+        <AiBlock title="Staff summary" text={packet.staffSummary} />
+        <AiBlock title="Recommended next step" text={packet.recommendedNextStep} />
+        <AiListBlock title="Missing information notes" items={packet.missingInformationNotes} emptyText="No missing information noted." />
+        <AiBlock title="Resident update draft" text={packet.residentUpdateDraft} />
+        {packet.closureLanguage && <AiBlock title="Closure language" text={packet.closureLanguage} />}
+        <AiListBlock
+          title="Risk or supervisor flags"
+          items={packet.supervisorFlags}
+          emptyText="No supervisor flags raised."
+          tone="amber"
+        />
+        <AiBlock title="Plain English reason" text={packet.plainEnglishReason} />
+      </div>
+
+      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+        <span className="font-semibold">Staff approval required:</span>{' '}
+        {packet.advisory || 'AI prepares a draft only. Staff review and approval are required before any action.'}
+      </p>
+    </section>
+  )
+}
+
+function AiBlock({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
+      <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-navy-900">
+        {text?.trim() || <span className="text-ink-subtle italic">Not provided.</span>}
+      </p>
+    </div>
+  )
+}
+
+function AiListBlock({
+  title,
+  items,
+  emptyText,
+  tone = 'default',
+}: {
+  title: string
+  items: string[]
+  emptyText: string
+  tone?: 'default' | 'amber'
+}) {
+  const bullet = tone === 'amber' ? 'text-amber-600' : 'text-accent-600'
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
+      {items.length ? (
+        <ul className="mt-1 space-y-1">
+          {items.map((item, i) => (
+            <li key={i} className="flex gap-2 text-sm text-navy-900">
+              <span aria-hidden className={`mt-0.5 ${bullet}`}>•</span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-sm text-ink-subtle italic">{emptyText}</p>
+      )}
     </div>
   )
 }
