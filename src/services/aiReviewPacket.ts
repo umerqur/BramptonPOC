@@ -9,6 +9,7 @@
 
 /** Reserved server-side endpoint (never shadowed by the SPA catch-all). */
 const AI_REVIEW_PACKET_ENDPOINT = '/.netlify/functions/generate-ai-review-packet'
+const ASK_CASE_AGENT_ENDPOINT = '/.netlify/functions/ask-case-agent'
 
 /** Exactly what the client sends: case snapshot + ML signal + deterministic context. */
 export type AiReviewPacketRequest = {
@@ -99,4 +100,76 @@ export async function generateAiReviewPacket(
   }
 
   return payload as AiReviewPacketResponse
+}
+
+// ---------------------------------------------------------------------------
+// "Ask this case" assistant — a lightweight agentic chat over the SELECTED case.
+// Same server-side key handling as above: the browser never sees the Anthropic
+// key, nothing is written to Supabase, and the answer is draft guidance only.
+// ---------------------------------------------------------------------------
+
+/**
+ * Request for the "Ask this case" assistant: the same case context shape the
+ * review packet sends, plus the staff question. Reusing AiReviewPacketRequest
+ * keeps the case snapshot / ML signal / deterministic context identical.
+ */
+export type AskCaseAgentRequest = AiReviewPacketRequest & {
+  question: string
+}
+
+/**
+ * Transparent record of the lightweight agentic steps the assistant followed:
+ * the goal, the short plan, the in-request context surfaces it reasoned over
+ * (selectedCaseContext, deterministicRules, needsAttentionSignal), and any
+ * non-blocking notes. No similar-case retrieval in this version.
+ */
+export type AskCaseAgentTrace = {
+  goal: string
+  plan: string[]
+  toolsUsed: string[]
+  notes: string[]
+}
+
+/** Concise draft answer plus the agent trace and governance advisory. */
+export type AskCaseAgentResponse = {
+  answer: string
+  agentTrace: AskCaseAgentTrace
+  advisory: string
+  model?: string
+  prompt_version?: string
+}
+
+/**
+ * Ask the server-side assistant a question about the single selected case.
+ * Throws on any non-OK response (including the 503 when ANTHROPIC_API_KEY is not
+ * configured) so the UI can show a non-blocking error.
+ */
+export async function askCaseAgent(input: AskCaseAgentRequest): Promise<AskCaseAgentResponse> {
+  let res: Response
+  try {
+    res = await fetch(ASK_CASE_AGENT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+  } catch {
+    throw new Error('Could not reach the case assistant. Please try again.')
+  }
+
+  let payload: unknown = null
+  try {
+    payload = await res.json()
+  } catch {
+    // fall through to the status-based error below
+  }
+
+  if (!res.ok) {
+    const message =
+      payload && typeof payload === 'object' && typeof (payload as Record<string, unknown>).error === 'string'
+        ? ((payload as Record<string, unknown>).error as string)
+        : `Case assistant request failed (status ${res.status}).`
+    throw new Error(message)
+  }
+
+  return payload as AskCaseAgentResponse
 }
