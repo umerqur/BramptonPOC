@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { isSupabaseConfigured } from '../../lib/supabase'
 import {
   getWorkloadInsightsV1,
   type WorkloadInsightRow,
 } from '../../services/municipalServiceRequests'
 import { workloadV1FallbackRows } from '../../data/workloadV1'
+import TorontoWardContextPanel from '../../components/app/TorontoWardContextPanel'
 import WorkloadAdvisory from '../../components/insights/WorkloadAdvisory'
 import KeyQuestions from '../../components/insights/KeyQuestions'
 import WorkloadTierSummary from '../../components/insights/WorkloadTierSummary'
@@ -72,45 +74,73 @@ export default function AppWorkloadInsightsPage() {
 
   return (
     <div className="container-page py-10">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="section-eyebrow">Workload Insights</div>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            Workload Insights (v1)
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-            Where complaint workload concentrates across Toronto forward-sortation areas, to support capacity planning.
-            This tab is a supporting benchmark analytics view — the core POC remains complaint workflow acceleration and
-            staff review. It is a benchmark model output for decision support, not Brampton operational data and not
-            automated enforcement.
-          </p>
+      {/* Page header */}
+      <div className="section-eyebrow">Insights</div>
+      <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Insights</h1>
+      <p className="mt-2 max-w-3xl text-sm text-ink-muted">
+        Workload patterns, area context, and benchmark service request signals for the POC.
+      </p>
+
+      {/* 1. Area Context — the real Toronto ward/area coding visualization first. */}
+      <section className="mt-8">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold tracking-tight text-navy-900">Area Context</h2>
+          <Link
+            to="/app/wards"
+            className="inline-flex items-center gap-1 text-sm font-semibold text-accent-600 hover:text-accent-700"
+          >
+            Open full ward context
+            <span aria-hidden>→</span>
+          </Link>
         </div>
-        <DataSourceBadge source={source} loading={loading} count={rows.length} />
-      </div>
+        <p className="mt-1 max-w-3xl text-xs text-ink-subtle">
+          Benchmark context only. Brampton operational data can replace this layer during the POC.
+        </p>
 
-      <div className="mt-6 space-y-6">
-        <WorkloadAdvisory />
+        {/* Reused real ward/area map. Compact embed: the secondary geometry and
+            Brampton future-context layers stay on the full /app/wards page. */}
+        <TorontoWardContextPanel showValidationLayers={false} />
+      </section>
 
-        {source !== 'live' && !loading && <FallbackNotice source={source} detail={errorDetail} />}
-
-        <KeyQuestions />
-
-        {loading ? (
-          <div className="card flex min-h-[160px] items-center justify-center text-sm text-ink-subtle">
-            Loading workload insights…
+      {/* 2. Workload Insights — the existing benchmark analytics, below the map. */}
+      <section className="mt-10">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-navy-900">Workload Insights (v1)</h2>
+            <p className="mt-1 max-w-3xl text-sm text-ink-muted">
+              Where complaint workload concentrates across Toronto forward-sortation areas, to support capacity
+              planning. This is a supporting benchmark analytics view — the core POC remains complaint workflow
+              acceleration and staff review. It is a benchmark model output for decision support, not Brampton
+              operational data and not automated enforcement.
+            </p>
           </div>
-        ) : (
-          <>
-            <WorkloadTierSummary rows={rows} />
-            <TopFsaTable rows={rows} />
-            <div className="grid gap-6 lg:grid-cols-2">
-              <ModelPerformance />
-              <FeatureImportance />
+          <DataSourceBadge source={source} loading={loading} count={rows.length} />
+        </div>
+
+        <div className="mt-6 space-y-6">
+          <WorkloadAdvisory />
+
+          {source !== 'live' && !loading && <FallbackNotice source={source} detail={errorDetail} />}
+
+          <KeyQuestions />
+
+          {loading ? (
+            <div className="card flex min-h-[160px] items-center justify-center text-sm text-ink-subtle">
+              Loading workload insights…
             </div>
-            <V2Direction />
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              <WorkloadTierSummary rows={rows} />
+              <TopFsaTable rows={rows} />
+              <div className="grid gap-6 lg:grid-cols-2">
+                <ModelPerformance />
+                <FeatureImportance />
+              </div>
+              <V2Direction />
+            </>
+          )}
+        </div>
+      </section>
     </div>
   )
 }
