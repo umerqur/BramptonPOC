@@ -24,8 +24,9 @@
 // /.netlify/functions/generate-ai-review-packet endpoint, which the SPA
 // catch-all redirect never shadows.
 
-// Small, cheap Claude model — this is short drafting, not heavy reasoning.
-const MODEL = 'claude-3-5-haiku-latest'
+// Use the same known-working Anthropic model as generate-case-ai-review.ts so
+// this function stays on a model id the account/API actually serves.
+const MODEL = 'claude-sonnet-4-6'
 const PROMPT_VERSION = 'ai-review-packet-v1'
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
@@ -279,8 +280,21 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   if (!anthropicRes.ok) {
-    console.error('Anthropic API returned a non-OK status:', anthropicRes.status)
-    return json({ error: `AI service error (status ${anthropicRes.status}).` }, 502)
+    // Read the upstream body safely for server-side diagnosis (e.g. an invalid
+    // model id surfaces here). This is logged only — never returned to the
+    // browser — and the API key and full prompt are never logged.
+    let detail = ''
+    try {
+      detail = (await anthropicRes.text()).slice(0, 2000)
+    } catch (err) {
+      detail = `<unreadable response body: ${errorText(err)}>`
+    }
+    console.error(
+      'Anthropic API returned a non-OK status:',
+      anthropicRes.status,
+      detail,
+    )
+    return json({ error: 'AI service error. Please check the server logs.' }, 502)
   }
 
   let text: string
