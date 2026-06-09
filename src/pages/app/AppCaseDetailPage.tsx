@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  getComplaintByCaseId,
+  getComplaintByCaseIdOrSourceRecordId,
   type MunicipalComplaintRow,
 } from '../../services/municipalServiceRequests'
 import { CaseNotFound, ComplaintDetailView } from '../../components/cases/CaseDetailViews'
 
 // Authenticated live complaint detail. Looks the complaint up in Supabase
-// (municipal_complaints) by its case_id. Live data only — authenticated /app
-// routes never fall back to bundled sample cases. A failed query surfaces an
-// explicit Supabase error with retry; a null result renders CaseNotFound.
+// (municipal_complaints) by its case_id, with a defensive numeric-id fallback so
+// links opened from Closure Review (which key by source_record_id = case_id)
+// resolve reliably. Live data only — authenticated /app routes never fall back to
+// bundled sample cases. A failed query surfaces an explicit Supabase error with
+// retry; a null result renders CaseNotFound.
 export default function AppCaseDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [row, setRow] = useState<MunicipalComplaintRow | null | undefined>(undefined)
@@ -27,7 +29,7 @@ export default function AppCaseDetailPage() {
     }
     setLoading(true)
     setError(null)
-    getComplaintByCaseId(id)
+    getComplaintByCaseIdOrSourceRecordId(id)
       .then((data) => {
         if (!active) return
         setRow(data)

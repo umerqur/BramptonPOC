@@ -338,6 +338,41 @@ export async function getComplaintByCaseId(caseId: string): Promise<MunicipalCom
   return (data as MunicipalComplaintRow) ?? null
 }
 
+/**
+ * Resolve a complaint for the case detail route opened from Closure Review.
+ *
+ * Closure Review rows link by workflow_ml_predictions.source_record_id, which
+ * the scoring batch populates directly from municipal_complaints.case_id, so the
+ * case_id lookup is the primary (and expected) path. As a defensive fallback —
+ * only when the id is a plain, safe integer string — we also try the integer
+ * primary key (municipal_complaints.id). No fuzzy matching: exact case_id, then
+ * exact numeric id. Returns null when neither matches.
+ */
+export async function getComplaintByCaseIdOrSourceRecordId(
+  id: string,
+): Promise<MunicipalComplaintRow | null> {
+  const byCaseId = await getComplaintByCaseId(id)
+  if (byCaseId) return byCaseId
+
+  // municipal_complaints.id is an integer column, so only attempt the numeric
+  // fallback when id is an exact, non-overflowing integer string (type-safe).
+  if (/^\d+$/.test(id)) {
+    const numericId = Number(id)
+    if (Number.isSafeInteger(numericId)) {
+      const client = requireClient()
+      const { data, error } = await client
+        .from(COMPLAINTS_TABLE)
+        .select('*')
+        .eq('id', numericId)
+        .maybeSingle()
+      if (error) throw error
+      return (data as MunicipalComplaintRow) ?? null
+    }
+  }
+
+  return null
+}
+
 export async function getComplaintFilterOptions(): Promise<ComplaintFilterOptions> {
   const client = requireClient()
 
