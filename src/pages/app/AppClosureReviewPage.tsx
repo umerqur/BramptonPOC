@@ -391,6 +391,11 @@ function ReviewPacket({
         ? 'Regenerate AI Review Packet'
         : 'Generate AI Review Packet'
 
+  // Once an AI packet is generated, the deterministic sections E/F/G stay
+  // visible but are relabeled as the fallback baseline so they don't read as a
+  // duplicate of the AI draft.
+  const hasAiPacket = aiState === 'success' && aiPacket != null
+
   return (
     <div className="divide-y divide-slate-100">
       {/* AI generation control — prominent but governed. Near the top of the panel. */}
@@ -482,8 +487,8 @@ function ReviewPacket({
           deterministic drafts, which remain the governance baseline. */}
       {aiState === 'success' && aiPacket && <AiPacketSection packet={aiPacket} />}
 
-      {/* E. Missing Information Checklist */}
-      <PacketSection letter="E" title="Missing Information Checklist">
+      {/* E. Missing Information Checklist — relabeled as baseline when an AI packet exists. */}
+      <PacketSection letter="E" title={hasAiPacket ? 'Baseline checklist' : 'Missing Information Checklist'}>
         <ul className="space-y-1.5">
           {checks.map((c) => (
             <li key={c.label} className="flex items-center justify-between gap-2 text-sm">
@@ -502,13 +507,13 @@ function ReviewPacket({
         </ul>
       </PacketSection>
 
-      {/* F. Draft Staff Summary */}
-      <PacketSection letter="F" title="Draft Staff Summary">
+      {/* F. Draft Staff Summary — relabeled as baseline when an AI packet exists. */}
+      <PacketSection letter="F" title={hasAiPacket ? 'Baseline staff summary' : 'Draft Staff Summary'}>
         <DraftBlock text={draftStaffSummary(row)} />
       </PacketSection>
 
-      {/* G. Draft Resident Update or Closure Language */}
-      <PacketSection letter="G" title="Draft Resident Update or Closure Language">
+      {/* G. Draft Resident Update or Closure Language — relabeled as baseline when an AI packet exists. */}
+      <PacketSection letter="G" title={hasAiPacket ? 'Baseline resident update' : 'Draft Resident Update or Closure Language'}>
         <DraftBlock text={draftResidentLanguage(row)} />
       </PacketSection>
 
@@ -571,9 +576,9 @@ function AiPacketSection({ packet }: { packet: AiReviewPacketResponse }) {
         <AiBlock title="Resident update draft" text={packet.residentUpdateDraft} />
         {packet.closureLanguage && <AiBlock title="Closure language" text={packet.closureLanguage} />}
         <AiListBlock
-          title="Risk or supervisor flags"
+          title="Review Flags"
           items={packet.supervisorFlags}
-          emptyText="No supervisor flags raised."
+          emptyText="No review flags raised."
           tone="amber"
         />
         <AiBlock title="Plain English reason" text={packet.plainEnglishReason} />
