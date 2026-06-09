@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { isSupabaseConfigured } from '../../lib/supabase'
 import {
   getClosureReviewCases,
@@ -267,51 +268,68 @@ export default function AppClosureReviewPage() {
                 const isSelected = key === selectedId
                 return (
                   <li key={key}>
-                    <button
-                      onClick={() => handleSelect(key)}
+                    {/* Selection and full-case-file navigation are intentionally
+                        two separate controls (no nested interactives): the body
+                        button selects the case into the right workspace, while
+                        the "Open full case file" link below routes to the
+                        existing /app/cases/:id detail page. */}
+                    <div
                       aria-current={isSelected ? 'true' : undefined}
-                      className={`relative block w-full border-l-4 px-4 py-3 text-left transition ${
+                      className={`relative border-l-4 transition ${
                         isSelected
                           ? 'border-accent-500 bg-accent-50/60 ring-1 ring-inset ring-accent-200'
                           : 'border-transparent hover:bg-slate-50'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium text-navy-900">
-                          {r.complaint_type || 'Uncategorized'}
-                        </span>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          {isSelected && (
-                            <span className="inline-flex rounded-full bg-accent-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-700">
-                              Selected
-                            </span>
-                          )}
-                          <AttentionChip tier={r.attention_tier} />
-                        </div>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-subtle">
-                        <span>{r.assigned_department || 'Unassigned'}</span>
-                        <span aria-hidden>·</span>
-                        <span>{r.status || 'Unknown status'}</span>
-                        <span aria-hidden>·</span>
-                        <span>{r.ward_or_area || 'Area not recorded'}</span>
-                        <span aria-hidden>·</span>
-                        <span className="tabular-nums">
-                          score {r.needs_attention_score == null ? '—' : r.needs_attention_score.toFixed(3)}
-                        </span>
-                      </div>
-                      {r.description?.trim() && (
-                        <p className="mt-1 line-clamp-1 text-xs text-ink-muted">{r.description}</p>
-                      )}
-                      <div
-                        className={`mt-1.5 inline-flex items-center gap-1 text-xs font-semibold ${
-                          isSelected ? 'text-accent-700' : 'text-accent-600'
-                        }`}
+                      <button
+                        onClick={() => handleSelect(key)}
+                        className="block w-full px-4 pb-2 pt-3 text-left"
                       >
-                        Open case file
-                        <span aria-hidden>→</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-sm font-medium text-navy-900">
+                            {r.complaint_type || 'Uncategorized'}
+                          </span>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {isSelected && (
+                              <span className="inline-flex rounded-full bg-accent-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-700">
+                                Selected
+                              </span>
+                            )}
+                            <AttentionChip tier={r.attention_tier} />
+                          </div>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-subtle">
+                          <span>{r.assigned_department || 'Unassigned'}</span>
+                          <span aria-hidden>·</span>
+                          <span>{r.status || 'Unknown status'}</span>
+                          <span aria-hidden>·</span>
+                          <span>{r.ward_or_area || 'Area not recorded'}</span>
+                          <span aria-hidden>·</span>
+                          <span className="tabular-nums">
+                            score {r.needs_attention_score == null ? '—' : r.needs_attention_score.toFixed(3)}
+                          </span>
+                        </div>
+                        {r.description?.trim() && (
+                          <p className="mt-1 line-clamp-1 text-xs text-ink-muted">{r.description}</p>
+                        )}
+                      </button>
+                      <div className="px-4 pb-3">
+                        {r.source_record_id ? (
+                          <Link
+                            to={`/app/cases/${encodeURIComponent(r.source_record_id)}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`inline-flex items-center gap-1 text-xs font-semibold hover:underline ${
+                              isSelected ? 'text-accent-700' : 'text-accent-600'
+                            }`}
+                          >
+                            Open full case file
+                            <span aria-hidden>→</span>
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-ink-subtle">Case file link unavailable</span>
+                        )}
                       </div>
-                    </button>
+                    </div>
                   </li>
                 )
               })}
@@ -347,6 +365,17 @@ export default function AppClosureReviewPage() {
                       <span aria-hidden>·</span>
                       <span>{selected.ward_or_area || 'Source area not recorded'}</span>
                     </div>
+                    {selected.source_record_id && (
+                      <div className="mt-2">
+                        <Link
+                          to={`/app/cases/${encodeURIComponent(selected.source_record_id)}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-accent-200 bg-white px-2.5 py-1 text-xs font-semibold text-accent-700 transition hover:border-accent-300 hover:bg-accent-50"
+                        >
+                          Open full case file
+                          <span aria-hidden>→</span>
+                        </Link>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-ink-subtle">Open a case from the queue to start a case file.</p>
