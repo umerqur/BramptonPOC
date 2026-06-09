@@ -32,6 +32,22 @@ export type AiReviewPacketRequest = {
   }
 }
 
+/**
+ * Transparent record of the lightweight agentic workflow the backend ran:
+ * the goal it pursued, the plan it followed, the read-only tool(s) it used, how
+ * many similar cases it retrieved for context, and any non-blocking notes (e.g.
+ * similar-case retrieval was skipped or returned nothing). Rendered as the
+ * compact "Agent workflow trace" below the AI packet. May be absent on older
+ * responses, so treat it as optional.
+ */
+export type AgentTrace = {
+  goal: string
+  plan: string[]
+  toolsUsed: string[]
+  similarCasesFound: number
+  notes: string[]
+}
+
 /** Structured draft packet returned by the function for staff review. */
 export type AiReviewPacketResponse = {
   staffSummary: string
@@ -44,6 +60,7 @@ export type AiReviewPacketResponse = {
   advisory: string
   model?: string
   prompt_version?: string
+  agentTrace?: AgentTrace
 }
 
 /**

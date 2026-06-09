@@ -6,6 +6,7 @@ import {
 } from '../../services/municipalServiceRequests'
 import {
   generateAiReviewPacket,
+  type AgentTrace,
   type AiReviewPacketRequest,
   type AiReviewPacketResponse,
 } from '../../services/aiReviewPacket'
@@ -530,6 +531,13 @@ function ReviewPacket({
           deterministic drafts, which remain the governance baseline. */}
       {aiState === 'success' && aiPacket && <AiPacketSection packet={aiPacket} />}
 
+      {/* Agent workflow trace — compact, collapsed proof of the agentic steps
+          (goal, plan, tools used, similar cases found). Shown only after an AI
+          packet exists, kept subtle so it does not clutter the demo. */}
+      {aiState === 'success' && aiPacket?.agentTrace && (
+        <AgentTraceSection trace={aiPacket.agentTrace} />
+      )}
+
       {/* E. Missing Information Checklist — relabeled as baseline when an AI packet exists. */}
       <PacketSection letter="E" title={hasAiPacket ? 'Baseline checklist' : 'Missing Information Checklist'}>
         <ul className="space-y-1.5">
@@ -631,6 +639,90 @@ function AiPacketSection({ packet }: { packet: AiReviewPacketResponse }) {
         <span className="font-semibold">Staff approval required:</span>{' '}
         {packet.advisory || 'AI prepares a draft only. Staff review and approval are required before any action.'}
       </p>
+    </section>
+  )
+}
+
+/**
+ * Agent workflow trace — a subtle, collapsed section that proves the agentic
+ * behavior behind the AI packet: the goal it pursued, the short plan it
+ * followed, the read-only tool(s) it used, and how many similar cases it
+ * retrieved for context. Read-only and informational; nothing here is an action.
+ */
+function AgentTraceSection({ trace }: { trace: AgentTrace }) {
+  return (
+    <section className="px-5 py-3">
+      <details className="group rounded-lg border border-slate-200 bg-slate-50/60">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-ink-muted">
+          <span className="flex items-center gap-2">
+            <span className="inline-flex h-4 items-center justify-center rounded bg-slate-200 px-1.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
+              Agent
+            </span>
+            Agent workflow trace
+            <span className="font-normal text-ink-subtle">
+              · {trace.toolsUsed.length} tool{trace.toolsUsed.length === 1 ? '' : 's'} · {trace.similarCasesFound}{' '}
+              similar case{trace.similarCasesFound === 1 ? '' : 's'}
+            </span>
+          </span>
+          <span aria-hidden className="text-ink-subtle transition group-open:rotate-180">▾</span>
+        </summary>
+
+        <div className="space-y-3 border-t border-slate-200 px-3 py-3 text-xs">
+          <div>
+            <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">Goal</div>
+            <p className="mt-0.5 text-navy-900">{trace.goal}</p>
+          </div>
+
+          <div>
+            <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">Plan</div>
+            <ol className="mt-0.5 list-decimal space-y-0.5 pl-4 text-navy-900">
+              {trace.plan.map((step, i) => (
+                <li key={i}>{step}</li>
+              ))}
+            </ol>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">Tools used</div>
+              {trace.toolsUsed.length ? (
+                <ul className="mt-0.5 space-y-0.5 text-navy-900">
+                  {trace.toolsUsed.map((t, i) => (
+                    <li key={i} className="font-mono text-[11px]">{t}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-0.5 text-ink-subtle italic">None used.</p>
+              )}
+            </div>
+            <div>
+              <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">
+                Similar cases found
+              </div>
+              <p className="mt-0.5 tabular-nums text-navy-900">{trace.similarCasesFound}</p>
+            </div>
+          </div>
+
+          {trace.notes.length > 0 && (
+            <div>
+              <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">Notes</div>
+              <ul className="mt-0.5 space-y-0.5 text-ink-muted">
+                {trace.notes.map((n, i) => (
+                  <li key={i} className="flex gap-1.5">
+                    <span aria-hidden className="text-ink-subtle">·</span>
+                    <span>{n}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="text-[10px] text-ink-subtle">
+            Context only. Similar cases are public benchmark data and imply no outcome for this case. Read only — no
+            data was written and no action was taken.
+          </p>
+        </div>
+      </details>
     </section>
   )
 }
