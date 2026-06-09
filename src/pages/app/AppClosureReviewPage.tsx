@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { isSupabaseConfigured } from '../../lib/supabase'
 import {
   getClosureReviewCases,
   type WorkflowMlPrediction,
 } from '../../services/municipalServiceRequests'
 import {
+  askCaseAgent,
   generateAiReviewPacket,
   type AgentTrace,
   type AiReviewPacketRequest,
   type AiReviewPacketResponse,
+  type AskCaseAgentResponse,
 } from '../../services/aiReviewPacket'
 
 // Closure Review Workflow — turns the V2 "Needs Attention" model output into a
@@ -147,6 +149,9 @@ export default function AppClosureReviewPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [controlNote, setControlNote] = useState<string | null>(null)
+  // The right "Case File Workspace" panel. Used to scroll the opened case file
+  // into view when staff pick a different queue row (mobile / small screens).
+  const workspaceRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     let active = true
@@ -195,12 +200,14 @@ export default function AppClosureReviewPage() {
     setControlNote(`${label} — POC mode: no action was submitted to Supabase.`)
   }
 
-  // Selecting a case resets the per-case control note. The AI generated packet
-  // state lives inside ReviewPacket, which is remounted via its `key={selectedId}`,
-  // so the AI draft is cleared automatically on selection.
+  // Selecting a case opens it as the active case file. The control note resets,
+  // and the AI packet + "Ask this case" state live inside ReviewPacket, which is
+  // remounted via its `key={selectedId}`, so they clear automatically. We also
+  // scroll the workspace into view so the opened case file is obvious.
   function handleSelect(key: string) {
     setSelectedId(key)
     setControlNote(null)
+    workspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   return (
@@ -301,7 +308,7 @@ export default function AppClosureReviewPage() {
                           isSelected ? 'text-accent-700' : 'text-accent-600'
                         }`}
                       >
-                        View review packet
+                        Open case file
                         <span aria-hidden>→</span>
                       </div>
                     </button>
@@ -311,11 +318,11 @@ export default function AppClosureReviewPage() {
             </ul>
           </section>
 
-          {/* Right — staff ready review packet */}
-          <section className="card overflow-hidden">
+          {/* Right — case file workspace */}
+          <section ref={workspaceRef} className="card overflow-hidden scroll-mt-20">
             <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-5 py-3">
               <div>
-                <h2 className="text-sm font-semibold text-navy-900">Staff Ready Review Packet</h2>
+                <h2 className="text-sm font-semibold text-navy-900">Case File Workspace</h2>
                 {selected ? (
                   <div className="mt-1.5">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
@@ -330,10 +337,19 @@ export default function AppClosureReviewPage() {
                       <span>{selected.status || 'Unknown status'}</span>
                       <span aria-hidden>·</span>
                       <span>Rank {selected.attention_rank == null ? '—' : `#${selected.attention_rank}`}</span>
+                      <span aria-hidden>·</span>
+                      <span>
+                        Needs Attention{' '}
+                        {selected.needs_attention_score == null
+                          ? '—'
+                          : selected.needs_attention_score.toFixed(3)}
+                      </span>
+                      <span aria-hidden>·</span>
+                      <span>{selected.ward_or_area || 'Source area not recorded'}</span>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-ink-subtle">Prepared for staff review — nothing is submitted automatically.</p>
+                  <p className="text-xs text-ink-subtle">Open a case from the queue to start a case file.</p>
                 )}
               </div>
               {selected && <ActionChip action={recommendedAction(selected)} />}
@@ -442,6 +458,14 @@ function ReviewPacket({
 
   return (
     <div className="divide-y divide-slate-100">
+      {/* Case file opened banner — makes it obvious that clicking the queue tile
+          changed the active workspace to this case. */}
+      <div className="flex items-center gap-2 bg-accent-50/60 px-5 py-2.5 text-xs font-semibold text-accent-700">
+        <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-accent-500" />
+        Case file opened
+        <span className="font-normal text-ink-subtle">· {row.complaint_type || 'Uncategorized'}</span>
+      </div>
+
       {/* AI generation control — prominent but governed. Near the top of the panel. */}
       <div className="bg-slate-50/60 px-5 py-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -473,6 +497,11 @@ function ReviewPacket({
           </div>
         )}
       </div>
+
+      {/* Ask this case — lightweight agentic chat scoped to the selected case.
+          Sits just below the AI packet button. State is local and resets with the
+          ReviewPacket remount (key={selectedId}). */}
+      <AskThisCase row={row} rules={rules} action={action} checks={checks} />
 
       {/* A. Case Snapshot */}
       <PacketSection letter="A" title="Case Snapshot">
@@ -597,6 +626,168 @@ function ReviewPacket({
         </p>
       </PacketSection>
     </div>
+  )
+}
+
+// Starter prompts that map a friendly chip label to the question text sent to
+// the assistant. Kept short so the panel does not read like a full chatbot.
+const ASK_STARTERS: Array<{ chip: string; question: string }> = [
+  { chip: 'What is missing?', question: 'What information is missing for this case?' },
+  { chip: 'Why follow up?', question: 'Why is this case recommended for follow up?' },
+  { chip: 'Draft shorter update', question: 'Draft a shorter resident update for this case.' },
+  { chip: 'What should staff verify first?', question: 'What should staff verify first on this case?' },
+]
+
+type AskState = 'idle' | 'loading' | 'success' | 'error'
+
+/**
+ * "Ask this case" — a compact agentic assistant scoped to the selected case.
+ * Staff type or pick a question; the backend answers using only the selected
+ * case context, deterministic rules, and Needs Attention signal. Draft guidance
+ * only — nothing is submitted, written, or acted on. State is local and resets
+ * with the ReviewPacket remount (key={selectedId}).
+ */
+function AskThisCase({
+  row,
+  rules,
+  action,
+  checks,
+}: {
+  row: WorkflowMlPrediction
+  rules: Rule[]
+  action: WorkflowAction
+  checks: Check[]
+}) {
+  const [question, setQuestion] = useState('')
+  const [state, setState] = useState<AskState>('idle')
+  const [response, setResponse] = useState<AskCaseAgentResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function ask(q: string) {
+    const trimmed = q.trim()
+    if (!trimmed || state === 'loading') return
+    setQuestion(trimmed)
+    setState('loading')
+    setError(null)
+    try {
+      const res = await askCaseAgent({ ...buildPacketRequest(row, rules, action, checks), question: trimmed })
+      setResponse(res)
+      setState('success')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setState('error')
+    }
+  }
+
+  return (
+    <section className="px-5 py-4">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+        <span className="inline-flex h-5 items-center justify-center rounded-md bg-accent-100 px-1.5 text-[10px] font-semibold uppercase tracking-wider text-accent-700">
+          Ask
+        </span>
+        Ask this case
+      </h3>
+      <p className="mt-1 text-[11px] text-ink-subtle">
+        Ask about the selected case. Answers use the case context, rules, and Needs Attention signal only.
+      </p>
+
+      {/* Starter chips */}
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {ASK_STARTERS.map((s) => (
+          <button
+            key={s.chip}
+            type="button"
+            onClick={() => ask(s.question)}
+            disabled={state === 'loading'}
+            className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-ink-muted transition hover:border-accent-300 hover:text-navy-900 disabled:opacity-50"
+          >
+            {s.chip}
+          </button>
+        ))}
+      </div>
+
+      {/* Input + Ask */}
+      <form
+        className="mt-2.5 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          ask(question)
+        }}
+      >
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Ask about this selected case..."
+          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-navy-900 placeholder:text-ink-subtle focus:border-accent-400 focus:outline-none focus:ring-2 focus:ring-accent-100"
+        />
+        <button
+          type="submit"
+          className="btn-accent text-sm"
+          disabled={state === 'loading' || !question.trim()}
+          aria-busy={state === 'loading'}
+        >
+          {state === 'loading' && (
+            <span aria-hidden className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          )}
+          Ask
+        </button>
+      </form>
+
+      {state === 'error' && (
+        <div role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span className="font-semibold">Assistant unavailable.</span> {error}
+        </div>
+      )}
+
+      {state === 'success' && response && (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">Assistant answer</div>
+          <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-navy-900">{response.answer}</p>
+
+          {/* Compact, collapsed agent trace — proof of the agentic steps. */}
+          <details className="group mt-2.5 rounded-lg border border-slate-200 bg-slate-50/60">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-1.5 text-[11px] font-semibold text-ink-muted">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-flex h-4 items-center justify-center rounded bg-slate-200 px-1.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
+                  Agent
+                </span>
+                Agent trace · {response.agentTrace.toolsUsed.length} context source
+                {response.agentTrace.toolsUsed.length === 1 ? '' : 's'}
+              </span>
+              <span aria-hidden className="text-ink-subtle transition group-open:rotate-180">▾</span>
+            </summary>
+            <div className="space-y-2 border-t border-slate-200 px-2.5 py-2 text-[11px]">
+              <div>
+                <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">Goal</div>
+                <p className="mt-0.5 text-navy-900">{response.agentTrace.goal}</p>
+              </div>
+              <div>
+                <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">Plan</div>
+                <ol className="mt-0.5 list-decimal space-y-0.5 pl-4 text-navy-900">
+                  {response.agentTrace.plan.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+              <div>
+                <div className="font-semibold uppercase tracking-wider text-ink-subtle text-[10px]">Context used</div>
+                <ul className="mt-0.5 space-y-0.5 text-navy-900">
+                  {response.agentTrace.toolsUsed.map((t, i) => (
+                    <li key={i} className="font-mono text-[10px]">{t}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </details>
+
+          <p className="mt-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+            <span className="font-semibold">Draft only · Staff approval required · No action submitted.</span>{' '}
+            Assistant response is draft guidance only. Staff must review before taking action.
+          </p>
+        </div>
+      )}
+    </section>
   )
 }
 
