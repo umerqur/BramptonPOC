@@ -194,6 +194,14 @@ export default function AppClosureReviewPage() {
     setControlNote(`${label} — POC mode: no action was submitted to Supabase.`)
   }
 
+  // Selecting a case resets the per-case control note. The AI generated packet
+  // state lives inside ReviewPacket, which is remounted via its `key={selectedId}`,
+  // so the AI draft is cleared automatically on selection.
+  function handleSelect(key: string) {
+    setSelectedId(key)
+    setControlNote(null)
+  }
+
   return (
     <div className="container-page py-10">
       {/* 1. Header */}
@@ -214,14 +222,13 @@ export default function AppClosureReviewPage() {
         </div>
       </div>
 
-      {/* 2. Top summary cards */}
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <SummaryCard label="Total cases loaded" value={summary.total} />
+      {/* 2. Top summary cards — kept to four so the first impression reads as a
+          focused queue, not a metrics dump. */}
+      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <SummaryCard label="Cases loaded" value={summary.total} />
         <SummaryCard label="Higher attention" value={summary.higher} tone="amber" />
-        <SummaryCard label="Medium attention" value={summary.medium} />
-        <SummaryCard label="Lower attention" value={summary.lower} />
-        <SummaryCard label="Closure ready candidates" value={summary.closureReady} tone="emerald" />
-        <SummaryCard label="Needs follow up candidates" value={summary.followUp} />
+        <SummaryCard label="Needs follow up" value={summary.followUp} />
+        <SummaryCard label="AI packet mode" value="On demand" tone="emerald" />
       </div>
 
       {/* 3. Main split layout */}
@@ -253,16 +260,26 @@ export default function AppClosureReviewPage() {
                 return (
                   <li key={key}>
                     <button
-                      onClick={() => setSelectedId(key)}
-                      className={`w-full px-4 py-3 text-left transition ${
-                        isSelected ? 'bg-slate-100' : 'hover:bg-slate-50'
+                      onClick={() => handleSelect(key)}
+                      aria-current={isSelected ? 'true' : undefined}
+                      className={`relative block w-full border-l-4 px-4 py-3 text-left transition ${
+                        isSelected
+                          ? 'border-accent-500 bg-accent-50/60 ring-1 ring-inset ring-accent-200'
+                          : 'border-transparent hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-sm font-medium text-navy-900">
                           {r.complaint_type || 'Uncategorized'}
                         </span>
-                        <AttentionChip tier={r.attention_tier} />
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {isSelected && (
+                            <span className="inline-flex rounded-full bg-accent-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-700">
+                              Selected
+                            </span>
+                          )}
+                          <AttentionChip tier={r.attention_tier} />
+                        </div>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-subtle">
                         <span>{r.assigned_department || 'Unassigned'}</span>
@@ -278,6 +295,14 @@ export default function AppClosureReviewPage() {
                       {r.description?.trim() && (
                         <p className="mt-1 line-clamp-1 text-xs text-ink-muted">{r.description}</p>
                       )}
+                      <div
+                        className={`mt-1.5 inline-flex items-center gap-1 text-xs font-semibold ${
+                          isSelected ? 'text-accent-700' : 'text-accent-600'
+                        }`}
+                      >
+                        View review packet
+                        <span aria-hidden>→</span>
+                      </div>
                     </button>
                   </li>
                 )
@@ -287,10 +312,28 @@ export default function AppClosureReviewPage() {
 
           {/* Right — staff ready review packet */}
           <section className="card overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-5 py-3">
               <div>
                 <h2 className="text-sm font-semibold text-navy-900">Staff Ready Review Packet</h2>
-                <p className="text-xs text-ink-subtle">Prepared for staff review — nothing is submitted automatically.</p>
+                {selected ? (
+                  <div className="mt-1.5">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                      Selected case
+                    </div>
+                    <div className="mt-0.5 text-sm font-semibold text-navy-900">
+                      {selected.complaint_type || 'Uncategorized'}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-subtle">
+                      <span>{selected.assigned_department || 'Unassigned'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{selected.status || 'Unknown status'}</span>
+                      <span aria-hidden>·</span>
+                      <span>Rank {selected.attention_rank == null ? '—' : `#${selected.attention_rank}`}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-ink-subtle">Prepared for staff review — nothing is submitted automatically.</p>
+                )}
               </div>
               {selected && <ActionChip action={recommendedAction(selected)} />}
             </div>
@@ -699,15 +742,18 @@ function SummaryCard({
   tone = 'default',
 }: {
   label: string
-  value: number
+  value: number | string
   tone?: 'default' | 'amber' | 'emerald'
 }) {
   const valueColor =
     tone === 'amber' ? 'text-amber-800' : tone === 'emerald' ? 'text-emerald-800' : 'text-navy-900'
+  const isNumeric = typeof value === 'number'
   return (
     <div className="card p-4">
       <div className="stat-label">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${valueColor}`}>{value}</div>
+      <div className={`mt-1 font-semibold ${isNumeric ? 'text-2xl tabular-nums' : 'text-xl'} ${valueColor}`}>
+        {value}
+      </div>
     </div>
   )
 }
