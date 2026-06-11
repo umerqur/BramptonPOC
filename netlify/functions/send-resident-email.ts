@@ -1,6 +1,8 @@
-// Server-side Netlify function that sends resident-facing and staff-facing
-// transactional email for the Resident Intake Demo flow, through Brevo
-// (https://www.brevo.com).
+// Server-side Netlify function that sends resident-facing transactional email
+// for the Resident Intake Demo flow, through Brevo (https://www.brevo.com).
+//
+// Only the RESIDENT is ever emailed. Staff receive no email — they drive the
+// workflow, and each staff stage change triggers an email to the resident.
 //
 // SECURITY
 // --------
@@ -9,21 +11,17 @@
 // browser, never exposed through a VITE_* variable, and never logged. Do NOT
 // create VITE_BREVO_API_KEY — the key must stay server side.
 //
-// SENDER & STAFF NOTIFICATIONS
-// ----------------------------
+// SENDER
+// ------
 // The "from" address must be a sender that is configured and verified in the
 // Brevo account. It is read from BREVO_SENDER_EMAIL (and optional
-// BREVO_SENDER_NAME). Staff "new request" notifications go to the server-owned
-// BREVO_NOTIFY_EMAIL address — the recipient is NEVER taken from the client, so
-// the public form cannot redirect staff notifications anywhere.
+// BREVO_SENDER_NAME).
 //
 // SCOPE & GOVERNANCE
 // ------------------
-// Three payload types only:
-//   * 'confirmation'       — to the resident, once on submission.
-//   * 'status_update'      — to the resident, on an explicit staff status change.
-//   * 'admin_notification' — to municipal staff (BREVO_NOTIFY_EMAIL), when a new
-//                            resident request is submitted.
+// Two payload types only, both to the resident:
+//   * 'confirmation'  — once, when the resident submits.
+//   * 'status_update' — on an explicit staff stage change.
 // This function only sends the single email described by the request body. It
 // does not read or write any database and is never invoked automatically.
 
@@ -45,18 +43,18 @@ const STATUS_LABELS: Record<string, string> = {
   received: 'Received',
   assigned: 'Assigned',
   in_review: 'Under review',
-  completed: 'Completed',
+  closed: 'Closed',
 }
 
 // What the resident should expect next, by status — used in the status email.
 const STATUS_NEXT: Record<string, string> = {
   received: 'Your request has been received by municipal staff and is in the queue for review.',
-  assigned: 'Your request has been assigned to a staff member who will look into it.',
-  in_review: 'A staff member is actively reviewing your request.',
-  completed: 'Your request has been marked completed. Thank you for helping keep the city in good shape.',
+  assigned: 'Your request has been assigned to an officer who will investigate.',
+  in_review: 'An officer is actively reviewing your request.',
+  closed: 'Your request has been closed. Thank you for helping keep the city in good shape.',
 }
 
-type EmailType = 'confirmation' | 'status_update' | 'admin_notification'
+type EmailType = 'confirmation' | 'status_update'
 
 type EmailRequest = {
   type: EmailType
@@ -124,7 +122,7 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
   const obj = raw as Record<string, unknown>
 
   const type = str(obj.type).trim()
-  if (type !== 'confirmation' && type !== 'status_update' && type !== 'admin_notification') return null
+  if (type !== 'confirmation' && type !== 'status_update') return null
 
   return {
     type,
@@ -170,7 +168,7 @@ function buildConfirmationPayload(input: EmailRequest, to: Array<{ email: string
       <p>Hi ${safeName},</p>
       <p>Thanks for reaching out. We have received your service request and created a reference for it.</p>
       <table style="font-size:14px;margin:12px 0">${detailRows}</table>
-      <p>Municipal staff will review your request. We will email you as the status changes — submitted, received, under review, and completed.</p>
+      <p>Municipal staff will review your request. We will email you as the status changes — submitted, received, assigned, under review, and closed.</p>
       <p style="color:#64748b;font-size:12px;margin-top:24px">${DEMO_FOOTER_TEXT}</p>
     </div>`
 
@@ -183,7 +181,7 @@ function buildConfirmationPayload(input: EmailRequest, to: Array<{ email: string
     input.requestType ? `Problem type: ${input.requestType}` : '',
     input.location ? `Location: ${input.location}` : '',
     '',
-    'Municipal staff will review your request. We will email you as the status changes — submitted, received, under review, and completed.',
+    'Municipal staff will review your request. We will email you as the status changes — submitted, received, assigned, under review, and closed.',
     '',
     DEMO_FOOTER_TEXT,
   ]
@@ -228,50 +226,10 @@ function buildStatusUpdatePayload(input: EmailRequest, to: Array<{ email: string
   return { sender: senderFromEnv(), to, subject, htmlContent, textContent }
 }
 
-// Helper payload builder for the staff "new request" notification.
-function buildAdminNotificationPayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
-  const caseId = escapeHtml(input.caseId)
-  const residentName = input.residentName ? escapeHtml(input.residentName) : 'Unknown'
-  const requestType = input.requestType ? escapeHtml(input.requestType) : 'Service request'
-  const location = input.location ? escapeHtml(input.location) : 'Not provided'
-
-  const subject = `New resident request ${input.caseId} — ${input.requestType || 'service request'}`
-
-  const rows = [
-    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Reference</td><td style="font-weight:600">${caseId}</td></tr>`,
-    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Resident</td><td>${residentName}</td></tr>`,
-    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Problem type</td><td>${requestType}</td></tr>`,
-    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Location</td><td>${location}</td></tr>`,
-  ].join('')
-
-  const htmlContent = `
-    <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:560px">
-      <p>A new resident service request has been submitted.</p>
-      <table style="font-size:14px;margin:12px 0">${rows}</table>
-      <p>Open the Resident Intake workbench (/app/resident-intake) to review and action it.</p>
-      <p style="color:#64748b;font-size:12px;margin-top:24px">${DEMO_FOOTER_TEXT}</p>
-    </div>`
-
-  const textContent = [
-    'A new resident service request has been submitted.',
-    '',
-    `Reference: ${input.caseId}`,
-    `Resident: ${input.residentName || 'Unknown'}`,
-    `Problem type: ${input.requestType || 'Service request'}`,
-    `Location: ${input.location || 'Not provided'}`,
-    '',
-    'Open the Resident Intake workbench (/app/resident-intake) to review and action it.',
-    '',
-    DEMO_FOOTER_TEXT,
-  ].join('\n')
-
-  return { sender: senderFromEnv(), to, subject, htmlContent, textContent }
-}
-
 function buildPayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
-  if (input.type === 'confirmation') return buildConfirmationPayload(input, to)
-  if (input.type === 'status_update') return buildStatusUpdatePayload(input, to)
-  return buildAdminNotificationPayload(input, to)
+  return input.type === 'confirmation'
+    ? buildConfirmationPayload(input, to)
+    : buildStatusUpdatePayload(input, to)
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -298,30 +256,14 @@ export default async function handler(req: Request): Promise<Response> {
   if (!input.caseId) {
     return json({ error: 'A case id is required.' }, 400)
   }
-
-  // Resolve the recipient. For staff notifications the address is server-owned
-  // (BREVO_NOTIFY_EMAIL) and never taken from the client.
-  let recipient: Array<{ email: string; name?: string }>
-  if (input.type === 'admin_notification') {
-    const notify = (process.env.BREVO_NOTIFY_EMAIL || '').trim().toLowerCase()
-    if (!notify) {
-      // Not configured — skip quietly so the resident submission still succeeds.
-      return json({ ok: false, skipped: true, reason: 'BREVO_NOTIFY_EMAIL not set' }, 200)
-    }
-    if (!isLikelyEmail(notify)) {
-      return json({ error: 'BREVO_NOTIFY_EMAIL is not a valid email address.' }, 500)
-    }
-    recipient = [{ email: notify, name: 'Municipal staff' }]
-  } else {
-    if (!input.to || !isLikelyEmail(input.to)) {
-      return json({ error: 'A valid recipient email address is required.' }, 400)
-    }
-    if (input.type === 'status_update' && !input.status) {
-      return json({ error: 'A status is required for a status update email.' }, 400)
-    }
-    recipient = [{ email: input.to, name: input.residentName || undefined }]
+  if (!input.to || !isLikelyEmail(input.to)) {
+    return json({ error: 'A valid recipient email address is required.' }, 400)
+  }
+  if (input.type === 'status_update' && !input.status) {
+    return json({ error: 'A status is required for a status update email.' }, 400)
   }
 
+  const recipient = [{ email: input.to, name: input.residentName || undefined }]
   const payload = buildPayload(input, recipient)
 
   let brevoRes: Response

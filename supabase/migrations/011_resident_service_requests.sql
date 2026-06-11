@@ -48,9 +48,10 @@ create table if not exists public.resident_service_requests (
   resolution_followup boolean not null default false,
   method_of_contact text,            -- 'Email' | 'Phone'
 
-  -- Canonical status: submitted -> received -> assigned -> in_review -> completed.
+  -- Canonical status mirrors the enforcement lifecycle, up to close:
+  -- submitted -> received -> assigned -> in_review -> closed.
   status text not null default 'submitted'
-    check (status in ('submitted', 'received', 'assigned', 'in_review', 'completed')),
+    check (status in ('submitted', 'received', 'assigned', 'in_review', 'closed')),
   -- Always true for now — this table only ever holds demo submissions.
   is_demo boolean not null default true,
   created_at timestamptz not null default now(),

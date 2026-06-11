@@ -24,8 +24,12 @@ const RESIDENT_EMAIL_ENDPOINT = '/.netlify/functions/send-resident-email'
 export const RESIDENT_DEMO_NOTICE =
   'This is a public demo of a resident service-request flow. Do not enter real personal information — submissions are stored as demo data only.'
 
-// Canonical status values stored on resident_service_requests.status.
-export type ResidentStatus = 'submitted' | 'received' | 'assigned' | 'in_review' | 'completed'
+// Canonical status values stored on resident_service_requests.status. These
+// mirror the enforcement intake-to-closure lifecycle used across the app
+// (Intake -> Triage -> Staff review -> Closure): a request is submitted, then
+// staff move it through received (triage), assigned (to an officer), in_review
+// (active review / inspection), and finally closed.
+export type ResidentStatus = 'submitted' | 'received' | 'assigned' | 'in_review' | 'closed'
 
 /** Human-readable label for each status. */
 export const STATUS_LABELS: Record<ResidentStatus, string> = {
@@ -33,22 +37,22 @@ export const STATUS_LABELS: Record<ResidentStatus, string> = {
   received: 'Received',
   assigned: 'Assigned',
   in_review: 'Under review',
-  completed: 'Completed',
+  closed: 'Closed',
 }
 
 /**
- * The four resident-facing tracker stages. The five canonical statuses map onto
- * these four steps for the public status page ('assigned' and 'in_review' both
- * show as "Under review").
+ * The resident-facing tracker stages, one per canonical status, in order. The
+ * public status page highlights the active one.
  */
 export const RESIDENT_STAGES = [
   { key: 'submitted', label: 'Submitted' },
   { key: 'received', label: 'Received' },
-  { key: 'under_review', label: 'Under review' },
-  { key: 'completed', label: 'Completed' },
+  { key: 'assigned', label: 'Assigned' },
+  { key: 'in_review', label: 'Under review' },
+  { key: 'closed', label: 'Closed' },
 ] as const
 
-/** Index of the active resident tracker stage (0–3) for a given status. */
+/** Index of the active resident tracker stage (0–4) for a given status. */
 export function stageIndexForStatus(status: string): number {
   switch (status) {
     case 'submitted':
@@ -56,18 +60,21 @@ export function stageIndexForStatus(status: string): number {
     case 'received':
       return 1
     case 'assigned':
-    case 'in_review':
       return 2
-    case 'completed':
+    case 'in_review':
       return 3
+    case 'closed':
+      return 4
     default:
       return 0
   }
 }
 
 /**
- * The explicit staff actions, in workflow order. Each maps to a target status,
- * a button label, and the workflow-event type recorded in the audit trail.
+ * The explicit staff actions, in workflow order, mirroring the enforcement
+ * lifecycle all the way to closure. Each maps to a target status, a button
+ * label, and the workflow-event type recorded in the audit trail. Each action,
+ * on an explicit staff click, also emails the resident.
  */
 export const STAFF_ACTIONS: Array<{
   toStatus: ResidentStatus
@@ -75,9 +82,9 @@ export const STAFF_ACTIONS: Array<{
   eventType: string
 }> = [
   { toStatus: 'received', label: 'Mark received', eventType: 'resident_request_received' },
-  { toStatus: 'assigned', label: 'Assign', eventType: 'resident_request_assigned' },
+  { toStatus: 'assigned', label: 'Assign to officer', eventType: 'resident_request_assigned' },
   { toStatus: 'in_review', label: 'Move to review', eventType: 'resident_request_in_review' },
-  { toStatus: 'completed', label: 'Mark completed', eventType: 'resident_request_completed' },
+  { toStatus: 'closed', label: 'Close case', eventType: 'resident_request_closed' },
 ]
 
 /**
@@ -231,7 +238,7 @@ export function generateCaseId(): string {
  * the environment, e.g. local dev without BREVO_API_KEY).
  */
 export async function sendResidentEmail(payload: {
-  type: 'confirmation' | 'status_update' | 'admin_notification'
+  type: 'confirmation' | 'status_update'
   to: string
   residentName: string
   caseId: string
@@ -303,20 +310,10 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
 
   if (error) throw error
 
+  // Only the resident is ever emailed — first this confirmation, then a message
+  // on each staff-driven status change. Staff do not receive email.
   const emailSent = await sendResidentEmail({
     type: 'confirmation',
-    to: row.resident_email,
-    residentName: row.resident_name,
-    caseId,
-    requestType: row.request_type,
-    location: row.location,
-  })
-
-  // Notify municipal staff that a new request arrived. The recipient is
-  // server-owned (BREVO_NOTIFY_EMAIL); `to` here is ignored by the function.
-  // Best-effort — never blocks or fails the resident submission.
-  void sendResidentEmail({
-    type: 'admin_notification',
     to: row.resident_email,
     residentName: row.resident_name,
     caseId,

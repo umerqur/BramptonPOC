@@ -23,15 +23,15 @@ const STATUS_STYLES: Record<ResidentStatus, string> = {
   received: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
   assigned: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200',
   in_review: 'bg-violet-50 text-violet-800 ring-1 ring-inset ring-violet-200',
-  completed: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
+  closed: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
 }
 
 /**
  * Resident Intake Demo — the staff-side workbench for the public resident flow.
  * Authenticated staff see requests residents submitted through /resident, and
- * advance each one (received → assigned → in review → completed). Every advance
- * is an EXPLICIT click that writes a workflow event and emails the resident; no
- * email is ever sent on load or automatically.
+ * advance each one (received → assigned → in review → closed). Every advance is
+ * an EXPLICIT click that writes a workflow event and emails the resident; no
+ * email is ever sent on load or automatically. Staff themselves receive no email.
  */
 export default function AppResidentIntakePage() {
   const [state, setState] = useState<LoadState>({ rows: [], loading: true, error: null })
