@@ -21,11 +21,12 @@ export default function ResidentHomePage() {
       <div className="max-w-3xl">
         <div className="section-eyebrow">Resident Services · Demo</div>
         <h1 className="mt-2 text-3xl sm:text-4xl font-semibold tracking-tight text-navy-900">
-          Report an issue to the city
+          Report a Parking Infraction
         </h1>
         <p className="mt-3 text-ink-muted">
-          Submit a non-emergency service request — property standards, noise, parking, waste, and more. You&apos;ll get a
-          reference number and email updates as municipal staff work your request.
+          Submit a non-emergency parking infraction service request. Tell us the location and problem type, provide your
+          contact information, and you&apos;ll get a reference number plus email updates as enforcement staff work your
+          request.
         </p>
 
         <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -34,7 +35,7 @@ export default function ResidentHomePage() {
 
         <div className="mt-8 flex flex-wrap gap-3">
           <Link to="/resident/new-request" className="btn-primary">
-            Submit a new request
+            Create request
           </Link>
         </div>
       </div>

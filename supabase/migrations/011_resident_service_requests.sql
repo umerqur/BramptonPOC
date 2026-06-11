@@ -7,12 +7,17 @@
 -- touches operational records. It holds only demo submissions entered through
 -- the public /resident flow.
 --
+-- The field set mirrors the real City of Brampton 311 "Report a Parking
+-- Infraction" Service Request Form (Location → Details → Contact → Review):
+-- an address/intersection location, a parking problem type plus additional
+-- information, and the resident's contact details.
+--
 -- PRIVACY MODEL
 -- -------------
 -- A resident submits a request (anon INSERT). Resident contact details
--- (email / phone) are NEVER exposed to anonymous readers: anon has no SELECT on
--- the base table. The public status page looks a single request up by its demo
--- case id through the SECURITY DEFINER function
+-- (email / phone / postal code) are NEVER exposed to anonymous readers: anon
+-- has no SELECT on the base table. The public status page looks a single
+-- request up by its demo case id through the SECURITY DEFINER function
 -- public.get_resident_request_status(text), which returns only non-sensitive
 -- columns. Authenticated staff (the /app workbench) may read the full row and
 -- update the status as they work the request.
@@ -20,12 +25,29 @@
 create table if not exists public.resident_service_requests (
   id uuid primary key default gen_random_uuid(),
   case_id text not null unique,
-  resident_name text not null,
-  resident_email text not null,
-  resident_phone text,
-  request_type text not null,
-  location text not null,
-  description text not null,
+
+  -- Step 1 — Location of concern
+  address_type text,                 -- 'Street Address' | 'Intersection'
+  location text not null,            -- street address or nearest intersection
+  city text,
+  province text,
+
+  -- Step 2 — Details
+  request_type text not null,        -- "Problem Type" (parking infraction type)
+  description text,                  -- "Additional Information" (optional)
+
+  -- Step 3 — Contact
+  first_name text not null,
+  last_name text not null,
+  resident_name text not null,       -- "{first} {last}", for display
+  unit_number text,
+  postal_code text,
+  country text,
+  resident_phone text,               -- contact phone number
+  resident_email text not null,      -- contact email address
+  resolution_followup boolean not null default false,
+  method_of_contact text,            -- 'Email' | 'Phone'
+
   -- Canonical status: submitted -> received -> assigned -> in_review -> completed.
   status text not null default 'submitted'
     check (status in ('submitted', 'received', 'assigned', 'in_review', 'completed')),
@@ -86,13 +108,15 @@ with check (true);
 -- Public status lookup by demo case id. SECURITY DEFINER so an anonymous
 -- resident can check the status of their own request without granting anon a
 -- broad SELECT over contact details. Returns ONLY non-sensitive columns and a
--- single row matched on the exact case id (no enumeration, no email / phone).
+-- single row matched on the exact case id (no enumeration, no email / phone /
+-- postal code).
 create or replace function public.get_resident_request_status(p_case_id text)
 returns table (
   case_id text,
   resident_name text,
   request_type text,
   location text,
+  city text,
   status text,
   created_at timestamptz,
   updated_at timestamptz
@@ -106,6 +130,7 @@ as $$
     r.resident_name,
     r.request_type,
     r.location,
+    r.city,
     r.status,
     r.created_at,
     r.updated_at

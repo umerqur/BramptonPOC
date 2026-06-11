@@ -169,12 +169,15 @@ function RequestCard({
         <Detail label="Resident" value={row.resident_name} />
         <Detail label="Email" value={row.resident_email} />
         <Detail label="Phone" value={row.resident_phone || '—'} />
-        <Detail label="Location" value={row.location} />
+        <Detail label="Method of contact" value={row.method_of_contact || '—'} />
+        <Detail label="Location" value={[row.location, row.city].filter(Boolean).join(', ')} />
+        <Detail label="Postal code" value={row.postal_code || '—'} />
+        <Detail label="Resolution followup" value={row.resolution_followup ? 'Yes' : 'No'} />
       </dl>
 
       <div className="mt-3">
-        <div className="text-xs uppercase tracking-wide text-ink-subtle">Description</div>
-        <p className="mt-0.5 text-sm text-ink">{row.description}</p>
+        <div className="text-xs uppercase tracking-wide text-ink-subtle">Additional information</div>
+        <p className="mt-0.5 text-sm text-ink">{row.description || '—'}</p>
       </div>
 
       <div className="mt-4 border-t border-slate-100 pt-4">
