@@ -15,6 +15,11 @@ import AppTorontoWardContextPage from './pages/app/AppTorontoWardContextPage'
 import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
 import AppV2MlResultsPage from './pages/app/AppV2MlResultsPage'
 import AppClosureReviewPage from './pages/app/AppClosureReviewPage'
+import AppResidentIntakePage from './pages/app/AppResidentIntakePage'
+import ResidentLayout from './components/resident/ResidentLayout'
+import ResidentHomePage from './pages/resident/ResidentHomePage'
+import ResidentNewRequestPage from './pages/resident/ResidentNewRequestPage'
+import ResidentStatusPage from './pages/resident/ResidentStatusPage'
 
 export default function App() {
   return (
@@ -35,6 +40,15 @@ export default function App() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
 
+      {/* Public resident simulation flow — a self-serve 311 service request
+          portal. Demo data only; kept separate from the benchmark dataset and
+          the authenticated staff app. */}
+      <Route element={<ResidentLayout />}>
+        <Route path="/resident" element={<ResidentHomePage />} />
+        <Route path="/resident/new-request" element={<ResidentNewRequestPage />} />
+        <Route path="/resident/status/:caseId" element={<ResidentStatusPage />} />
+      </Route>
+
       {/* Authenticated app (live Supabase data) */}
       <Route path="/app" element={<ProtectedRoute />}>
         <Route index element={<Navigate to="/app/closure-review" replace />} />
@@ -44,6 +58,7 @@ export default function App() {
         <Route path="insights" element={<AppWorkloadInsightsPage />} />
         <Route path="v2-ml" element={<AppV2MlResultsPage />} />
         <Route path="closure-review" element={<AppClosureReviewPage />} />
+        <Route path="resident-intake" element={<AppResidentIntakePage />} />
         <Route path="cases" element={<AppCaseQueuePage />} />
         <Route path="cases/:id" element={<AppCaseDetailPage />} />
       </Route>

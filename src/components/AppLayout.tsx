@@ -38,6 +38,7 @@ export default function AppLayout() {
 
           <nav className="hidden lg:flex items-center gap-2">
             <StaffLink to="/app/closure-review">Closure Workbench</StaffLink>
+            <StaffLink to="/app/resident-intake">Resident Intake</StaffLink>
             <StaffLink to="/app/insights">Insights</StaffLink>
             <StaffLink to="/methodology">Methodology</StaffLink>
             {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
@@ -61,6 +62,7 @@ export default function AppLayout() {
           <div className="lg:hidden border-t border-slate-200 bg-white">
             <div className="container-page py-3 flex flex-col gap-1">
               <StaffLink to="/app/closure-review" onClick={() => setOpen(false)}>Closure Workbench</StaffLink>
+              <StaffLink to="/app/resident-intake" onClick={() => setOpen(false)}>Resident Intake</StaffLink>
               <StaffLink to="/app/insights" onClick={() => setOpen(false)}>Insights</StaffLink>
               <StaffLink to="/methodology" onClick={() => setOpen(false)}>Methodology</StaffLink>
               <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>

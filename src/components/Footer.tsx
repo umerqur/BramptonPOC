@@ -20,6 +20,7 @@ export default function Footer() {
           <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-subtle">Product</h4>
           <ul className="mt-3 space-y-2 text-sm">
             <li><Link to="/how-it-works" className="link-quiet">How It Works</Link></li>
+            <li><Link to="/resident" className="link-quiet">Resident portal (demo)</Link></li>
             <li><Link to="/login" className="link-quiet">Authorized staff login</Link></li>
           </ul>
         </div>
