@@ -1,10 +1,10 @@
-# AI-Assisted Municipal Enforcement Intelligence
+# Proactive Enforcement Intelligence — Brampton compatible POC
 
-Decision support for municipal enforcement teams — AI-assisted triage, explainable risk scoring, and staff-ready case preparation.
+Decision support for municipal enforcement teams — AI-assisted triage, explainable scoring, workload insights, and staff-ready case preparation.
 
 This repository contains the proof of concept (POC) website: a Vite + React + TypeScript application styled with Tailwind CSS and routed with React Router. It is designed to be demo-ready for a City of Brampton conversation and deploys cleanly on Netlify.
 
-> **Positioning.** This system is **decision support for authorized municipal staff**. It does not make enforcement decisions, issue notices, or act autonomously. It surfaces explainable risk scores, risk drivers, recommended actions, stale-case flags, and a priority queue so that staff can triage faster — a human reviews and decides on every case. The prototype is modelled on **real public NYC 311 service request data, normalized into a Brampton compatible municipal enforcement schema**, with synthetic records used only for non-public internal workflow fields (patrol logs, ticket history, officer notes, closure outcomes). No private City data is required for the initial POC, and the schema is ready for Brampton enforcement data later.
+> **Positioning.** This is a **Brampton compatible Proactive Enforcement Intelligence POC using Toronto 311 public benchmark data**. It is **not Brampton operational data**. Real public Toronto 311 service request data is normalized into a Brampton compatible municipal enforcement schema and used to demonstrate **workflow triage, case queueing, workload insights, ML "Needs Attention" scoring, closure review, and AI-assisted staff review packets**. The system is decision support for authorized municipal staff: it does not make enforcement decisions, issue notices, or act autonomously — a human reviews and decides on every case. No private City data is required for the POC, and the schema is ready for Brampton enforcement data later.
 
 ---
 
@@ -12,9 +12,24 @@ This repository contains the proof of concept (POC) website: a Vite + React + Ty
 
 **The app uses Supabase live data when configured, and falls back to bundled sample (mock) data when it is not.**
 
-- **Live data:** when the Supabase environment variables are set, the dashboard, case queue, and case detail views read from the Supabase table **`municipal_service_requests`** (real public NYC 311 records normalized into the enforcement schema). See `src/services/municipalServiceRequests.ts` and `src/lib/supabase.ts`.
-- **Sample fallback:** when the variables are missing — or a live query fails — the app falls back to the bundled sample dataset in `src/data/mockCases.ts`, so the POC always renders without a backend.
-- **Always visible:** every data-driven screen shows a badge indicating whether it is displaying **Live data: Supabase** or **Sample data (Supabase not configured)**, and carries the disclaimer that this is public NYC 311 data, not Brampton operational data.
+The current service layer (`src/services/municipalServiceRequests.ts`) reads from these Supabase tables and views:
+
+| Object | Role |
+| --- | --- |
+| `municipal_complaints` | **Primary complaints table.** Toronto 311 public benchmark records normalized into the Brampton compatible enforcement schema. Drives the dashboard, case queue, and case detail. |
+| `workflow_events` | Staff workflow events (triage, stage changes) over the benchmark data; surfaced via the `v_recent_workflow_events` view. |
+| `ai_triage_results` | Rule-based POC triage outputs (advisory only). |
+| `case_ai_reviews` | Persisted AI-assisted staff review records. |
+| `workload_insights_v1` | v1 workload-density model outputs — one scored location per model run, with full provenance (source city, dataset, model version, feature window). |
+| `workflow_ml_predictions` | V2 workflow ML model outputs — "Needs Attention" score, tier, and rank per scored complaint. Drives the V2 ML results and Closure Review pages. |
+| `toronto_ward_boundaries` | The 25 real City of Toronto ward polygons (City of Toronto Open Data "City Wards"), used as the geographic base layer. |
+| `v_toronto_ward_workload` | Real Toronto 311 benchmark complaint volume aggregated per Toronto ward from `municipal_complaints`. |
+| `v_workflow_stage_counts` | Live counts by workflow stage for the Operations Workflow Console. |
+| `brampton_ward_boundaries` / `brampton_ward_workload_scenarios` | Real Brampton ward boundaries with a clearly labelled **synthetic** workload overlay — Toronto benchmark records are never plotted onto Brampton wards. |
+
+- **Sample fallback:** when the Supabase variables are missing — or a live query fails — the app falls back to the bundled sample dataset in `src/data/`, so the POC always renders without a backend.
+- **Always visible:** every data-driven screen shows a badge indicating whether it is displaying **Live data: Supabase** or **Sample data**, and carries the disclaimer that this is Toronto 311 public benchmark data, not Brampton operational data.
+- **Legacy:** `supabase/migrations/001_create_municipal_service_requests.sql` creates the original `municipal_service_requests` table from an earlier iteration. It is **legacy** — the app's service layer no longer reads it; `municipal_complaints` is the active complaints table.
 
 To connect a live data layer, copy `.env.example` to `.env.local` (which is gitignored and never committed) and fill in:
 
@@ -23,30 +38,33 @@ VITE_SUPABASE_URL=https://YOUR-PROJECT-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-public-key
 ```
 
-The Supabase schema lives in `supabase/migrations/001_create_municipal_service_requests.sql`.
+The Supabase schema lives in `supabase/migrations/` (001–008, applied in order). Read access to operational tables is restricted to the `authenticated` role.
 
 ---
 
 ## What it demonstrates
 
-- A landing page outlining the problem, the solution, and the **assistive** role of AI.
-- A demo **dashboard** (KPI cards, categories breakdown, hotspot map placeholder, priority queue) connected to Supabase with a sample fallback.
-- A filterable **case queue** ranked by explainable risk score, connected to Supabase with a sample fallback.
-- A **case detail** page showing the request, risk explanation with named risk drivers, a recommended action presented for staff review, and an audit-trail placeholder.
-- A **methodology** page explaining scope, data sources, feature design, risk scoring, AI use, human review, limitations, and the next phase.
-- A **privacy and security** page describing the governance and human-oversight principles applied to the POC.
-- A **login** mock-up illustrating the access pattern for City staff (no real authentication).
+- A public marketing site (landing, how-it-works, methodology, privacy) explaining the POC and the **assistive** role of AI — no public operational data demo.
+- An authenticated app (`/app`, Supabase magic-link login) with:
+  - **Dashboard** — KPI cards and category breakdowns over the live benchmark data.
+  - **Case queue and case detail** — filterable queue with server-side filtering against `municipal_complaints`, plus per-case detail with explainable triage signals.
+  - **Operations Workflow Console** — workflow-stage counts and recent staff workflow events, demonstrating triage and case progression.
+  - **Toronto ward workload context** — real Toronto ward polygons with real Toronto 311 ward-level complaint volume.
+  - **Workload insights (v1)** — scored locations from the v1 workload-density model.
+  - **V2 ML results** — the full scored benchmark from the V2 workflow ML model ("Needs Attention" score, tier, rank).
+  - **Closure review** — the needs-attention slice of `workflow_ml_predictions`, linked back to source case files, with an **AI-assisted staff review packet** generated server-side on explicit staff request.
+- AI-assisted review packets are produced by Netlify functions (`netlify/functions/`) that hold the Anthropic API key server-side; the browser never sees the key, drafts are advisory only, and nothing is sent to a resident.
 
 ---
 
 ## Positioning principles
 
 - **Decision support, not automated enforcement.** The system never issues notices or penalties on its own.
-- **Human review by design.** Every recommended action is advisory; authorized municipal staff make every final decision.
-- **Explainable risk scoring.** Each 0–100 score is published with the named risk drivers that produced it — no black box.
+- **Human review by design.** Every score, triage result, and AI-drafted review packet is advisory; authorized municipal staff make every final decision.
+- **Explainable scoring.** Scores are published with the drivers and provenance that produced them — no black box. Model outputs carry source city, dataset, model version, and scoring period on every row.
 - **Staff-ready summaries.** Outputs are framed as briefing material for officers to review, not as decisions.
-- **Auditability and governance.** Risk scores, AI-generated content, and staff actions are designed to be logged and reviewable.
-- **Agentic workflows are a later phase only.** Automated or agentic workflows are intentionally **out of scope** for this POC. They would be considered only after the data model, dashboards, risk scoring, governance, and the human-review process are proven in a Brampton context.
+- **Auditability and governance.** Scores, AI-generated content, and staff workflow events are logged and reviewable.
+- **Benchmark data is clearly separated from Brampton context.** Toronto 311 benchmark records are never plotted onto Brampton wards; the Brampton ward workload overlay is explicitly labelled synthetic.
 
 ---
 
@@ -56,8 +74,9 @@ The Supabase schema lives in `supabase/migrations/001_create_municipal_service_r
 - **React 18 + TypeScript**
 - **Tailwind CSS** — design system
 - **React Router** — page routing
-- **Supabase** — live data layer (`municipal_service_requests`), with a bundled sample dataset (`src/data/`) as fallback
-- **Data pipeline** — a local NYC 311 cleaning pipeline (`scripts/`) and a Supabase migration (`supabase/migrations/`)
+- **Supabase** — live data layer (`municipal_complaints` and related tables/views above), with a bundled sample dataset (`src/data/`) as fallback
+- **Netlify functions** — server-side AI review packet generation (Anthropic API key never exposed to the browser)
+- **Data and ML pipeline** — local Python scripts (`scripts/`): Toronto 311 EDA, v1 workload-density model training, V2 workflow ML training/scoring, and Supabase upload utilities
 
 ---
 
@@ -95,32 +114,48 @@ src/
   components/       Shared UI primitives (Header, Footer, StatCard, RiskBadge, …)
   data/             Sample (fallback) dataset and TypeScript types
   lib/              Supabase client (live data when configured)
-  services/         Data-access layer for municipal_service_requests + mock fallback
-  pages/            One file per route
+  services/         Data-access layer for municipal_complaints + related tables/views,
+                    and the AI review packet client
+  pages/            Public site pages, one file per route
+  pages/app/        Authenticated app pages (dashboard, workflow, wards, insights,
+                    V2 ML results, closure review, case queue/detail)
   App.tsx           Route definitions
   main.tsx          App entrypoint
   index.css         Tailwind layers + design tokens
+netlify/
+  functions/        Server-side AI review packet + case agent functions
 public/
   _redirects        Netlify SPA redirect rule
   favicon.svg
+scripts/            Toronto 311 EDA, v1/V2 model training, scoring, and upload scripts
+supabase/
+  migrations/       Schema migrations 001–008 (001 is the legacy
+                    municipal_service_requests table; 002+ cover RLS,
+                    municipal_complaints workflow, ward context, workload
+                    insights, and workflow ML predictions)
 netlify.toml        Build settings for Netlify
 tailwind.config.js  Design tokens (navy + accent palette)
-supabase/
-  migrations/       municipal_service_requests schema
 ```
 
 ### Pages
 
-| Route             | Page                |
-| ----------------- | ------------------- |
-| `/`               | Landing             |
-| `/how-it-works`   | How It Works        |
-| `/dashboard`      | Demo Dashboard      |
-| `/cases`          | Case Queue          |
-| `/cases/:id`      | Case Detail         |
-| `/methodology`    | POC Methodology     |
-| `/privacy`        | Privacy & Security  |
-| `/login`          | Login mock-up       |
+| Route                 | Page                                  |
+| --------------------- | ------------------------------------- |
+| `/`                   | Landing                               |
+| `/how-it-works`       | How It Works                          |
+| `/methodology`        | POC Methodology                       |
+| `/privacy`            | Privacy & Security                    |
+| `/login`              | Login (Supabase magic-link)           |
+| `/app/dashboard`      | Dashboard (authenticated)             |
+| `/app/cases`          | Case Queue (authenticated)            |
+| `/app/cases/:id`      | Case Detail (authenticated)           |
+| `/app/workflow`       | Operations Workflow Console           |
+| `/app/wards`          | Toronto Ward Workload Context         |
+| `/app/insights`       | Workload Insights (v1 model)          |
+| `/app/v2-ml`          | V2 ML Results ("Needs Attention")     |
+| `/app/closure-review` | Closure Review + AI review packet     |
+
+Old public demo routes (`/dashboard`, `/cases`) redirect to `/login`; the live versions are under `/app`.
 
 ---
 
@@ -131,9 +166,9 @@ The repository includes a `netlify.toml` and a `public/_redirects` file so the a
 - **Build command:** `npm run build`
 - **Publish directory:** `dist`
 - **Node version:** 20 (set in `netlify.toml`)
-- SPA fallback: every unknown path serves `index.html` so client-side routing works.
+- SPA fallback: every unknown path serves `index.html` so client-side routing works (`/.netlify/functions/*` is never shadowed).
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Netlify site's environment variables to enable live data; otherwise the deployed site runs on the sample dataset.
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Netlify site's environment variables to enable live data, `VITE_APP_BASE_URL` so magic-link redirects return to the deployed site, and `ANTHROPIC_API_KEY` (server-side only, never `VITE_`-prefixed) for the AI review packet functions.
 
 ### Live data on Netlify shows "Sample data" — troubleshooting
 
@@ -143,7 +178,7 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Netlify site's envir
 2. **Trigger a fresh deploy** after setting them — values added after the last build do not apply until the next build. Use **Deploys → Trigger deploy → Clear cache and deploy site**.
 3. **Read the data-source badge** on the dashboard / case queue to tell the two failure modes apart:
    - **"Sample data (Supabase not configured)"** — the variables were missing at build time (revisit steps 1–2).
-   - **"Sample data (Supabase query failed)"** — the variables were present, but the live query failed at runtime. Check that the `municipal_service_requests` table exists, is populated, and that a row-level-security read policy grants the `anon` role `SELECT`.
+   - **"Sample data (Supabase query failed)"** — the variables were present, but the live query failed at runtime. Check that the `municipal_complaints` table exists, is populated, and that the row-level-security policies grant the `authenticated` role `SELECT` (and that the user is signed in).
 
 ---
 
@@ -151,22 +186,22 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Netlify site's envir
 
 Full version lives on the in-app `/methodology` page. Short form:
 
-1. **Ingest.** Real public NYC 311 service request data, open geospatial / reference data where available, and synthetic placeholders only for non-public internal records (patrol logs, ticket history, officer notes, closure workflow).
-2. **Normalize.** Standardize addresses, categories, and timestamps so complaints across channels can be compared.
-3. **Detect patterns.** Identify repeat complaints, geographic clusters, and category escalation across rolling time windows.
-4. **Score risk.** A transparent, rules-based score with named drivers, normalized to 0–100 and mapped to Low / Medium / High / Critical. The same feature design is ML-ready when labeled outcomes become available.
-5. **Summarize.** Generate plain-language case summaries, risk explanations, and staff-ready briefing notes.
+1. **Ingest.** Real public Toronto 311 service request data and real open geospatial reference data (Toronto and Brampton ward boundaries), with synthetic placeholders only for non-public internal records and the clearly labelled Brampton workload overlay.
+2. **Normalize.** Standardize addresses, categories, and timestamps into the Brampton compatible enforcement schema (`municipal_complaints`) so complaints across channels can be compared.
+3. **Detect patterns.** Identify repeat complaints, geographic clusters, and ward-level workload concentration across rolling time windows.
+4. **Score.** Transparent rule-based triage plus two ML layers — the v1 workload-density model (`workload_insights_v1`) and the V2 workflow ML model (`workflow_ml_predictions`, "Needs Attention" score / tier / rank) — every output carrying provenance and an advisory disclaimer.
+5. **Summarize.** Generate plain-language case summaries, triage explanations, and AI-assisted staff review packets (server-side, on explicit staff request).
 6. **Recommend.** Suggest a next operational action (Monitor, Merge, Schedule inspection, Escalate for supervisor review, Send notice, Prepare officer visit) **for staff review**.
 
 ### Out of scope for this POC
 
 - Private City data integration (deferred to a later phase, under privacy and cybersecurity controls).
-- Automated notices, penalties, or external communications.
-- Automated or agentic enforcement workflows (a deliberate later phase, only after the data model, dashboards, governance, and human review are proven).
-- Production-grade authentication and role-based access (the login page is a mock-up).
+- Automated notices, penalties, or external communications — AI drafts are never sent to residents.
+- Fully autonomous enforcement workflows (a deliberate later phase, only after the data model, dashboards, governance, and human review are proven).
+- Production-grade authentication and role-based access beyond the Supabase magic-link login used for the demo.
 
 ### Important positioning
 
 - This is not replacing officers — it is **decision support**.
-- It is modelled on **real public NYC 311 service request data**, normalized into a Brampton compatible enforcement schema, with synthetic data only for non-public internal fields. **It is not Brampton operational data.**
-- The schema is ready for Brampton enforcement data; City-provided data can replace or supplement the NYC data later under privacy and cybersecurity controls.
+- It is a **Brampton compatible POC built on real public Toronto 311 service request benchmark data**, normalized into a Brampton compatible enforcement schema, with synthetic data only for non-public internal fields and the labelled Brampton workload overlay. **It is not Brampton operational data.**
+- The schema is ready for Brampton enforcement data; City-provided data can replace or supplement the Toronto 311 benchmark data later under privacy and cybersecurity controls.
