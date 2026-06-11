@@ -80,27 +80,72 @@ export const STAFF_ACTIONS: Array<{
   { toStatus: 'completed', label: 'Mark completed', eventType: 'resident_request_completed' },
 ]
 
-/** Request-type options shown in the resident submission form. */
-export const REQUEST_TYPES = [
-  'Property standards',
-  'Noise',
-  'Parking',
-  'Waste & illegal dumping',
-  'Long grass & weeds',
-  'Zoning',
-  'Other',
+/**
+ * Parking infraction "Problem Type" options, mirroring the City of Brampton 311
+ * "Report a Parking Infraction" Service Request Form.
+ */
+export const PARKING_PROBLEM_TYPES = [
+  'Idling',
+  'Immobile Vehicle on City Street',
+  'Multiple Offences',
+  'Other Offences',
+  'Oversized Motor Vehicle on City Street',
+  'Oversized Motor Vehicle on Private Property',
+  'Parked 15CM from Curb',
+  'Parked between 2:00am-6:00am',
+  'Parked Blocking Fire Hydrant',
+  'Parked in a Bike Lane',
+  'Parked in a Prohibited Parking Area',
+  'Parked in a Prohibited Stop Area',
+  'Parked in Accessible Space Access Aisle',
+  'Parked in an Accessible Space',
+  'Parked in Fire Route',
+  'Parked in Laneway',
+  'Parked Interfering with Snow Clearing',
+  'Parked more than 3 Hours',
+  'Parked more than Posted Time Limit',
+  'Parked on the Boulevard - Grass',
+  'Parked on the Sidewalk',
+  'Parked Overhanging Curb',
+  'Parked the Wrong Way',
+  'Parked Vehicle Obstructing Traffic',
+  'Parked within 9M of Intersection',
+  'Parking on Grass, Walkway or Other Materials',
+  'Time as Posted - No Parking',
+  'Time as Posted - No Stopping',
+  'Trailer Parked on City Street',
+  'Unauthorized Vehicle in Private Driveway',
+  'Unauthorized Vehicle Parked on Municipal Property',
+  'Unlicensed Vehicle',
+  'Vehicle parked in taxi stand',
 ] as const
+
+/** Address type options for the Location step. */
+export const ADDRESS_TYPES = ['Street Address', 'Intersection'] as const
+
+/** Preferred method-of-contact options for the Contact step. */
+export const METHOD_OF_CONTACT_OPTIONS = ['Email', 'Phone'] as const
 
 /** Full row of public.resident_service_requests (staff / authenticated view). */
 export type ResidentRequestRow = {
   id: string
   case_id: string
-  resident_name: string
-  resident_email: string
-  resident_phone: string | null
-  request_type: string
+  address_type: string | null
   location: string
-  description: string
+  city: string | null
+  province: string | null
+  request_type: string
+  description: string | null
+  first_name: string
+  last_name: string
+  resident_name: string
+  unit_number: string | null
+  postal_code: string | null
+  country: string | null
+  resident_phone: string | null
+  resident_email: string
+  resolution_followup: boolean
+  method_of_contact: string | null
   status: ResidentStatus
   is_demo: boolean
   created_at: string
@@ -113,19 +158,35 @@ export type ResidentRequestStatus = {
   resident_name: string
   request_type: string
   location: string
+  city: string | null
   status: ResidentStatus
   created_at: string
   updated_at: string
 }
 
-/** Fields a resident enters in the submission form. */
+/**
+ * Fields a resident enters in the multi-step submission form, mirroring the
+ * Brampton 311 "Report a Parking Infraction" Service Request Form.
+ */
 export type ResidentRequestInput = {
-  name: string
-  email: string
-  phone?: string
-  requestType: string
+  // Location
+  addressType: string
   location: string
-  description: string
+  city: string
+  province: string
+  // Details
+  requestType: string
+  description?: string
+  // Contact
+  firstName: string
+  lastName: string
+  unitNumber?: string
+  postalCode: string
+  country: string
+  phone: string
+  email: string
+  resolutionFollowup: boolean
+  methodOfContact: string
 }
 
 function requireClient() {
@@ -206,13 +267,25 @@ export type SubmitResult = {
 export async function submitResidentRequest(input: ResidentRequestInput): Promise<SubmitResult> {
   const client = requireClient()
 
+  const firstName = input.firstName.trim()
+  const lastName = input.lastName.trim()
   const row = {
-    resident_name: input.name.trim(),
-    resident_email: input.email.trim().toLowerCase(),
-    resident_phone: input.phone?.trim() ? input.phone.trim() : null,
-    request_type: input.requestType.trim(),
+    address_type: input.addressType.trim() || null,
     location: input.location.trim(),
-    description: input.description.trim(),
+    city: input.city.trim() || null,
+    province: input.province.trim() || null,
+    request_type: input.requestType.trim(),
+    description: input.description?.trim() ? input.description.trim() : null,
+    first_name: firstName,
+    last_name: lastName,
+    resident_name: `${firstName} ${lastName}`.trim(),
+    unit_number: input.unitNumber?.trim() ? input.unitNumber.trim() : null,
+    postal_code: input.postalCode.trim() || null,
+    country: input.country.trim() || null,
+    resident_phone: input.phone.trim() ? input.phone.trim() : null,
+    resident_email: input.email.trim().toLowerCase(),
+    resolution_followup: input.resolutionFollowup,
+    method_of_contact: input.methodOfContact.trim() || null,
     status: 'submitted' as const,
     is_demo: true,
   }
@@ -255,7 +328,7 @@ export async function getResidentRequestStatus(caseId: string): Promise<Resident
 }
 
 const RESIDENT_REQUEST_COLUMNS =
-  'id, case_id, resident_name, resident_email, resident_phone, request_type, location, description, status, is_demo, created_at, updated_at'
+  'id, case_id, address_type, location, city, province, request_type, description, first_name, last_name, resident_name, unit_number, postal_code, country, resident_phone, resident_email, resolution_followup, method_of_contact, status, is_demo, created_at, updated_at'
 
 /** Staff (authenticated) — read resident demo requests, newest first. */
 export async function getResidentRequests(limit = 100): Promise<ResidentRequestRow[]> {

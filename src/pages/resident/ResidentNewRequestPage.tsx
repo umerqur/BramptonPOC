@@ -1,30 +1,60 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { isSupabaseConfigured } from '../../lib/supabase'
 import {
-  REQUEST_TYPES,
+  ADDRESS_TYPES,
+  METHOD_OF_CONTACT_OPTIONS,
+  PARKING_PROBLEM_TYPES,
   RESIDENT_DEMO_NOTICE,
   submitResidentRequest,
   type ResidentRequestInput,
 } from '../../services/residentRequests'
 
+// This flow mirrors the City of Brampton 311 "Report a Parking Infraction"
+// Service Request Form: a consent gate, then a four-step wizard
+// (Location → Details → Contact → Review). It is a demo reconstruction — do not
+// enter real personal information.
+
 type FormState = {
-  name: string
-  email: string
-  phone: string
-  requestType: string
+  // Location
+  addressType: string
   location: string
+  city: string
+  province: string
+  // Details
+  requestType: string
   description: string
+  // Contact
+  firstName: string
+  lastName: string
+  unitNumber: string
+  postalCode: string
+  country: string
+  phone: string
+  email: string
+  resolutionFollowup: boolean
+  methodOfContact: string
 }
 
-const EMPTY: FormState = {
-  name: '',
-  email: '',
-  phone: '',
-  requestType: '',
+const INITIAL: FormState = {
+  addressType: '',
   location: '',
+  city: 'Brampton',
+  province: 'Ontario',
+  requestType: '',
   description: '',
+  firstName: '',
+  lastName: '',
+  unitNumber: '',
+  postalCode: '',
+  country: 'Canada',
+  phone: '',
+  email: '',
+  resolutionFollowup: true,
+  methodOfContact: '',
 }
+
+const STEPS = ['Location', 'Details', 'Contact', 'Review'] as const
 
 type Status =
   | { kind: 'idle' }
@@ -33,30 +63,64 @@ type Status =
   | { kind: 'error'; message: string }
 
 export default function ResidentNewRequestPage() {
-  const [form, setForm] = useState<FormState>(EMPTY)
+  const [agreed, setAgreed] = useState(false)
+  const [step, setStep] = useState(0)
+  const [form, setForm] = useState<FormState>(INITIAL)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
+  const [stepError, setStepError] = useState<string | null>(null)
 
-  function update<K extends keyof FormState>(key: K, value: string) {
+  function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
+    if (stepError) setStepError(null)
     if (status.kind === 'error') setStatus({ kind: 'idle' })
   }
 
-  function validate(): string | null {
-    if (!form.name.trim()) return 'Please enter your name.'
-    if (!form.email.trim()) return 'Please enter your email so we can send updates.'
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Please enter a valid email address.'
-    if (!form.requestType) return 'Please choose a request type.'
-    if (!form.location.trim()) return 'Please enter the location of the issue.'
-    if (!form.description.trim()) return 'Please describe the issue.'
+  function validateStep(index: number): string | null {
+    if (index === 0) {
+      if (!form.addressType) return 'Please choose a type of address.'
+      if (!form.location.trim()) return 'Please provide the address or nearest intersection.'
+      if (!form.city.trim()) return 'Please provide a city.'
+      if (!form.province.trim()) return 'Please provide a province.'
+    }
+    if (index === 1) {
+      if (!form.requestType) return 'Please choose a problem type.'
+    }
+    if (index === 2) {
+      if (!form.firstName.trim()) return 'Please enter your first name.'
+      if (!form.lastName.trim()) return 'Please enter your last name.'
+      if (!form.postalCode.trim()) return 'Please enter your postal code.'
+      if (!form.phone.trim()) return 'Please enter a contact phone number.'
+      if (!form.email.trim()) return 'Please enter a contact email address.'
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Please enter a valid email address.'
+      if (!form.methodOfContact) return 'Please choose a method of contact.'
+    }
     return null
+  }
+
+  function goNext() {
+    const problem = validateStep(step)
+    if (problem) {
+      setStepError(problem)
+      return
+    }
+    setStep((s) => Math.min(s + 1, STEPS.length - 1))
+  }
+
+  function goBack() {
+    setStepError(null)
+    setStep((s) => Math.max(s - 1, 0))
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    const problem = validate()
-    if (problem) {
-      setStatus({ kind: 'error', message: problem })
-      return
+    // Re-validate every input-bearing step before final submit.
+    for (let i = 0; i <= 2; i++) {
+      const problem = validateStep(i)
+      if (problem) {
+        setStep(i)
+        setStepError(problem)
+        return
+      }
     }
     if (!isSupabaseConfigured) {
       setStatus({
@@ -68,25 +132,32 @@ export default function ResidentNewRequestPage() {
 
     setStatus({ kind: 'submitting' })
     const input: ResidentRequestInput = {
-      name: form.name,
-      email: form.email,
-      phone: form.phone || undefined,
-      requestType: form.requestType,
+      addressType: form.addressType,
       location: form.location,
-      description: form.description,
+      city: form.city,
+      province: form.province,
+      requestType: form.requestType,
+      description: form.description || undefined,
+      firstName: form.firstName,
+      lastName: form.lastName,
+      unitNumber: form.unitNumber || undefined,
+      postalCode: form.postalCode,
+      country: form.country,
+      phone: form.phone,
+      email: form.email,
+      resolutionFollowup: form.resolutionFollowup,
+      methodOfContact: form.methodOfContact,
     }
     try {
       const result = await submitResidentRequest(input)
       setStatus({ kind: 'success', caseId: result.caseId, emailSent: result.emailSent })
     } catch (err) {
       console.error('Resident request submission failed:', err)
-      setStatus({
-        kind: 'error',
-        message: 'Something went wrong submitting your request. Please try again.',
-      })
+      setStatus({ kind: 'error', message: 'Something went wrong submitting your request. Please try again.' })
     }
   }
 
+  // ---- Success screen -----------------------------------------------------
   if (status.kind === 'success') {
     return (
       <div className="container-page py-12">
@@ -97,7 +168,9 @@ export default function ResidentNewRequestPage() {
             </svg>
           </div>
           <h1 className="mt-4 text-2xl font-semibold text-navy-900">Request submitted</h1>
-          <p className="mt-2 text-sm text-ink-muted">Save your reference number to check the status later.</p>
+          <p className="mt-2 text-sm text-ink-muted">
+            Your parking infraction request has been submitted. Save your reference number to track it.
+          </p>
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-ink-subtle">Reference number</div>
             <div className="mt-1 text-xl font-semibold tracking-wide text-navy-900">{status.caseId}</div>
@@ -120,101 +193,118 @@ export default function ResidentNewRequestPage() {
     )
   }
 
-  const submitting = status.kind === 'submitting'
+  // ---- Consent gate -------------------------------------------------------
+  if (!agreed) {
+    return (
+      <div className="container-page py-12">
+        <div className="mx-auto max-w-2xl">
+          <div className="section-eyebrow">Service Request Form</div>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
+            Report a Parking Infraction
+          </h1>
+
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {RESIDENT_DEMO_NOTICE}
+          </div>
+
+          <div className="mt-6 card p-6 text-sm text-ink leading-relaxed space-y-4">
+            <p className="font-semibold text-navy-900">
+              Please read these terms carefully. They contain important information about the investigative process and
+              timelines.
+            </p>
+            <p>
+              The accuracy and completeness of the information provided will assist in the investigative process. Please
+              enter your information completely and accurately, as you may be contacted for additional information.
+            </p>
+            <p>
+              Once a concern has been registered, an officer will be assigned to investigate. Each investigation is
+              unique in some way and there are varying levels of complexity and time requirements. The investigating
+              officer will review the information and determine what action, if any, should be taken.
+            </p>
+            <p>
+              This online portal should not be used to report incidents presenting an immediate threat to life or
+              property. If you require emergency assistance, contact Peel Regional Police or dial 911.
+            </p>
+            <h2 className="text-base font-semibold text-navy-900 pt-2">Collection of Personal Information</h2>
+            <p>
+              Personal information is collected under the authority of the Municipal Act, 2001, S.O. 2001, c. 25. The
+              information will be used or disclosed only to communicate with you in regard to inquiries and processing
+              service requests, or for a purpose consistent with the Municipal Freedom of Information and Protection of
+              Privacy Act.
+            </p>
+            <p className="text-xs text-ink-subtle">
+              Demo notice: this is a proof-of-concept reconstruction of the City of Brampton 311 form and is not
+              operated by the City of Brampton.
+            </p>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Link to="/resident" className="text-sm text-ink-muted hover:text-navy-900">
+              ← Cancel
+            </Link>
+            <button type="button" className="btn-primary" onClick={() => setAgreed(true)}>
+              I Agree, Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Wizard -------------------------------------------------------------
+  const isLast = step === STEPS.length - 1
 
   return (
     <div className="container-page py-12">
       <div className="mx-auto max-w-2xl">
-        <div className="section-eyebrow">New service request</div>
+        <div className="section-eyebrow">Service Request Form</div>
         <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-          Tell us about the issue
+          Report a Parking Infraction
         </h1>
-        <p className="mt-2 text-sm text-ink-muted">
-          Fields marked with <span className="text-rose-600">*</span> are required.
-        </p>
 
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <Stepper step={step} />
+
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
           {RESIDENT_DEMO_NOTICE}
         </div>
 
-        <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Name" required>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => update('name', e.target.value)}
-                className={inputClass}
-                autoComplete="name"
-              />
-            </Field>
-            <Field label="Email" required>
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => update('email', e.target.value)}
-                className={inputClass}
-                autoComplete="email"
-                placeholder="you@example.com"
-              />
-            </Field>
-            <Field label="Phone" hint="optional">
-              <input
-                type="tel"
-                value={form.phone}
-                onChange={(e) => update('phone', e.target.value)}
-                className={inputClass}
-                autoComplete="tel"
-              />
-            </Field>
-            <Field label="Request type" required>
-              <select
-                value={form.requestType}
-                onChange={(e) => update('requestType', e.target.value)}
-                className={inputClass}
-              >
-                <option value="">Select a type…</option>
-                {REQUEST_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
+        <form className="mt-8" onSubmit={handleSubmit}>
+          {step === 0 && <LocationStep form={form} update={update} />}
+          {step === 1 && <DetailsStep form={form} update={update} />}
+          {step === 2 && <ContactStep form={form} update={update} />}
+          {step === 3 && <ReviewStep form={form} onEdit={setStep} />}
 
-          <Field label="Location" required hint="address, intersection, or landmark">
-            <input
-              type="text"
-              value={form.location}
-              onChange={(e) => update('location', e.target.value)}
-              className={inputClass}
-              placeholder="e.g. 24 Main St, or Main St & Queen St"
-            />
-          </Field>
-
-          <Field label="Description" required>
-            <textarea
-              value={form.description}
-              onChange={(e) => update('description', e.target.value)}
-              className={`${inputClass} min-h-[120px] resize-y`}
-              placeholder="Describe the issue so staff can act on it."
-            />
-          </Field>
-
+          {stepError && (
+            <div className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {stepError}
+            </div>
+          )}
           {status.kind === 'error' && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            <div className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {status.message}
             </div>
           )}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Link to="/resident" className="text-sm text-ink-muted hover:text-navy-900">
-              ← Cancel
-            </Link>
-            <button type="submit" className="btn-primary sm:w-auto" disabled={submitting}>
-              {submitting ? 'Submitting…' : 'Submit request'}
-            </button>
+          <div className="mt-8 flex items-center justify-between">
+            {step === 0 ? (
+              <Link to="/resident" className="text-sm text-ink-muted hover:text-navy-900">
+                ← Cancel
+              </Link>
+            ) : (
+              <button type="button" onClick={goBack} className="btn-secondary">
+                Back
+              </button>
+            )}
+
+            {isLast ? (
+              <button type="submit" className="btn-primary" disabled={status.kind === 'submitting'}>
+                {status.kind === 'submitting' ? 'Submitting…' : 'Submit request'}
+              </button>
+            ) : (
+              <button type="button" onClick={goNext} className="btn-primary">
+                Next
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -222,6 +312,310 @@ export default function ResidentNewRequestPage() {
   )
 }
 
+// ---- Stepper --------------------------------------------------------------
+function Stepper({ step }: { step: number }) {
+  return (
+    <ol className="mt-6 flex items-center">
+      {STEPS.map((label, i) => {
+        const done = i < step
+        const current = i === step
+        const isLast = i === STEPS.length - 1
+        return (
+          <li key={label} className="flex flex-1 items-center last:flex-none">
+            <div className="flex flex-col items-center text-center">
+              <span
+                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                  done
+                    ? 'bg-accent-600 text-white'
+                    : current
+                      ? 'bg-navy-900 text-white ring-4 ring-navy-100'
+                      : 'bg-slate-100 text-slate-400'
+                }`}
+              >
+                {done ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                ) : (
+                  i + 1
+                )}
+              </span>
+              <span className={`mt-1.5 text-[11px] ${current ? 'font-semibold text-navy-900' : 'text-ink-subtle'}`}>
+                {label}
+              </span>
+            </div>
+            {!isLast && <div className={`mx-1 h-0.5 flex-1 ${i < step ? 'bg-accent-600' : 'bg-slate-200'}`} />}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+type StepProps = {
+  form: FormState
+  update: <K extends keyof FormState>(key: K, value: FormState[K]) => void
+}
+
+// ---- Step 1: Location -----------------------------------------------------
+function LocationStep({ form, update }: StepProps) {
+  return (
+    <section>
+      <h2 className="text-xl font-semibold text-navy-900">Location of Concern</h2>
+      <p className="mt-1 text-sm text-ink-muted">
+        Please provide the address or nearest intersection of the request you are submitting.
+      </p>
+      <div className="mt-6 space-y-5">
+        <Field label="Type of Address" required>
+          <select value={form.addressType} onChange={(e) => update('addressType', e.target.value)} className={inputClass}>
+            <option value="">Select…</option>
+            {ADDRESS_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label={form.addressType === 'Intersection' ? 'Nearest Intersection' : 'Street Address'}
+          required
+          hint="address or nearest intersection"
+        >
+          <input
+            type="text"
+            value={form.location}
+            onChange={(e) => update('location', e.target.value)}
+            className={inputClass}
+            placeholder={form.addressType === 'Intersection' ? 'e.g. Main St & Queen St' : 'e.g. 24 Main St N'}
+          />
+        </Field>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="City" required>
+            <input type="text" value={form.city} onChange={(e) => update('city', e.target.value)} className={inputClass} />
+          </Field>
+          <Field label="Province" required>
+            <input
+              type="text"
+              value={form.province}
+              onChange={(e) => update('province', e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---- Step 2: Details ------------------------------------------------------
+function DetailsStep({ form, update }: StepProps) {
+  return (
+    <section>
+      <h2 className="text-xl font-semibold text-navy-900">Details</h2>
+      <p className="mt-1 text-sm text-ink-muted">
+        Please answer the following questions so the city can manage your request.
+      </p>
+      <div className="mt-6 space-y-5">
+        <Field label="Problem Type" required hint="search for parking infraction types here">
+          <select value={form.requestType} onChange={(e) => update('requestType', e.target.value)} className={inputClass}>
+            <option value="">Select…</option>
+            {PARKING_PROBLEM_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Additional Information">
+          <textarea
+            value={form.description}
+            onChange={(e) => update('description', e.target.value)}
+            className={`${inputClass} min-h-[120px] resize-y`}
+            placeholder="Describe the issue so staff can act on it."
+          />
+        </Field>
+      </div>
+    </section>
+  )
+}
+
+// ---- Step 3: Contact ------------------------------------------------------
+function ContactStep({ form, update }: StepProps) {
+  return (
+    <section>
+      <h2 className="text-xl font-semibold text-navy-900">Contact</h2>
+      <p className="mt-1 text-sm text-ink-muted">
+        Please provide your contact information so you can receive updates on your service request. Valid contact
+        information is required — anonymous service requests will not be accepted.
+      </p>
+      <div className="mt-6 space-y-5">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="First Name" required>
+            <input
+              type="text"
+              value={form.firstName}
+              onChange={(e) => update('firstName', e.target.value)}
+              className={inputClass}
+              autoComplete="given-name"
+            />
+          </Field>
+          <Field label="Last Name" required>
+            <input
+              type="text"
+              value={form.lastName}
+              onChange={(e) => update('lastName', e.target.value)}
+              className={inputClass}
+              autoComplete="family-name"
+            />
+          </Field>
+          <Field label="Unit Number" hint="optional">
+            <input
+              type="text"
+              value={form.unitNumber}
+              onChange={(e) => update('unitNumber', e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Postal Code" required>
+            <input
+              type="text"
+              value={form.postalCode}
+              onChange={(e) => update('postalCode', e.target.value)}
+              className={inputClass}
+              autoComplete="postal-code"
+              placeholder="A1A 1A1"
+            />
+          </Field>
+          <Field label="Country">
+            <input
+              type="text"
+              value={form.country}
+              onChange={(e) => update('country', e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Contact Phone Number" required>
+            <input
+              type="tel"
+              value={form.phone}
+              onChange={(e) => update('phone', e.target.value)}
+              className={inputClass}
+              autoComplete="tel"
+              placeholder="Provide a telephone number"
+            />
+          </Field>
+        </div>
+
+        <Field label="Contact Email Address" required>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => update('email', e.target.value)}
+            className={inputClass}
+            autoComplete="email"
+            placeholder="you@example.com"
+          />
+        </Field>
+
+        <div>
+          <span className="text-sm font-medium text-navy-900">Resolution Followup Requested</span>
+          <p className="mt-0.5 text-xs text-ink-subtle">Resolution follow up has a built in delay for security reasons.</p>
+          <div className="mt-2 flex gap-4">
+            {[
+              { label: 'No', value: false },
+              { label: 'Yes', value: true },
+            ].map((opt) => (
+              <label key={opt.label} className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="resolutionFollowup"
+                  checked={form.resolutionFollowup === opt.value}
+                  onChange={() => update('resolutionFollowup', opt.value)}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <Field label="Method Of Contact" required>
+          <select
+            value={form.methodOfContact}
+            onChange={(e) => update('methodOfContact', e.target.value)}
+            className={inputClass}
+          >
+            <option value="">Select…</option>
+            {METHOD_OF_CONTACT_OPTIONS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+    </section>
+  )
+}
+
+// ---- Step 4: Review -------------------------------------------------------
+function ReviewStep({ form, onEdit }: { form: FormState; onEdit: (step: number) => void }) {
+  return (
+    <section>
+      <h2 className="text-xl font-semibold text-navy-900">Review</h2>
+      <p className="mt-1 text-sm text-ink-muted">Please review your request before submitting.</p>
+
+      <div className="mt-6 space-y-4">
+        <ReviewGroup title="Location" onEdit={() => onEdit(0)}>
+          <ReviewItem label="Type of Address" value={form.addressType} />
+          <ReviewItem label={form.addressType === 'Intersection' ? 'Nearest Intersection' : 'Street Address'} value={form.location} />
+          <ReviewItem label="City" value={form.city} />
+          <ReviewItem label="Province" value={form.province} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Details" onEdit={() => onEdit(1)}>
+          <ReviewItem label="Problem Type" value={form.requestType} />
+          <ReviewItem label="Additional Information" value={form.description || '—'} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Contact" onEdit={() => onEdit(2)}>
+          <ReviewItem label="Name" value={`${form.firstName} ${form.lastName}`.trim()} />
+          <ReviewItem label="Unit Number" value={form.unitNumber || '—'} />
+          <ReviewItem label="Postal Code" value={form.postalCode} />
+          <ReviewItem label="Country" value={form.country} />
+          <ReviewItem label="Phone" value={form.phone} />
+          <ReviewItem label="Email" value={form.email} />
+          <ReviewItem label="Resolution Followup" value={form.resolutionFollowup ? 'Yes' : 'No'} />
+          <ReviewItem label="Method Of Contact" value={form.methodOfContact} />
+        </ReviewGroup>
+      </div>
+    </section>
+  )
+}
+
+function ReviewGroup({ title, onEdit, children }: { title: string; onEdit: () => void; children: ReactNode }) {
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
+        <button type="button" onClick={onEdit} className="text-xs font-medium text-navy-700 hover:text-navy-900">
+          Edit
+        </button>
+      </div>
+      <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">{children}</dl>
+    </div>
+  )
+}
+
+function ReviewItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-wide text-ink-subtle">{label}</dt>
+      <dd className="mt-0.5 break-words text-ink">{value || '—'}</dd>
+    </div>
+  )
+}
+
+// ---- Shared field helpers -------------------------------------------------
 const inputClass =
   'mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500'
 
@@ -234,7 +628,7 @@ function Field({
   label: string
   required?: boolean
   hint?: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <label className="block">

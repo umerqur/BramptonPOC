@@ -150,8 +150,9 @@ function StatusBody({ request }: { request: ResidentRequestStatus }) {
         <dl className="mt-4 grid gap-4 sm:grid-cols-2 text-sm">
           <Detail label="Reference" value={request.case_id} />
           <Detail label="Submitted by" value={request.resident_name} />
-          <Detail label="Request type" value={request.request_type} />
+          <Detail label="Problem type" value={request.request_type} />
           <Detail label="Location" value={request.location} />
+          <Detail label="City" value={request.city || '—'} />
           <Detail label="Submitted" value={formatDateTime(request.created_at)} />
           <Detail label="Last updated" value={formatDateTime(request.updated_at)} />
         </dl>
