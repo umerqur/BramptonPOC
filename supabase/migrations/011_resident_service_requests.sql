@@ -71,6 +71,11 @@ execute function public.set_updated_at();
 
 alter table public.resident_service_requests enable row level security;
 
+-- Table-level privileges (RLS still gates every row). Anonymous residents may
+-- INSERT; authenticated staff may read and update.
+grant insert on public.resident_service_requests to anon;
+grant select, insert, update on public.resident_service_requests to authenticated;
+
 -- Anonymous residents may SUBMIT a demo request. The WITH CHECK keeps the table
 -- demo-only — anon can only insert rows flagged is_demo and starting at the
 -- initial 'submitted' status.
