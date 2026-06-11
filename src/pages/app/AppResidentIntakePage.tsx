@@ -18,6 +18,40 @@ type LoadState = {
 // Per-request transient feedback after an explicit staff action.
 type ActionFeedback = { caseId: string; message: string; tone: 'ok' | 'warn' }
 
+const STAFF_LIFECYCLE = [
+  { key: 'submitted', label: 'Submitted', description: 'Resident created the request' },
+  { key: 'received', label: 'Received', description: 'Enforcement intake acknowledged' },
+  { key: 'assigned', label: 'Assigned', description: 'Officer or staff owner assigned' },
+  { key: 'in_review', label: 'Under review', description: 'Review or investigation underway' },
+  { key: 'closed', label: 'Closed', description: 'Final status sent to resident' },
+] as const
+
+function StaffLifecycleStrip() {
+  return (
+    <div className="mt-6 card p-5">
+      <div className="text-xs uppercase tracking-wide text-ink-subtle">Internal workflow</div>
+      <h2 className="mt-1 text-base font-semibold text-navy-900">Resident intake to enforcement closure</h2>
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
+        {STAFF_LIFECYCLE.map((stage, i) => (
+          <div key={stage.key} className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-navy-900 text-[11px] font-semibold text-white">
+                {i + 1}
+              </span>
+              <span className="text-sm font-semibold text-navy-900">{stage.label}</span>
+            </div>
+            <p className="mt-2 text-xs text-ink-subtle">{stage.description}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-xs text-ink-subtle">
+        Staff actions are explicit. Each status change logs a workflow event and sends the resident an update. No
+        automated enforcement decision is made.
+      </p>
+    </div>
+  )
+}
+
 const STATUS_STYLES: Record<ResidentStatus, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
   received: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
@@ -87,8 +121,9 @@ export default function AppResidentIntakePage() {
           <div className="section-eyebrow">Staff Workspace</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Resident Intake Demo</h1>
           <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-            Requests submitted by residents through the public portal. Advance a request to email the resident and log a
-            workflow event. Every email is sent only when you click a status action.
+            Requests submitted by residents through the public parking infraction form appear here for Enforcement and
+            By Law staff review. Staff explicitly move each request through received, assigned, under review, and closed.
+            Each action logs a workflow event and sends the resident a status update.
           </p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={state.loading}>
@@ -97,9 +132,12 @@ export default function AppResidentIntakePage() {
       </div>
 
       <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
-        Demo resident-intake flow. Submissions are demo data stored separately from the benchmark complaint dataset.
-        Status actions email the resident and write to the workflow audit trail.
+        Demo resident intake flow for the Proactive Enforcement Response POC. Submissions are demo data stored
+        separately from municipal_complaints and the Toronto 311 benchmark analytics layer. Status actions email the
+        resident and write to the workflow audit trail.
       </div>
+
+      <StaffLifecycleStrip />
 
       <div className="mt-8">
         <SectionHeading eyebrow="Inbox" title="Resident requests" description="Newest first." />
@@ -181,7 +219,7 @@ function RequestCard({
       </div>
 
       <div className="mt-4 border-t border-slate-100 pt-4">
-        <div className="text-xs font-medium text-ink-subtle">Staff actions — each emails the resident</div>
+        <div className="text-xs font-medium text-ink-subtle">Explicit staff actions — resident update sent on click</div>
         <div className="mt-2 flex flex-wrap gap-2">
           {STAFF_ACTIONS.map((action) => {
             const isCurrent = action.toStatus === row.status

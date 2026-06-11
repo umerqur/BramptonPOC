@@ -101,7 +101,7 @@ function StatusBody({ request }: { request: ResidentRequestStatus }) {
           <span className="badge bg-slate-100 text-slate-600">Demo</span>
         </div>
 
-        {/* 4-stage tracker: Submitted → Received → Under review → Completed */}
+        {/* 5 stage tracker: Submitted → Received → Assigned → Under review → Closed */}
         <ol className="mt-6 flex items-center">
           {RESIDENT_STAGES.map((stage, i) => {
             const done = i < activeIndex

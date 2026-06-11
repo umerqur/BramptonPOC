@@ -43,6 +43,10 @@ export default function LandingPage() {
               A Closure Review Workbench for Enforcement and By-law complaint responses. AI automates research,
               analysis, and draft preparation for staff approved closure responses.
             </p>
+            <p className="mt-3 text-base text-white/80">
+              Resident intake is included only to simulate how a parking complaint enters the enforcement workflow
+              before staff prepare a closure response.
+            </p>
 
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <Link to="/login" className="btn-accent">
@@ -78,7 +82,8 @@ export default function LandingPage() {
           Enforcement and By-law teams receive large volumes of complaints across property standards, parking, noise,
           waste, zoning, licensing, and other bylaw categories. Closing each complaint response well means gathering
           enforcement context, checking complaint trends and patrol or ticket style records, and writing a clear update
-          back to the resident — manual, time consuming work that competes with field time.
+          back to the resident — manual, time consuming work that competes with field time. Slow or unclear updates also
+          drive avoidable resident follow up calls that add to the workload.
         </p>
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -107,7 +112,8 @@ export default function LandingPage() {
             gathers complaint context, area, status, department, and trend signals; deterministic rules flag missing
             information, safety wording, supervisor review, or closure candidates; and an AI Review Packet drafts the
             staff summary, next step, resident update, and closure language when appropriate. Staff must approve before
-            any closure or resident communication.
+            any closure or resident communication. The resident form creates a demo service request that enters this
+            queue; the staff workbench handles triage, review, context gathering, and closure language.
           </p>
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">

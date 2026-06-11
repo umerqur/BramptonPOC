@@ -13,7 +13,7 @@ export default function ResidentLayout() {
             <Logo className="h-7 w-7" />
             <div className="leading-tight">
               <div className="text-sm font-semibold text-navy-900">Resident Services</div>
-              <div className="text-[11px] text-ink-subtle">311 service requests · Demo</div>
+              <div className="text-[11px] text-ink-subtle">Proactive enforcement intake · Demo</div>
             </div>
           </Link>
 
@@ -41,7 +41,7 @@ export default function ResidentLayout() {
 
       <footer className="border-t border-slate-200 bg-white mt-16">
         <div className="container-page py-6 text-xs text-ink-subtle flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <span>© {new Date().getFullYear()} Resident Services — Proof of Concept demo.</span>
+          <span>© {new Date().getFullYear()} Proactive Enforcement Response — Proof of Concept demo.</span>
           <span>Demo only. Do not enter real personal information.</span>
         </div>
       </footer>

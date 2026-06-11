@@ -16,19 +16,28 @@ import {
 // enter real personal information.
 
 type FormState = {
-  // Location
+  // Location of concern
   addressType: string
   location: string
+  concernUnitNumber: string
   city: string
   province: string
+  concernPostalCode: string
+
   // Details
   requestType: string
   description: string
+  vehicleThereNow: string
+  uploadedFileNames: string[]
+
   // Contact
   firstName: string
   lastName: string
-  unitNumber: string
-  postalCode: string
+  contactUnitNumber: string
+  contactStreetAddress: string
+  contactCity: string
+  contactProvince: string
+  contactPostalCode: string
   country: string
   phone: string
   email: string
@@ -39,14 +48,21 @@ type FormState = {
 const INITIAL: FormState = {
   addressType: '',
   location: '',
+  concernUnitNumber: '',
   city: 'Brampton',
   province: 'Ontario',
+  concernPostalCode: '',
   requestType: '',
   description: '',
+  vehicleThereNow: '',
+  uploadedFileNames: [],
   firstName: '',
   lastName: '',
-  unitNumber: '',
-  postalCode: '',
+  contactUnitNumber: '',
+  contactStreetAddress: '',
+  contactCity: 'Brampton',
+  contactProvince: 'Ontario',
+  contactPostalCode: '',
   country: 'Canada',
   phone: '',
   email: '',
@@ -84,11 +100,13 @@ export default function ResidentNewRequestPage() {
     }
     if (index === 1) {
       if (!form.requestType) return 'Please choose a problem type.'
+      if (!form.vehicleThereNow) return 'Please tell us whether the vehicle is there now.'
     }
     if (index === 2) {
       if (!form.firstName.trim()) return 'Please enter your first name.'
       if (!form.lastName.trim()) return 'Please enter your last name.'
-      if (!form.postalCode.trim()) return 'Please enter your postal code.'
+      if (!form.contactStreetAddress.trim()) return 'Please enter your street address.'
+      if (!form.contactPostalCode.trim()) return 'Please enter your postal code.'
       if (!form.phone.trim()) return 'Please enter a contact phone number.'
       if (!form.email.trim()) return 'Please enter a contact email address.'
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Please enter a valid email address.'
@@ -134,14 +152,21 @@ export default function ResidentNewRequestPage() {
     const input: ResidentRequestInput = {
       addressType: form.addressType,
       location: form.location,
+      concernUnitNumber: form.concernUnitNumber || undefined,
       city: form.city,
       province: form.province,
+      concernPostalCode: form.concernPostalCode || undefined,
       requestType: form.requestType,
       description: form.description || undefined,
+      vehicleThereNow: form.vehicleThereNow || undefined,
+      uploadedFileNames: form.uploadedFileNames,
       firstName: form.firstName,
       lastName: form.lastName,
-      unitNumber: form.unitNumber || undefined,
-      postalCode: form.postalCode,
+      contactUnitNumber: form.contactUnitNumber || undefined,
+      contactStreetAddress: form.contactStreetAddress || undefined,
+      contactCity: form.contactCity || undefined,
+      contactProvince: form.contactProvince || undefined,
+      contactPostalCode: form.contactPostalCode,
       country: form.country,
       phone: form.phone,
       email: form.email,
@@ -256,11 +281,14 @@ export default function ResidentNewRequestPage() {
 
   return (
     <div className="container-page py-12">
-      <div className="mx-auto max-w-2xl">
-        <div className="section-eyebrow">Service Request Form</div>
-        <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-          Report a Parking Infraction
-        </h1>
+      <div className="mx-auto max-w-4xl">
+        {/* Brampton style title band — anchors the wizard the way the real
+            Service Request Form does, while staying clearly a demo. */}
+        <div className="rounded-lg border border-navy-100 bg-navy-900 px-5 py-4 text-white">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">Service Request Form</div>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-semibold tracking-tight">Report a Parking Infraction</h1>
+          <p className="mt-1 text-sm text-white/80">Demo reconstruction for Proactive Enforcement Response</p>
+        </div>
 
         <Stepper step={step} />
 
@@ -324,11 +352,11 @@ function Stepper({ step }: { step: number }) {
           <li key={label} className="flex flex-1 items-center last:flex-none">
             <div className="flex flex-col items-center text-center">
               <span
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition ${
                   done
                     ? 'bg-accent-600 text-white'
                     : current
-                      ? 'bg-navy-900 text-white ring-4 ring-navy-100'
+                      ? 'bg-accent-600 text-white ring-4 ring-accent-100'
                       : 'bg-slate-100 text-slate-400'
                 }`}
               >
@@ -365,45 +393,102 @@ function LocationStep({ form, update }: StepProps) {
       <p className="mt-1 text-sm text-ink-muted">
         Please provide the address or nearest intersection of the request you are submitting.
       </p>
-      <div className="mt-6 space-y-5">
-        <Field label="Type of Address" required>
-          <select value={form.addressType} onChange={(e) => update('addressType', e.target.value)} className={inputClass}>
-            <option value="">Select…</option>
-            {ADDRESS_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label={form.addressType === 'Intersection' ? 'Nearest Intersection' : 'Street Address'}
-          required
-          hint="address or nearest intersection"
-        >
-          <input
-            type="text"
-            value={form.location}
-            onChange={(e) => update('location', e.target.value)}
-            className={inputClass}
-            placeholder={form.addressType === 'Intersection' ? 'e.g. Main St & Queen St' : 'e.g. 24 Main St N'}
-          />
-        </Field>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="City" required>
-            <input type="text" value={form.city} onChange={(e) => update('city', e.target.value)} className={inputClass} />
+      <div className="mt-6 grid gap-8 lg:grid-cols-2">
+        {/* Left — address fields */}
+        <div className="space-y-5">
+          <Field label="Type of Address" required>
+            <select
+              value={form.addressType}
+              onChange={(e) => update('addressType', e.target.value)}
+              className={inputClass}
+            >
+              <option value="">Select…</option>
+              {ADDRESS_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="Province" required>
+          <Field
+            label={form.addressType === 'Intersection' ? 'Nearest Intersection' : 'Street Address'}
+            required
+            hint="address or nearest intersection"
+          >
             <input
               type="text"
-              value={form.province}
-              onChange={(e) => update('province', e.target.value)}
+              value={form.location}
+              onChange={(e) => update('location', e.target.value)}
+              className={inputClass}
+              placeholder={form.addressType === 'Intersection' ? 'e.g. Main St & Queen St' : 'e.g. 24 Main St N'}
+            />
+          </Field>
+          <Field label="Unit or Apartment Number" hint="optional">
+            <input
+              type="text"
+              value={form.concernUnitNumber}
+              onChange={(e) => update('concernUnitNumber', e.target.value)}
               className={inputClass}
             />
           </Field>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field label="City" required>
+              <input
+                type="text"
+                value={form.city}
+                onChange={(e) => update('city', e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Province" required>
+              <input
+                type="text"
+                value={form.province}
+                onChange={(e) => update('province', e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+          <Field label="Postal Code" hint="optional">
+            <input
+              type="text"
+              value={form.concernPostalCode}
+              onChange={(e) => update('concernPostalCode', e.target.value)}
+              className={inputClass}
+              placeholder="A1A 1A1"
+            />
+          </Field>
         </div>
+
+        {/* Right — geolocation message + map preview */}
+        <MapPreview location={form.location} />
       </div>
     </section>
+  )
+}
+
+function MapPreview({ location }: { location: string }) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Geolocation access is not enabled in this demo. Staff can still use the address provided by the resident.
+      </div>
+      <div className="relative h-72 overflow-hidden rounded-md border border-slate-300 bg-[#f3efc9]">
+        <div className="absolute inset-0 opacity-70">
+          <div className="absolute left-[-15%] top-1/2 h-5 w-[130%] -rotate-45 bg-white shadow-sm" />
+          <div className="absolute left-[15%] top-[20%] h-5 w-[90%] rotate-45 bg-white shadow-sm" />
+          <div className="absolute left-[55%] top-0 h-[120%] w-5 rotate-12 bg-white shadow-sm" />
+          <div className="absolute left-[8%] top-[70%] h-5 w-[70%] -rotate-45 bg-white shadow-sm" />
+        </div>
+        <div className="absolute left-4 top-4 flex h-8 w-8 items-center justify-center rounded border border-slate-300 bg-white text-slate-500">
+          ⊕
+        </div>
+        <div className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-orange-900 bg-orange-500 shadow" />
+        <div className="absolute left-[42%] top-[38%] max-w-[70%] rounded border border-slate-300 bg-white px-4 py-3 text-sm font-semibold shadow">
+          {location.trim() ? location.trim().toUpperCase() : 'LOCATION PREVIEW'}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -426,6 +511,19 @@ function DetailsStep({ form, update }: StepProps) {
             ))}
           </select>
         </Field>
+
+        <Field label="Is the vehicle there now?" required>
+          <select
+            value={form.vehicleThereNow}
+            onChange={(e) => update('vehicleThereNow', e.target.value)}
+            className={inputClass}
+          >
+            <option value="">Select…</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
+        </Field>
+
         <Field label="Additional Information">
           <textarea
             value={form.description}
@@ -434,6 +532,42 @@ function DetailsStep({ form, update }: StepProps) {
             placeholder="Describe the issue so staff can act on it."
           />
         </Field>
+
+        <div className="rounded-md border border-amber-200 bg-amber-50">
+          <div className="border-b border-amber-100 px-4 py-3 text-lg font-semibold text-navy-900">Uploaded Files List</div>
+          <div className="px-4 py-4 text-sm text-amber-900">
+            {form.uploadedFileNames.length > 0 ? (
+              <ul className="list-disc pl-5">
+                {form.uploadedFileNames.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            ) : (
+              'There are no notes to display.'
+            )}
+          </div>
+        </div>
+
+        <div>
+          <input
+            id="resident-demo-files"
+            type="file"
+            multiple
+            className="sr-only"
+            onChange={(e) =>
+              update(
+                'uploadedFileNames',
+                Array.from(e.target.files ?? []).map((file) => file.name),
+              )
+            }
+          />
+          <label htmlFor="resident-demo-files" className="btn-secondary inline-flex cursor-pointer">
+            Upload File
+          </label>
+          <p className="mt-1.5 text-xs text-ink-subtle">
+            Demo only — file names are recorded for staff context; files are not uploaded or stored.
+          </p>
+        </div>
       </div>
     </section>
   )
@@ -449,7 +583,7 @@ function ContactStep({ form, update }: StepProps) {
         information is required — anonymous service requests will not be accepted.
       </p>
       <div className="mt-6 space-y-5">
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-5 md:grid-cols-2">
           <Field label="First Name" required>
             <input
               type="text"
@@ -471,16 +605,44 @@ function ContactStep({ form, update }: StepProps) {
           <Field label="Unit Number" hint="optional">
             <input
               type="text"
-              value={form.unitNumber}
-              onChange={(e) => update('unitNumber', e.target.value)}
+              value={form.contactUnitNumber}
+              onChange={(e) => update('contactUnitNumber', e.target.value)}
               className={inputClass}
+            />
+          </Field>
+          <Field label="Street Address" required>
+            <input
+              type="text"
+              value={form.contactStreetAddress}
+              onChange={(e) => update('contactStreetAddress', e.target.value)}
+              className={inputClass}
+              autoComplete="address-line1"
+              placeholder="e.g. 24 Main St N"
+            />
+          </Field>
+          <Field label="City">
+            <input
+              type="text"
+              value={form.contactCity}
+              onChange={(e) => update('contactCity', e.target.value)}
+              className={inputClass}
+              autoComplete="address-level2"
+            />
+          </Field>
+          <Field label="Province">
+            <input
+              type="text"
+              value={form.contactProvince}
+              onChange={(e) => update('contactProvince', e.target.value)}
+              className={inputClass}
+              autoComplete="address-level1"
             />
           </Field>
           <Field label="Postal Code" required>
             <input
               type="text"
-              value={form.postalCode}
-              onChange={(e) => update('postalCode', e.target.value)}
+              value={form.contactPostalCode}
+              onChange={(e) => update('contactPostalCode', e.target.value)}
               className={inputClass}
               autoComplete="postal-code"
               placeholder="A1A 1A1"
@@ -492,6 +654,7 @@ function ContactStep({ form, update }: StepProps) {
               value={form.country}
               onChange={(e) => update('country', e.target.value)}
               className={inputClass}
+              autoComplete="country-name"
             />
           </Field>
           <Field label="Contact Phone Number" required>
@@ -504,18 +667,17 @@ function ContactStep({ form, update }: StepProps) {
               placeholder="Provide a telephone number"
             />
           </Field>
+          <Field label="Contact Email Address" required>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => update('email', e.target.value)}
+              className={inputClass}
+              autoComplete="email"
+              placeholder="you@example.com"
+            />
+          </Field>
         </div>
-
-        <Field label="Contact Email Address" required>
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => update('email', e.target.value)}
-            className={inputClass}
-            autoComplete="email"
-            placeholder="you@example.com"
-          />
-        </Field>
 
         <div>
           <span className="text-sm font-medium text-navy-900">Resolution Followup Requested</span>
@@ -568,19 +730,29 @@ function ReviewStep({ form, onEdit }: { form: FormState; onEdit: (step: number) 
         <ReviewGroup title="Location" onEdit={() => onEdit(0)}>
           <ReviewItem label="Type of Address" value={form.addressType} />
           <ReviewItem label={form.addressType === 'Intersection' ? 'Nearest Intersection' : 'Street Address'} value={form.location} />
+          <ReviewItem label="Unit or Apartment Number" value={form.concernUnitNumber || '—'} />
           <ReviewItem label="City" value={form.city} />
           <ReviewItem label="Province" value={form.province} />
+          <ReviewItem label="Postal Code" value={form.concernPostalCode || '—'} />
         </ReviewGroup>
 
         <ReviewGroup title="Details" onEdit={() => onEdit(1)}>
           <ReviewItem label="Problem Type" value={form.requestType} />
+          <ReviewItem label="Is the vehicle there now?" value={form.vehicleThereNow || '—'} />
           <ReviewItem label="Additional Information" value={form.description || '—'} />
+          <ReviewItem
+            label="Uploaded Files"
+            value={form.uploadedFileNames.length > 0 ? form.uploadedFileNames.join(', ') : '—'}
+          />
         </ReviewGroup>
 
         <ReviewGroup title="Contact" onEdit={() => onEdit(2)}>
           <ReviewItem label="Name" value={`${form.firstName} ${form.lastName}`.trim()} />
-          <ReviewItem label="Unit Number" value={form.unitNumber || '—'} />
-          <ReviewItem label="Postal Code" value={form.postalCode} />
+          <ReviewItem label="Unit Number" value={form.contactUnitNumber || '—'} />
+          <ReviewItem label="Street Address" value={form.contactStreetAddress || '—'} />
+          <ReviewItem label="City" value={form.contactCity || '—'} />
+          <ReviewItem label="Province" value={form.contactProvince || '—'} />
+          <ReviewItem label="Postal Code" value={form.contactPostalCode} />
           <ReviewItem label="Country" value={form.country} />
           <ReviewItem label="Phone" value={form.phone} />
           <ReviewItem label="Email" value={form.email} />

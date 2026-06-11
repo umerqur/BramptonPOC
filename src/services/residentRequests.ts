@@ -176,19 +176,28 @@ export type ResidentRequestStatus = {
  * Brampton 311 "Report a Parking Infraction" Service Request Form.
  */
 export type ResidentRequestInput = {
-  // Location
+  // Location of concern
   addressType: string
   location: string
+  concernUnitNumber?: string
   city: string
   province: string
+  concernPostalCode?: string
+
   // Details
   requestType: string
   description?: string
+  vehicleThereNow?: string
+  uploadedFileNames?: string[]
+
   // Contact
   firstName: string
   lastName: string
-  unitNumber?: string
-  postalCode: string
+  contactUnitNumber?: string
+  contactStreetAddress?: string
+  contactCity?: string
+  contactProvince?: string
+  contactPostalCode: string
   country: string
   phone: string
   email: string
@@ -276,18 +285,42 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
 
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
+
+  // Demo-only fields the public form collects but the existing schema has no
+  // dedicated columns for are appended into the description, so we avoid a DB
+  // migration while still preserving the resident's input for staff review.
+  const baseDescription = input.description?.trim() ?? ''
+  const demoDetailLines = [
+    input.vehicleThereNow ? `Vehicle there now: ${input.vehicleThereNow}` : null,
+    input.concernUnitNumber ? `Location unit or apartment number: ${input.concernUnitNumber.trim()}` : null,
+    input.concernPostalCode ? `Location postal code: ${input.concernPostalCode.trim()}` : null,
+    input.uploadedFileNames?.length
+      ? `Demo uploaded files: ${input.uploadedFileNames.map((name) => name.trim()).filter(Boolean).join(', ')}`
+      : null,
+    input.contactStreetAddress ? `Contact street address: ${input.contactStreetAddress.trim()}` : null,
+    input.contactCity ? `Contact city: ${input.contactCity.trim()}` : null,
+    input.contactProvince ? `Contact province: ${input.contactProvince.trim()}` : null,
+  ].filter((line): line is string => Boolean(line))
+
+  const combinedDescription = [
+    baseDescription,
+    demoDetailLines.length > 0 ? `Demo form details:\n${demoDetailLines.join('\n')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
   const row = {
     address_type: input.addressType.trim() || null,
     location: input.location.trim(),
     city: input.city.trim() || null,
     province: input.province.trim() || null,
     request_type: input.requestType.trim(),
-    description: input.description?.trim() ? input.description.trim() : null,
+    description: combinedDescription || null,
     first_name: firstName,
     last_name: lastName,
     resident_name: `${firstName} ${lastName}`.trim(),
-    unit_number: input.unitNumber?.trim() ? input.unitNumber.trim() : null,
-    postal_code: input.postalCode.trim() || null,
+    unit_number: input.contactUnitNumber?.trim() ? input.contactUnitNumber.trim() : null,
+    postal_code: input.contactPostalCode.trim() || null,
     country: input.country.trim() || null,
     resident_phone: input.phone.trim() ? input.phone.trim() : null,
     resident_email: input.email.trim().toLowerCase(),

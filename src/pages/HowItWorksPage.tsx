@@ -4,33 +4,33 @@ import SectionHeading from '../components/SectionHeading'
 const steps = [
   {
     n: '01',
-    title: 'Complaint enters the review queue',
-    body: 'Enforcement and By-law complaint responses load into the Closure Review Workbench queue, built on Toronto 311 public benchmark data normalized into a Brampton compatible schema.',
+    title: 'Resident complaint enters intake',
+    body: 'A resident submits a parking infraction request through the demo service request form and receives a reference number.',
   },
   {
     n: '02',
-    title: 'Needs Attention score prioritizes',
-    body: 'A transparent ML Needs Attention score ranks the queue so staff review the files that need attention first.',
+    title: 'Staff receives the request',
+    body: 'Enforcement and By Law staff see the request in the Resident Intake workbench and explicitly mark it received.',
   },
   {
     n: '03',
-    title: 'Case workspace gathers context',
-    body: 'The workspace shows complaint context, area, status, assigned department, and trend signals — including patrol or ticket style records where available — in one place.',
+    title: 'Officer assignment and review',
+    body: 'Staff assign the request and move it into review or investigation. The resident can check status at any time.',
   },
   {
     n: '04',
-    title: 'Deterministic rules flag issues',
-    body: 'Explainable rules flag missing information, safety wording, supervisor review, or closure candidates. Staff always see which rule fired and why.',
+    title: 'Enforcement context is gathered',
+    body: 'The Closure Review Workbench brings together complaint details, patrol logs, ticket records, and complaint trends.',
   },
   {
     n: '05',
-    title: 'AI Review Packet drafts language',
-    body: 'On staff request, AI drafts a staff summary, recommended next step, resident friendly update, and closure language when appropriate.',
+    title: 'AI drafts closure language',
+    body: 'On staff request, AI prepares a staff summary, recommended next step, resident friendly update, and closure language when appropriate.',
   },
   {
     n: '06',
     title: 'Staff approve before anything happens',
-    body: 'Every draft is advisory. Staff must approve before any closure or resident communication — the AI never closes a case on its own.',
+    body: 'Staff make the decision. No automated enforcement, no automatic penalties, and no resident communication without explicit staff action.',
   },
 ]
 

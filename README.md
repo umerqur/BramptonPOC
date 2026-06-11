@@ -19,6 +19,24 @@ The core of the app is the authenticated Closure Review Workbench (`/app/closure
 
 ---
 
+## Resident intake demo workflow
+
+This POC includes a resident facing parking infraction intake simulation so the Proactive Enforcement Response workflow can be demonstrated from complaint creation through staff approved closure.
+
+Demo script:
+
+1. Resident opens `/resident` and creates a parking infraction request.
+2. The app creates an `RSR...` reference and sends a confirmation email to the resident through Mailjet.
+3. Staff open `/app/resident-intake` and review the submitted request.
+4. Staff explicitly advance the request through Received, Assigned, Under review, and Closed.
+5. Each staff action writes a workflow event and sends a resident status update.
+6. The resident can check `/resident/status/:caseId` at any time.
+7. The Closure Review Workbench remains the internal AI assisted staff review layer for enforcement context, complaint trends, and staff approved closure language.
+
+This is not the 311 Self Serve Customer Service Agent use case. It is a Proactive Enforcement Response POC with a resident intake simulation.
+
+---
+
 ## Data layer
 
 **The app uses Supabase live data when configured, and falls back to bundled sample (mock) data when it is not.**
