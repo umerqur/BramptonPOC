@@ -30,26 +30,21 @@ export default function CaseAiReview({
 }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<CaseAiReviewResult | null>(null)
-  const [meta, setMeta] = useState<{ model: string; prompt_version: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [saveNote, setSaveNote] = useState<string | null>(null)
 
   async function handleGenerate() {
     setLoading(true)
     setError(null)
-    setSaveNote(null)
     try {
       const res = await generateCaseAiReview(input)
       setResult(res.result)
-      setMeta({ model: res.model, prompt_version: res.prompt_version })
-      // Best-effort persistence — staff still see the result even if the
-      // case_ai_reviews table is unavailable (e.g. before the migration runs).
+      // Best-effort persistence — staff still see the result even if the save
+      // backend is unavailable. Persistence is an internal concern: success or
+      // failure is logged for developers only and never surfaced in the UI.
       try {
         await saveCaseAiReview(res)
-        setSaveNote('Saved to case_ai_reviews.')
       } catch (saveErr) {
         console.error('Could not persist AI review:', saveErr)
-        setSaveNote('Generated, but could not be saved to case_ai_reviews.')
       }
     } catch (err) {
       console.error('AI review generation failed:', err)
@@ -73,9 +68,10 @@ export default function CaseAiReview({
       </div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Optional Claude assistance for this one case. It does not replace the rule based POC triage and does not make
-        any final enforcement or closure decision — authorized municipal staff review and decide every case. This uses
-        benchmark/demonstration data, not Brampton operational complaint data.
+        Optional. Runs only when you click Generate AI review, and only for this one case. It prepares a staff briefing —
+        it does not assign, close, enforce, or send anything. It does not replace the rule based POC triage, and
+        authorized municipal staff review and decide every case. Uses benchmark demonstration data, not Brampton
+        operational complaint data.
       </p>
 
       <button
@@ -122,14 +118,7 @@ export default function CaseAiReview({
             {result.human_review_note ||
               'This is AI assistance for staff. It is not a final decision and does not replace rule based triage or human judgement.'}
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-ink-subtle">
-            {meta && (
-              <span>
-                {meta.model} · {meta.prompt_version}
-              </span>
-            )}
-            {saveNote && <span>{saveNote}</span>}
-          </div>
+          <p className="text-[11px] text-ink-subtle">AI assisted draft. Staff review required before use.</p>
         </div>
       )}
     </div>

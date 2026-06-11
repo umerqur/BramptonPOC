@@ -30,7 +30,7 @@ export default function Header() {
             Methodology
           </NavLink>
           <NavLink
-            to="/login"
+            to="/how-it-works"
             className={({ isActive }) =>
               `px-3 py-2 rounded-md text-sm font-medium transition ${
                 isActive
@@ -39,10 +39,10 @@ export default function Header() {
               }`
             }
           >
-            Login
+            How it works
           </NavLink>
-          <Link to="/dashboard" className="btn-primary text-sm py-2 px-4">
-            Workflow Demo
+          <Link to="/login" className="btn-primary text-sm py-2 px-4">
+            Sign in to the Closure Review Workbench
           </Link>
         </nav>
 
@@ -72,7 +72,7 @@ export default function Header() {
               Methodology
             </NavLink>
             <NavLink
-              to="/login"
+              to="/how-it-works"
               onClick={() => setOpen(false)}
               className={({ isActive }) =>
                 `px-3 py-2 rounded-md text-sm font-medium ${
@@ -80,10 +80,10 @@ export default function Header() {
                 }`
               }
             >
-              Login
+              How it works
             </NavLink>
-            <Link to="/dashboard" onClick={() => setOpen(false)} className="btn-primary mt-2">
-              View Workflow Demo
+            <Link to="/login" onClick={() => setOpen(false)} className="btn-primary mt-2">
+              Sign in to the Closure Review Workbench
             </Link>
           </div>
         </div>

@@ -1,0 +1,27 @@
+ward_or_area,complaint_volume,ward_number,geojson_AREA_DESC,matches_geojson
+Toronto-Danforth (14),12239,14.0,Toronto-Danforth (14),True
+Davenport (09),11684,9.0,Davenport (9),True
+Beaches-East York (19),10465,19.0,Beaches-East York (19),True
+Eglinton-Lawrence (08),9970,8.0,Eglinton-Lawrence (8),True
+University-Rosedale (11),9923,11.0,University-Rosedale (11),True
+Toronto-St. Paul's (12),9871,12.0,Toronto-St. Paul's (12),True
+Parkdale-High Park (04),9680,4.0,Parkdale-High Park (4),True
+Etobicoke-Lakeshore (03),9356,3.0,Etobicoke-Lakeshore (3),True
+York South-Weston (05),8626,5.0,York South-Weston (5),True
+Scarborough Southwest (20),8478,20.0,Scarborough Southwest (20),True
+Etobicoke Centre (02),7856,2.0,Etobicoke Centre (2),True
+Spadina-Fort York (10),7607,10.0,Spadina-Fort York (10),True
+York Centre (06),7546,6.0,York Centre (6),True
+Don Valley West (15),7340,15.0,Don Valley West (15),True
+Toronto Centre (13),7000,13.0,Toronto Centre (13),True
+Scarborough Centre (21),6717,21.0,Scarborough Centre (21),True
+Scarborough-Rouge Park (25),6480,25.0,Scarborough-Rouge Park (25),True
+Scarborough-Agincourt (22),5410,22.0,Scarborough-Agincourt (22),True
+Scarborough-Guildwood (24),5353,24.0,Scarborough-Guildwood (24),True
+Etobicoke North (01),5296,1.0,Etobicoke North (1),True
+Willowdale (18),5143,18.0,Willowdale (18),True
+Humber River-Black Creek (07),4913,7.0,Humber River-Black Creek (7),True
+Don Valley East (16),4668,16.0,Don Valley East (16),True
+Scarborough North (23),4518,23.0,Scarborough North (23),True
+Don Valley North (17),4368,17.0,Don Valley North (17),True
+Unknown,4,,,False

@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "top_types": [
+      "Road Pothole / Road Damage",
+      "Sidewalk Snow Clearing Required",
+      "Road Plowing Request",
+      "Driveway Blocked By Plowed Snowbank",
+      "Residential Bin Lid Damaged",
+      "Property Standards and Maintenance Violations",
+      "Res / Garbage / Not Picked Up",
+      "Res / Organic Green Bin / Not Picked Up",
+      "Outcome of Service - Complaint - Road Operations",
+      "Injured - Wildlife",
+      "Sewer Service Line-Blocked",
+      "Catch Basin - Blocked / Flooding",
+      "Traffic Signal Repair",
+      "Icy Sidewalk Needs Salting",
+      "Boulevard Plow Damage",
+      "Residential Bin Body or Handle Damaged",
+      "Snow Removal - Sightline Problem",
+      "Pick up Dead Wildlife",
+      "Illegal Snow Dumping & Failure to Clear Snow or Ice on Public Sidewalk",
+      "Clean up Illegal Dumping on City Road Allowance"
+    ],
+    "source_channel_used": false,
+    "n_fsa_feature_window": 100
+  },
+  "n_fsa": 99,
+  "n_features": 86,
+  "positive_rate": 0.3333333333333333,
+  "results": {
+    "baseline_persistence": {
+      "pr_auc": 0.9599712300120161,
+      "roc_auc": 0.9703856749311295,
+      "precision_at_k": 1.0,
+      "recall_at_k": 0.6060606060606061,
+      "note": "prior-window volume rank; the bar every model must beat"
+    },
+    "baseline_prevalence": {
+      "positive_rate": 0.3333333333333333
+    },
+    "logreg": {
+      "pr_auc": 0.8058340520827709,
+      "roc_auc": 0.8673094582185491,
+      "precision_at_k": 0.85,
+      "recall_at_k": 0.5151515151515151,
+      "f1_high": 0.7076923076923077,
+      "balanced_accuracy": 0.7803030303030303,
+      "brier": 0.14538638220183703
+    },
+    "random_forest": {
+      "pr_auc": 0.9552808738960674,
+      "roc_auc": 0.9706152433425161,
+      "precision_at_k": 1.0,
+      "recall_at_k": 0.6060606060606061,
+      "f1_high": 0.8524590163934426,
+      "balanced_accuracy": 0.8787878787878788,
+      "brier": 0.08547657828282829
+    },
+    "hist_gbdt": {
+      "pr_auc": 0.9245437756046806,
+      "roc_auc": 0.9449035812672176,
+      "precision_at_k": 0.95,
+      "recall_at_k": 0.5757575757575758,
+      "f1_high": 0.90625,
+      "balanced_accuracy": 0.9242424242424243,
+      "brier": 0.06127648266579832
+    }
+  }
+}

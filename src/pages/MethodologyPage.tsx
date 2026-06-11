@@ -29,22 +29,24 @@ export default function MethodologyPage() {
         <article className="lg:col-span-2 space-y-10 text-ink leading-relaxed">
           <Section id="scope" title="1. Scope">
             <p>
-              This POC demonstrates how AI assistance can support municipal enforcement triage and case preparation. It
-              is intentionally scoped to a single workflow — case triage and briefing — and does not attempt to
-              automate enforcement decisions or replace existing systems of record.
+              This POC demonstrates how AI assistance can support the closure of Enforcement and By-law complaint
+              responses. It is intentionally scoped to a single workflow — the Closure Review Workbench: complaint
+              review queue, Needs Attention prioritization, case workspace, deterministic rule flags, AI Review Packet
+              drafting, and staff approval. AI automates research, analysis, and draft preparation for staff approved
+              closure responses; it does not automate enforcement decisions or replace existing systems of record.
             </p>
           </Section>
 
           <Section id="data" title="2. Data sources">
             <ul className="space-y-2 list-disc pl-5">
-              <li><strong>Toronto 311 public benchmark complaint data:</strong> actual open municipal 311 complaint records used to demonstrate the complaint workflow — real intake volume, categories, and complaint patterns.</li>
-              <li><strong>Normalized municipal complaint schema:</strong> the 311 data is cleaned and mapped into a standardized, Brampton compatible complaint workflow schema so records can be compared and processed consistently.</li>
+              <li><strong>Toronto 311 public benchmark data:</strong> real open municipal complaint records used to demonstrate the complaint closure workflow — real intake volume, categories, and complaint patterns.</li>
+              <li><strong>Normalized municipal complaint schema:</strong> the Toronto 311 benchmark data is cleaned and mapped into a standardized, Brampton compatible complaint workflow schema so records can be compared and processed consistently.</li>
               <li><strong>Brampton GeoHub ward boundaries:</strong> real Brampton ward and electoral area boundary data providing local geographic context. Benchmark complaints are not geographically joined to Brampton wards yet.</li>
               <li><strong>Synthetic placeholders for non public internal records:</strong> used only where data is not publicly available — patrol logs, ticket history, officer notes, and internal closure workflow.</li>
             </ul>
             <p className="mt-3 text-sm text-ink-muted">No private City data is required for this phase. City provided data can be integrated later under privacy and cybersecurity controls.</p>
             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-ink-muted">
-              <span className="font-semibold text-navy-900">Current dataset:</span> Toronto 311 public benchmark complaints used to demonstrate the complaint workflow. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data.
+              <span className="font-semibold text-navy-900">Current dataset:</span> Toronto 311 public benchmark data used to demonstrate the complaint closure workflow. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data.
             </div>
           </Section>
 
@@ -74,9 +76,11 @@ export default function MethodologyPage() {
 
           <Section id="ai" title="5. AI generated content">
             <p>
-              AI generated content in this POC is limited to summarization, pattern explanation, and briefing
-              preparation. The system does not generate notices, decisions, or external communications. All AI
-              generated output is clearly labeled in the interface.
+              AI generated content in this POC is limited to research, analysis, and draft preparation: staff
+              summaries, recommended next steps, resident friendly updates, and closure language when appropriate —
+              assembled into an AI Review Packet on explicit staff request. The system never closes a case or sends
+              anything to a resident on its own; every draft requires staff approval. All AI generated output is
+              clearly labeled in the interface.
             </p>
           </Section>
 
@@ -90,7 +94,7 @@ export default function MethodologyPage() {
 
           <Section id="limits" title="7. Known limitations">
             <ul className="space-y-2 list-disc pl-5">
-              <li>Toronto 311 benchmark data reflects real municipal complaint patterns, but it is not Brampton operational complaint data. Brampton specific calibration requires City provided complaints, tickets, patrol logs, closure outcomes, and case management data.</li>
+              <li>Toronto 311 public benchmark data reflects real municipal complaint patterns, but it is not Brampton operational complaint data. Brampton specific calibration requires City provided complaints, tickets, patrol logs, closure outcomes, and case management data.</li>
               <li>Rules based scoring is intentionally simple; production deployment would benefit from ML calibration on labeled outcomes.</li>
               <li>Geospatial clustering uses simplified distance heuristics in the POC.</li>
               <li>The POC does not address multilingual intake; this would be added in a production scope.</li>

@@ -2,12 +2,12 @@ import SectionHeading from '../components/SectionHeading'
 
 const principles = [
   {
-    title: 'Real public 311 data and synthetic internal fields only in POC',
-    body: 'The proof of concept is modelled on Toronto 311 public benchmark complaint data, normalized into a municipal complaint workflow schema, with synthetic records used only for non public internal workflow fields. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data. No private City data is required for this phase.',
+    title: 'Toronto 311 public benchmark data and synthetic internal fields only in POC',
+    body: 'The proof of concept is modelled on Toronto 311 public benchmark data, normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for non public internal workflow fields. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data. No private City data is required for this phase.',
   },
   {
     title: 'Decision support, not autonomous enforcement',
-    body: 'The system never issues notices, penalties, or external communications on its own. Every recommendation is reviewed by authorized municipal staff.',
+    body: 'AI automates research, analysis, and draft preparation for staff approved closure responses. The system never closes a case, issues notices or penalties, or sends resident communications on its own. Every draft is reviewed and approved by authorized municipal staff.',
   },
   {
     title: 'Explainability by default',

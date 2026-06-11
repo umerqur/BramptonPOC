@@ -1,0 +1,368 @@
+{
+  "data": {
+    "routing_train": 146653,
+    "routing_test": 43857,
+    "routing_classes": [
+      "311",
+      "Environment, Climate & Forestry",
+      "Municipal Licensing & Standards",
+      "Parks and Recreation",
+      "Solid Waste Management Services",
+      "Toronto Water",
+      "Transportation Services"
+    ],
+    "stale_train": 146654,
+    "stale_test": 43857,
+    "stale_positive_rate_train": 0.09013733004214,
+    "stale_positive_rate_test": 0.2776751715803635
+  },
+  "model_1_routing": {
+    "with_complaint_type": {
+      "models": {
+        "logreg": {
+          "macro_f1": 0.9973543453419029,
+          "weighted_f1": 0.9991303352403841,
+          "accuracy": 0.999133547666279
+        },
+        "random_forest": {
+          "macro_f1": 0.9715035995535201,
+          "weighted_f1": 0.9863491087914404,
+          "accuracy": 0.9864331805641061
+        },
+        "hist_gbdt": {
+          "macro_f1": 0.9775919429171172,
+          "weighted_f1": 0.993468990528025,
+          "accuracy": 0.9935700116287024
+        }
+      },
+      "best_model": "logreg",
+      "labels": [
+        "311",
+        "Environment, Climate & Forestry",
+        "Municipal Licensing & Standards",
+        "Parks and Recreation",
+        "Solid Waste Management Services",
+        "Toronto Water",
+        "Transportation Services"
+      ],
+      "per_class": {
+        "311": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 382.0
+        },
+        "Environment, Climate & Forestry": {
+          "precision": 1.0,
+          "recall": 0.996529284164859,
+          "f1-score": 0.9982616253802694,
+          "support": 2305.0
+        },
+        "Municipal Licensing & Standards": {
+          "precision": 0.9983333333333333,
+          "recall": 0.9994111296496221,
+          "f1-score": 0.9988719407523665,
+          "support": 10189.0
+        },
+        "Parks and Recreation": {
+          "precision": 1.0,
+          "recall": 0.9710144927536232,
+          "f1-score": 0.9852941176470589,
+          "support": 690.0
+        },
+        "Solid Waste Management Services": {
+          "precision": 1.0,
+          "recall": 0.9997274461706187,
+          "f1-score": 0.9998637045113806,
+          "support": 11007.0
+        },
+        "Toronto Water": {
+          "precision": 1.0,
+          "recall": 0.9997472832954258,
+          "f1-score": 0.999873625679262,
+          "support": 3957.0
+        },
+        "Transportation Services": {
+          "precision": 0.9986317435496481,
+          "recall": 1.0,
+          "f1-score": 0.9993154034229829,
+          "support": 15327.0
+        },
+        "accuracy": 0.999133547666279,
+        "macro avg": {
+          "precision": 0.9995664395547116,
+          "recall": 0.995204233719164,
+          "f1-score": 0.9973543453419029,
+          "support": 43857.0
+        },
+        "weighted avg": {
+          "precision": 0.9991346208522879,
+          "recall": 0.999133547666279,
+          "f1-score": 0.9991303352403841,
+          "support": 43857.0
+        }
+      },
+      "confusion_matrix": [
+        [
+          382,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          2297,
+          2,
+          0,
+          0,
+          0,
+          6
+        ],
+        [
+          0,
+          0,
+          10183,
+          0,
+          0,
+          0,
+          6
+        ],
+        [
+          0,
+          0,
+          15,
+          670,
+          0,
+          0,
+          5
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          11004,
+          0,
+          3
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          3956,
+          1
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          15327
+        ]
+      ]
+    },
+    "without_complaint_type_text_stripped": {
+      "models": {
+        "logreg": {
+          "macro_f1": 0.28072776944667815,
+          "weighted_f1": 0.4285586490136361,
+          "accuracy": 0.45304056365004447
+        },
+        "random_forest": {
+          "macro_f1": 0.2909930569287073,
+          "weighted_f1": 0.4418462667016217,
+          "accuracy": 0.4212326424516041
+        },
+        "hist_gbdt": {
+          "macro_f1": 0.2970834579189896,
+          "weighted_f1": 0.45060359792162513,
+          "accuracy": 0.49966938003055383
+        }
+      },
+      "best_model": "hist_gbdt",
+      "labels": [
+        "311",
+        "Environment, Climate & Forestry",
+        "Municipal Licensing & Standards",
+        "Parks and Recreation",
+        "Solid Waste Management Services",
+        "Toronto Water",
+        "Transportation Services"
+      ],
+      "per_class": {
+        "311": {
+          "precision": 0.8142857142857143,
+          "recall": 0.29842931937172773,
+          "f1-score": 0.4367816091954023,
+          "support": 382.0
+        },
+        "Environment, Climate & Forestry": {
+          "precision": 0.13970588235294118,
+          "recall": 0.01648590021691974,
+          "f1-score": 0.029491656965463717,
+          "support": 2305.0
+        },
+        "Municipal Licensing & Standards": {
+          "precision": 0.690395752895753,
+          "recall": 0.2807930120718422,
+          "f1-score": 0.3992185864787553,
+          "support": 10189.0
+        },
+        "Parks and Recreation": {
+          "precision": 0.06206896551724138,
+          "recall": 0.02608695652173913,
+          "f1-score": 0.036734693877551024,
+          "support": 690.0
+        },
+        "Solid Waste Management Services": {
+          "precision": 0.4131956805506111,
+          "recall": 0.6326882892704643,
+          "f1-score": 0.4999102688345716,
+          "support": 11007.0
+        },
+        "Toronto Water": {
+          "precision": 0.22933333333333333,
+          "recall": 0.021733636593378822,
+          "f1-score": 0.03970452446906741,
+          "support": 3957.0
+        },
+        "Transportation Services": {
+          "precision": 0.543246717473143,
+          "recall": 0.7720362758530698,
+          "f1-score": 0.6377428656121157,
+          "support": 15327.0
+        },
+        "accuracy": 0.49966938003055383,
+        "macro avg": {
+          "precision": 0.4131760066298196,
+          "recall": 0.29260762712844884,
+          "f1-score": 0.2970834579189896,
+          "support": 43857.0
+        },
+        "weighted avg": {
+          "precision": 0.49005195085559516,
+          "recall": 0.49966938003055383,
+          "f1-score": 0.45060359792162513,
+          "support": 43857.0
+        }
+      },
+      "confusion_matrix": [
+        [
+          114,
+          4,
+          6,
+          4,
+          154,
+          2,
+          98
+        ],
+        [
+          2,
+          38,
+          41,
+          31,
+          1182,
+          22,
+          989
+        ],
+        [
+          9,
+          38,
+          2861,
+          44,
+          3770,
+          69,
+          3398
+        ],
+        [
+          3,
+          16,
+          31,
+          18,
+          241,
+          2,
+          379
+        ],
+        [
+          6,
+          69,
+          812,
+          83,
+          6964,
+          83,
+          2990
+        ],
+        [
+          4,
+          37,
+          77,
+          38,
+          1620,
+          86,
+          2095
+        ],
+        [
+          2,
+          70,
+          316,
+          72,
+          2923,
+          111,
+          11833
+        ]
+      ]
+    },
+    "leakage_note": "macro_f1 drop from with->without isolates how much routing relied on the complaint_type label / templated text vs genuine signal."
+  },
+  "model_2_stale": {
+    "models": {
+      "logreg": {
+        "pr_auc": 0.6351747256945571,
+        "roc_auc": 0.8083343102544533,
+        "precision_at_k_top10pct": 0.7156862745098039,
+        "recall_at_k_top10pct": 0.25775989489242895,
+        "k": 4386,
+        "precision": 0.46183188565650996,
+        "recall": 0.825176547873214,
+        "f1": 0.5922149865928044,
+        "brier": 0.22462510261941307
+      },
+      "random_forest": {
+        "pr_auc": 0.6063781002859223,
+        "roc_auc": 0.7819373434235817,
+        "precision_at_k_top10pct": 0.7266301869585043,
+        "recall_at_k_top10pct": 0.2617014288060437,
+        "k": 4386,
+        "precision": 0.6424108305128873,
+        "recall": 0.4052389554935129,
+        "f1": 0.49697885196374625,
+        "brier": 0.16785589027842268
+      },
+      "hist_gbdt": {
+        "pr_auc": 0.6351769392130227,
+        "roc_auc": 0.8025331303272841,
+        "precision_at_k_top10pct": 0.735750113999088,
+        "recall_at_k_top10pct": 0.2649860404007226,
+        "k": 4386,
+        "precision": 0.7517188693659282,
+        "recall": 0.242404335687305,
+        "f1": 0.3665942253958398,
+        "brier": 0.16638754671035455
+      }
+    },
+    "best_model": "hist_gbdt"
+  },
+  "caveats": [
+    "Workflow ML, not geographic prediction or hotspot targeting.",
+    "Stale-risk is a proxy on current handling state; closed_at is empty so there is no time-to-close label.",
+    "Routing can leak via complaint_type and templated description; see with/without-type variants.",
+    "No automated decisions; staff decision support only."
+  ]
+}

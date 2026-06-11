@@ -2,14 +2,17 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
 
 // Primary data source for the authenticated Brampton complaint workflow app.
-// Toronto 311 public benchmark complaints are loaded into `municipal_complaints`
-// to demonstrate the complaint workflow; Brampton GeoHub ward boundaries provide
+// Toronto 311 public benchmark data is loaded into `municipal_complaints` to
+// demonstrate the closure review workflow; Brampton ward boundaries provide
 // real local context. This is not Brampton operational complaint data.
 export const COMPLAINTS_TABLE = 'municipal_complaints'
 export const WARDS_TABLE = 'brampton_ward_boundaries'
+export const TORONTO_WARDS_TABLE = 'toronto_ward_boundaries'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
+export const WORKLOAD_INSIGHTS_TABLE = 'workload_insights_v1'
+export const WORKFLOW_ML_PREDICTIONS_TABLE = 'workflow_ml_predictions'
 
 /**
  * Standard advisory disclaimer for AI-assisted triage. The current POC triage is
@@ -21,7 +24,7 @@ export const TRIAGE_ADVISORY =
 
 /** Product positioning note used across the authenticated app. */
 export const DATA_POSITIONING =
-  'Toronto 311 public benchmark data is used to demonstrate the complaint workflow. Brampton GeoHub ward boundaries provide real local context. This is not Brampton operational complaint data.'
+  'Toronto 311 public benchmark data is used to demonstrate the closure review workflow. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data.'
 
 /**
  * Shape of a row in the Supabase `municipal_complaints` table.
@@ -135,6 +138,39 @@ export type WardBoundary = {
   source_city: string | null
   source_dataset: string | null
   geojson_geometry: unknown
+}
+
+/**
+ * A row in public.toronto_ward_boundaries — one of the 25 City of Toronto wards
+ * (current 25-ward model) from City of Toronto Open Data "City Wards". REAL
+ * Toronto ward polygons used as the geographic base layer for the Toronto ward
+ * workload context map. `area_short_code` (1–25) is the join key to the real
+ * Toronto 311 workload counts in v_toronto_ward_workload. This is Toronto
+ * geography and must never be plotted onto Brampton wards.
+ */
+export type TorontoWardBoundary = {
+  id: number
+  area_short_code: number
+  ward_name: string
+  ward_desc: string
+  source_city: string | null
+  source_dataset: string | null
+  geojson_geometry: unknown
+}
+
+/**
+ * A row in public.v_toronto_ward_workload — REAL Toronto 311 benchmark complaint
+ * volume aggregated per Toronto ward from public.municipal_complaints. Joined to
+ * TorontoWardBoundary by ward_number ↔ area_short_code. The live view exposes the
+ * ward number, label (area_desc, aliased to ward_or_area) and complaint_volume
+ * only; it does not provide per-status case counts. This is Toronto 311 benchmark
+ * data — decision support only, not Brampton operational complaint data, and never
+ * a final enforcement decision.
+ */
+export type TorontoWardWorkload = {
+  ward_number: number
+  ward_or_area: string
+  complaint_volume: number
 }
 
 export type WorkflowEvent = {
@@ -268,6 +304,27 @@ export async function getMunicipalComplaints(filters: ComplaintFilters = {}): Pr
   return rankByPriority ? sortByOperationalPriority(mapped) : mapped
 }
 
+/**
+ * Oldest still-open complaints (workflow_stage not Closed/Cancelled), ordered by
+ * submitted date ascending so the longest-waiting cases surface first. Used by
+ * the Workflow console to flag aging / stale cases. Read-only over existing
+ * columns — no schema change. "Aging" is judged dataset-relative in the UI (vs.
+ * the newest submission in the loaded set), since the benchmark data is a
+ * historical snapshot rather than live wall-clock intake.
+ */
+export async function getAgingOpenComplaints(limit = 15): Promise<ComplaintRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(COMPLAINTS_TABLE)
+    .select(LIST_COLUMNS)
+    .not('workflow_stage', 'in', '("Closed","Cancelled")')
+    .order('submitted_at', { ascending: true, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return ((data ?? []) as MunicipalComplaintRow[]).map(mapComplaintRow)
+}
+
 export async function getComplaintByCaseId(caseId: string): Promise<MunicipalComplaintRow | null> {
   const client = requireClient()
   const { data, error } = await client
@@ -278,6 +335,41 @@ export async function getComplaintByCaseId(caseId: string): Promise<MunicipalCom
 
   if (error) throw error
   return (data as MunicipalComplaintRow) ?? null
+}
+
+/**
+ * Resolve a complaint for the case detail route opened from Closure Review.
+ *
+ * Closure Review rows link by workflow_ml_predictions.source_record_id, which
+ * the scoring batch populates directly from municipal_complaints.case_id, so the
+ * case_id lookup is the primary (and expected) path. As a defensive fallback —
+ * only when the id is a plain, safe integer string — we also try the integer
+ * primary key (municipal_complaints.id). No fuzzy matching: exact case_id, then
+ * exact numeric id. Returns null when neither matches.
+ */
+export async function getComplaintByCaseIdOrSourceRecordId(
+  id: string,
+): Promise<MunicipalComplaintRow | null> {
+  const byCaseId = await getComplaintByCaseId(id)
+  if (byCaseId) return byCaseId
+
+  // municipal_complaints.id is an integer column, so only attempt the numeric
+  // fallback when id is an exact, non-overflowing integer string (type-safe).
+  if (/^\d+$/.test(id)) {
+    const numericId = Number(id)
+    if (Number.isSafeInteger(numericId)) {
+      const client = requireClient()
+      const { data, error } = await client
+        .from(COMPLAINTS_TABLE)
+        .select('*')
+        .eq('id', numericId)
+        .maybeSingle()
+      if (error) throw error
+      return (data as MunicipalComplaintRow) ?? null
+    }
+  }
+
+  return null
 }
 
 export async function getComplaintFilterOptions(): Promise<ComplaintFilterOptions> {
@@ -327,6 +419,85 @@ export async function getBramptonWardBoundaries(): Promise<WardBoundary[]> {
 
   if (error) throw error
   return (data ?? []) as WardBoundary[]
+}
+
+// Real column list for the Toronto City Wards base layer, exactly as created by
+// migration 007 (no ward_name / ward_desc columns exist in the DB). We select the
+// real columns and map them to the TorontoWardBoundary view-model in TypeScript
+// below, so no Supabase query ever references ward_name / ward_desc.
+const TORONTO_WARD_COLUMNS =
+  'id, ward_number, area_name, area_desc, area_short_code, source_city, source_dataset, geojson_geometry'
+
+// Raw shape of a public.toronto_ward_boundaries row (real DB columns).
+type TorontoWardBoundaryRow = {
+  id: number
+  ward_number: number
+  area_name: string | null
+  area_desc: string | null
+  area_short_code: string | null
+  source_city: string | null
+  source_dataset: string | null
+  geojson_geometry: unknown
+}
+
+// Raw shape of a public.v_toronto_ward_workload row (real view columns).
+type TorontoWardWorkloadRow = {
+  ward_number: number
+  area_name: string | null
+  area_desc: string | null
+  area_short_code: string | null
+  complaint_volume: number
+}
+
+/**
+ * Reads the 25 City of Toronto ward polygons from public.toronto_ward_boundaries,
+ * ordered by ward number. Real Toronto City Wards geometry — the geographic base
+ * layer of the Toronto ward workload context map. The real DB columns are mapped
+ * into the TorontoWardBoundary view-model here (area_name -> ward_name,
+ * area_desc -> ward_desc, ward_number -> the numeric join code area_short_code).
+ * Any Supabase/RLS error is thrown so the caller can surface it.
+ */
+export async function getTorontoWardBoundaries(): Promise<TorontoWardBoundary[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(TORONTO_WARDS_TABLE)
+    .select(TORONTO_WARD_COLUMNS)
+    .order('ward_number', { ascending: true })
+
+  if (error) throw error
+  return ((data ?? []) as TorontoWardBoundaryRow[]).map((r) => ({
+    id: r.id,
+    area_short_code: r.ward_number,
+    ward_name: r.area_name ?? '',
+    ward_desc: r.area_desc ?? '',
+    source_city: r.source_city,
+    source_dataset: r.source_dataset,
+    geojson_geometry: r.geojson_geometry,
+  }))
+}
+
+/**
+ * Reads the real Toronto 311 benchmark per-ward complaint workload from
+ * public.v_toronto_ward_workload (aggregated over municipal_complaints), highest
+ * volume first. The live view exposes ward_number, area_name, area_desc,
+ * area_short_code and complaint_volume (joined by ward_number); it does not carry
+ * per-status case counts. area_desc is mapped to the ward_or_area label in
+ * TypeScript. This is decision-support benchmark data — never Brampton operational
+ * complaint data.
+ */
+export async function getTorontoWardWorkload(): Promise<TorontoWardWorkload[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_toronto_ward_workload')
+    .select('ward_number, area_name, area_desc, area_short_code, complaint_volume')
+    .order('complaint_volume', { ascending: false })
+
+  if (error) throw error
+  return ((data ?? []) as TorontoWardWorkloadRow[]).map((r) => ({
+    ward_number: r.ward_number,
+    ward_or_area: r.area_desc ?? r.area_name ?? `Ward ${r.ward_number}`,
+    complaint_volume: r.complaint_volume,
+  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -397,39 +568,127 @@ export async function getStaffActionSummary(): Promise<{ total: number; actors: 
 }
 
 // ---------------------------------------------------------------------------
-// Synthetic Brampton ward workload scenario overlay
+// Workload Insights (v1 model outputs)
 // ---------------------------------------------------------------------------
 
 /**
- * A row in public.brampton_ward_workload_scenarios. SYNTHETIC, illustrative
- * workload keyed by Brampton ward name — NOT Brampton operational complaint
- * data. Used only to demonstrate the ward heatmap. Toronto 311 benchmark
- * records are never plotted onto Brampton wards.
+ * A row in public.workload_insights_v1 — one scored location per model run.
+ *
+ * These are OUTPUTS of the v1 workload-density model over Toronto 311 public
+ * benchmark data. They are NOT Brampton operational complaint data, and never a
+ * final enforcement decision. Provenance (source_city/source_dataset/
+ * model_version/feature_window/scoring_period) and the advisory text travel with
+ * every row so the UI can label them honestly.
  */
-export type WardWorkloadScenario = {
-  id: number
-  ward: string
-  scenario_name: string
-  complaint_volume: number
-  open_cases: number
-  in_progress_cases: number
-  closed_cases: number
-  escalations: number
-  top_category: string
-  estimated_hours_saved: number
-  source_note: string
+export type WorkloadInsightRow = {
+  source_city: string
+  source_dataset: string
+  model: string
+  model_version: string
+  feature_set_version: string
+  feature_window: string
+  scoring_period: string
+  location_unit: string
+  location_id: string
+  workload_score: number
+  predicted_tier: string
+  prior_complaint_count: number | null
+  actual_volume: number | null
+  high_workload_area_true: boolean | null
+  top_factors: string[] | null
+  advisory: string
+  generated_at: string
 }
 
-export async function getWardWorkloadScenarios(): Promise<WardWorkloadScenario[]> {
+const WORKLOAD_INSIGHTS_COLUMNS =
+  'source_city, source_dataset, model, model_version, feature_set_version, feature_window, scoring_period, location_unit, location_id, workload_score, predicted_tier, prior_complaint_count, actual_volume, high_workload_area_true, top_factors, advisory, generated_at'
+
+/**
+ * Reads the v1 workload insights from public.workload_insights_v1, highest
+ * workload score first. Any Supabase/RLS error is thrown so the caller can
+ * decide whether to fall back to the bundled static artifact.
+ */
+export async function getWorkloadInsightsV1(): Promise<WorkloadInsightRow[]> {
   const client = requireClient()
   const { data, error } = await client
-    .from('brampton_ward_workload_scenarios')
-    .select(
-      'id, ward, scenario_name, complaint_volume, open_cases, in_progress_cases, closed_cases, escalations, top_category, estimated_hours_saved, source_note',
-    )
-    .order('ward', { ascending: true })
+    .from(WORKLOAD_INSIGHTS_TABLE)
+    .select(WORKLOAD_INSIGHTS_COLUMNS)
+    .order('workload_score', { ascending: false })
+
   if (error) throw error
-  return (data ?? []) as WardWorkloadScenario[]
+  return (data ?? []) as WorkloadInsightRow[]
+}
+
+// ---------------------------------------------------------------------------
+// V2 workflow ML predictions (read-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * A row in public.workflow_ml_predictions — one V2 model-scored complaint over
+ * the Toronto 311 benchmark. `needs_attention_score` / `attention_tier` are the
+ * "Needs Attention" handling-path ranking (relative, decision support only).
+ * `predicted_department` / `routing_confidence` are RESEARCH ONLY (Toronto routing
+ * mostly learned complaint_type -> department). Not Brampton operational data and
+ * not automated enforcement.
+ */
+export type WorkflowMlPrediction = {
+  source_record_id: string | null
+  complaint_type: string | null
+  description: string | null
+  ward_or_area: string | null
+  status: string | null
+  assigned_department: string | null
+  predicted_department: string | null
+  routing_confidence: number | null
+  needs_attention_score: number | null
+  attention_tier: string | null
+  attention_rank: number | null
+  model_version: string
+  advisory: string
+}
+
+const WORKFLOW_ML_PREDICTION_COLUMNS =
+  'source_record_id, complaint_type, description, ward_or_area, status, assigned_department, predicted_department, routing_confidence, needs_attention_score, attention_tier, attention_rank, model_version, advisory'
+
+/**
+ * Reads V2 workflow ML predictions from public.workflow_ml_predictions, highest
+ * Needs Attention rank first. `limit` keeps the payload small (the table holds the
+ * full scored benchmark). Any Supabase/RLS error is thrown so the caller can
+ * surface it. Decision-support benchmark data — never Brampton operational
+ * complaint data and never an automated decision.
+ */
+export async function getWorkflowMlPredictionsV2(limit = 50): Promise<WorkflowMlPrediction[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKFLOW_ML_PREDICTIONS_TABLE)
+    .select(WORKFLOW_ML_PREDICTION_COLUMNS)
+    .eq('prediction_type', 'needs_attention')
+    .order('needs_attention_score', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data ?? []) as WorkflowMlPrediction[]
+}
+
+/**
+ * Reads the V2 Needs Attention predictions for the Closure Review Workflow,
+ * highest `needs_attention_score` first, so the case queue surfaces the files
+ * staff should review first. Same table and `needs_attention` slice as
+ * getWorkflowMlPredictionsV2 — the closure/review workflow layers deterministic,
+ * client-side rules on top of these rows (no Supabase writes). Decision support
+ * only — never Brampton operational data and never an automated decision.
+ */
+export async function getClosureReviewCases(limit = 60): Promise<WorkflowMlPrediction[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(WORKFLOW_ML_PREDICTIONS_TABLE)
+    .select(WORKFLOW_ML_PREDICTION_COLUMNS)
+    .eq('prediction_type', 'needs_attention')
+    .order('needs_attention_score', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data ?? []) as WorkflowMlPrediction[]
 }
 
 export async function addWorkflowEvent(input: {

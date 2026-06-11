@@ -33,3 +33,7 @@ data/processed/**/*.csv
 *.njsproj
 *.sln
 *.sw?
+
+# V2 full scored predictions (106MB; lives in Supabase, not git)
+reports/modeling/v2/workflow_ml_predictions_full.csv
+reports/modeling/**/_*_log.txt

@@ -18,7 +18,7 @@ export default function LoginPage() {
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
 
   // Already authenticated — go straight to the app.
-  if (ready && session) return <Navigate to="/app/dashboard" replace />
+  if (ready && session) return <Navigate to="/app/closure-review" replace />
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -67,7 +67,7 @@ export default function LoginPage() {
           <Logo className="h-9 w-9" />
           <h2 className="mt-6 text-2xl font-semibold text-white">Proactive Enforcement Intelligence</h2>
           <p className="mt-3 text-navy-100">
-            Sign in to review AI assisted triage recommendations, case briefings, and operational dashboards on live data.
+            Sign in to the Closure Review Workbench — AI assisted research, analysis, and draft closure responses for staff approval, on live data.
           </p>
           <ul className="mt-8 space-y-3 text-sm text-navy-100">
             {['Passwordless magic-link sign in', 'Access limited to authorized project users', 'Live data stays behind login'].map((t) => (
@@ -78,7 +78,8 @@ export default function LoginPage() {
             ))}
           </ul>
           <p className="mt-10 text-xs text-white/70">
-            Looking for the public preview? The demo dashboard is open to everyone and uses sample data.
+            Not a reviewer yet? The public site explains the POC, how it works, and our data and governance approach —
+            the Closure Review Workbench and case data stay behind login.
           </p>
         </div>
       </div>
@@ -99,7 +100,7 @@ export default function LoginPage() {
               <div className="font-medium">Check your email</div>
               <p className="mt-1">
                 We sent a magic link to <span className="font-medium">{email.trim().toLowerCase()}</span>. Open it on this
-                device to sign in. You&apos;ll land on the live dashboard.
+                device to sign in. You&apos;ll land on the Closure Review workspace.
               </p>
             </div>
           ) : (

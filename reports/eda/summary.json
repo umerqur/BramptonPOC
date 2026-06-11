@@ -1,0 +1,73 @@
+{
+  "source": "toronto_311_2026_normalized_full.csv",
+  "rows": 190511,
+  "columns": 26,
+  "duration": {
+    "rows": 190511,
+    "closed_at_present": 0,
+    "closed_at_present_pct": 0.0,
+    "days_open_computable": 0
+  },
+  "demographics": {
+    "demographic_fields_found": [],
+    "has_demographics": false,
+    "statement": "No age, gender, race, income, or other demographic/personal fields exist in this dataset. The columns are operational and geographic only. No demographic attributes will be inferred or invented."
+  },
+  "ward_join": {
+    "geojson_feature_count": 25,
+    "geojson_property_keys": [
+      "AREA_ATTR_ID",
+      "AREA_CLASS",
+      "AREA_CLASS_ID",
+      "AREA_DESC",
+      "AREA_ID",
+      "AREA_LONG_CODE",
+      "AREA_NAME",
+      "AREA_SHORT_CODE",
+      "AREA_TYPE",
+      "AREA_TYPE_ID",
+      "DATE_EFFECTIVE",
+      "DATE_EXPIRY",
+      "FEATURE_CODE",
+      "FEATURE_CODE_DESC",
+      "OBJECTID",
+      "PARENT_AREA_ID",
+      "TRANS_ID_CREATE",
+      "TRANS_ID_EXPIRE",
+      "_id"
+    ],
+    "geometry_type": "MultiPolygon",
+    "crs": "urn:ogc:def:crs:OGC:1.3:CRS84",
+    "ward_or_area_nonnull": 190511,
+    "match_rate_vs_AREA_DESC_raw": 60.67,
+    "match_rate_vs_AREA_NAME_raw": 0.0,
+    "match_rate_normalized_by_ward_number": 100.0,
+    "distinct_ward_values": 26,
+    "distinct_geojson_wards": 25,
+    "unmatched_ward_values": [
+      "Unknown"
+    ]
+  },
+  "location_coverage_pct": {
+    "latlong": 0.0,
+    "ward": 100.0,
+    "fsa": 100.0
+  },
+  "time": {
+    "submitted_at_present_pct": 100.0,
+    "date_min": "2026-01-01 00:21:51",
+    "date_max": "2026-04-30 23:58:21",
+    "distinct_months": 4
+  },
+  "repeat": {
+    "ward_or_area__distinct": 26,
+    "ward_or_area__max_repeat": 12239,
+    "ward_or_area__locations_ge_3": 26,
+    "fsa_or_area__distinct": 100,
+    "fsa_or_area__max_repeat": 44612,
+    "fsa_or_area__locations_ge_3": 100,
+    "address_or_location__distinct": 10169,
+    "address_or_location__max_repeat": 3941,
+    "address_or_location__locations_ge_3": 4233
+  }
+}
