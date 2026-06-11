@@ -42,7 +42,7 @@ export default function Header() {
             How it works
           </NavLink>
           <Link to="/login" className="btn-primary text-sm py-2 px-4">
-            Sign in to Workflow Console
+            Sign in to the Closure Review Workbench
           </Link>
         </nav>
 
@@ -83,7 +83,7 @@ export default function Header() {
               How it works
             </NavLink>
             <Link to="/login" onClick={() => setOpen(false)} className="btn-primary mt-2">
-              Sign in to Workflow Console
+              Sign in to the Closure Review Workbench
             </Link>
           </div>
         </div>

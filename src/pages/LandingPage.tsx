@@ -2,12 +2,12 @@ import { Link } from 'react-router-dom'
 import SectionHeading from '../components/SectionHeading'
 
 const aiCapabilities = [
-  { title: 'Summarizes complaint history', body: 'Generates a clear, time-ordered summary of complaints associated with an address or case.' },
-  { title: 'Detects repeat complaint patterns', body: 'Identifies addresses, areas, and categories with recurring or escalating activity.' },
-  { title: 'Ranks cases by priority', body: 'Combines rules and signals to produce a transparent risk score and recommended priority.' },
-  { title: 'Explains risk drivers', body: 'Every score includes the specific factors that contributed to it — no black box.' },
-  { title: 'Recommends next operational action', body: 'Suggests a next step (monitor, notice, inspect, escalate) for staff review.' },
-  { title: 'Prepares officer briefing notes', body: 'Produces a short, officer ready briefing combining history, signals, and recommended actions.' },
+  { title: 'Gathers enforcement context', body: 'Pulls together complaint details, area, status, department, and related history into one case workspace.' },
+  { title: 'Surfaces complaint trends', body: 'Identifies repeat complaints and trend signals across addresses, areas, and categories, including patrol and ticket style records where available.' },
+  { title: 'Prioritizes the review queue', body: 'A Needs Attention score helps staff decide which complaint files to review first.' },
+  { title: 'Flags issues with transparent rules', body: 'Deterministic rules flag missing information, safety wording, supervisor review, and closure candidates — no black box.' },
+  { title: 'Drafts closure responses', body: 'The AI Review Packet drafts a staff summary, recommended next step, resident friendly update, and closure language when appropriate.' },
+  { title: 'Routes everything through staff approval', body: 'Every draft is advisory. Staff must approve before any closure or resident communication.' },
 ]
 
 export default function LandingPage() {
@@ -37,15 +37,16 @@ export default function LandingPage() {
         <div className="container-page relative z-20 py-20 lg:py-28">
           <div className="relative z-20 max-w-xl">
             <h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05] font-semibold tracking-tight text-white drop-shadow-sm">
-              Help enforcement teams see what needs attention first.
+              Help enforcement teams close complaint responses faster.
             </h1>
             <p className="mt-5 text-lg text-white/90">
-              AI assisted triage for repeat complaints, stale files, and high risk service requests.
+              A Closure Review Workbench for Enforcement and By-law complaint responses. AI automates research,
+              analysis, and draft preparation for staff approved closure responses.
             </p>
 
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <Link to="/login" className="btn-accent">
-                Sign in to Workflow Console
+                Sign in to the Closure Review Workbench
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
               </Link>
               <Link to="/how-it-works" className="btn-secondary bg-white/5 text-white border-white/20 hover:bg-white/10 hover:border-white/40">
@@ -54,10 +55,10 @@ export default function LandingPage() {
             </div>
 
             <p className="mt-5 text-sm text-white/75">
-              Built with public benchmark municipal service request data for the POC. Not Brampton operational data. No private City data required.
+              Built with Toronto 311 public benchmark data for the POC. Not Brampton operational data. No private City data required.
             </p>
             <p className="mt-2 text-sm text-white/65">
-              Decision support only. Human review required.
+              Decision support only. Staff approve every closure and resident communication.
             </p>
 
             {/* Mobile image: a wide blended visual below the CTA, not a card. */}
@@ -72,11 +73,12 @@ export default function LandingPage() {
 
       {/* Problem */}
       <section className="container-page py-16 lg:py-20">
-        <SectionHeading eyebrow="01 — Problem" title="High complaint volume, limited time to triage" />
+        <SectionHeading eyebrow="01 — Problem" title="High complaint volume, limited time to research and close files" />
         <p className="mt-4 max-w-3xl text-ink-muted">
-          Municipal complaint teams receive large volumes of complaints across property standards, parking, noise,
-          waste, zoning, licensing, and other bylaw categories. Validating, triaging, assigning, and closing repeat
-          complaints can be manual and time consuming.
+          Enforcement and By-law teams receive large volumes of complaints across property standards, parking, noise,
+          waste, zoning, licensing, and other bylaw categories. Closing each complaint response well means gathering
+          enforcement context, checking complaint trends and patrol or ticket style records, and writing a clear update
+          back to the resident — manual, time consuming work that competes with field time.
         </p>
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -98,20 +100,21 @@ export default function LandingPage() {
         <div className="container-page py-16 lg:py-20">
           <SectionHeading
             eyebrow="02 — Solution"
-            title="An assistive layer over existing intake and enforcement workflows"
+            title="A Closure Review Workbench over existing intake and enforcement workflows"
           />
           <p className="mt-4 max-w-3xl text-ink-muted">
-            The system combines public benchmark municipal service request data normalized into a Brampton compatible
-            enforcement workflow schema, synthetic records for missing internal workflow fields, rules based risk scoring,
-            machine learning ready features, and AI generated case summaries to support faster triage and better
-            operational visibility.
+            Complaints enter a review queue where a Needs Attention score helps staff prioritize. A case workspace
+            gathers complaint context, area, status, department, and trend signals; deterministic rules flag missing
+            information, safety wording, supervisor review, or closure candidates; and an AI Review Packet drafts the
+            staff summary, next step, resident update, and closure language when appropriate. Staff must approve before
+            any closure or resident communication.
           </p>
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {[
-              { title: 'Public benchmark data layer', body: 'Public municipal service request data is normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for missing internal workflow fields. Brampton ward boundaries provide real local context where available.' },
-              { title: 'Transparent scoring', body: 'A rules based risk score with explainable drivers and ML ready feature design.' },
-              { title: 'Officer ready outputs', body: 'Case summaries, recommended actions, and briefing notes designed for staff review.' },
+              { title: 'Toronto 311 public benchmark data layer', body: 'Toronto 311 public benchmark data is normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for missing internal workflow fields. Brampton ward boundaries provide real local context where available.' },
+              { title: 'Transparent prioritization', body: 'A Needs Attention score plus deterministic rules with explainable drivers — staff always see why a file was flagged.' },
+              { title: 'Staff approved closure responses', body: 'Draft staff summaries, next steps, and resident friendly closure messages prepared for staff review and approval.' },
             ].map((c) => (
               <div key={c.title} className="card p-6">
                 <div className="h-9 w-9 rounded-md bg-navy-900/5 flex items-center justify-center text-navy-900">
@@ -127,7 +130,7 @@ export default function LandingPage() {
 
       {/* What the AI does */}
       <section className="container-page py-16 lg:py-20">
-        <SectionHeading eyebrow="03 — What the AI does" title="Six assistive capabilities, all designed for staff review" />
+        <SectionHeading eyebrow="03 — What the AI does" title="Six assistive capabilities, all designed for staff approval" />
         <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {aiCapabilities.map((c, i) => (
             <div key={c.title} className="card p-5 card-hover">
@@ -151,14 +154,15 @@ export default function LandingPage() {
             </div>
             <div className="lg:col-span-3 space-y-4 text-navy-100">
               <p>
-                It supports City staff by preparing information, explaining patterns, and helping prioritize review.
-                Final decisions remain with authorized municipal staff.
+                AI automates research, analysis, and draft preparation for staff approved closure responses. It does
+                not close cases or contact residents on its own — final decisions remain with authorized municipal
+                staff.
               </p>
               <ul className="grid gap-2 sm:grid-cols-2 pt-2">
                 {[
-                  'No automated notices',
-                  'No automated penalties',
-                  'All recommendations are advisory',
+                  'No automated notices or penalties',
+                  'No closure without staff approval',
+                  'No resident communication without staff approval',
                   'Full audit trail of AI-generated content',
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2 text-sm">

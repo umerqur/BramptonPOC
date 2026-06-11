@@ -14,7 +14,7 @@ import {
   type AskCaseAgentResponse,
 } from '../../services/aiReviewPacket'
 
-// Closure Review Workflow — turns the V2 "Needs Attention" model output into a
+// Closure Review Workbench — turns the V2 "Needs Attention" model output into a
 // staff review + closure workflow. Cases are read live from Supabase
 // (public.workflow_ml_predictions, needs_attention slice). Everything below the
 // fetch is DETERMINISTIC and client-side: rules, recommended action, missing-info
@@ -24,7 +24,18 @@ import {
 // intentionally not part of the workflow surface.
 
 const GOVERNANCE_NOTE =
-  'This workflow does not make enforcement decisions, close files automatically, or contact residents without staff approval. It prepares a review packet for municipal staff.'
+  'AI automates research, analysis, and draft preparation for staff approved closure responses. It does not make enforcement decisions, close files on its own, or contact residents without staff approval.'
+
+// The six-step workbench workflow, shown as a strip under the page header so
+// the screen reads as one closure workflow rather than a set of panels.
+const WORKBENCH_STEPS: Array<{ title: string; detail: string }> = [
+  { title: 'Complaint enters review queue', detail: 'Cases load into the queue from the live benchmark workflow data.' },
+  { title: 'Needs Attention score prioritizes', detail: 'Staff see which files to review first.' },
+  { title: 'Case workspace gathers context', detail: 'Complaint details, area, status, department, and trend signals.' },
+  { title: 'Deterministic rules flag issues', detail: 'Missing information, safety wording, supervisor review, or closure candidate.' },
+  { title: 'AI Review Packet drafts language', detail: 'Staff summary, next step, resident update, and closure language when appropriate.' },
+  { title: 'Staff approve before anything happens', detail: 'No closure or resident communication without staff approval.' },
+]
 
 const SAFETY_KEYWORDS = ['emergency', 'hazard', 'unsafe', 'blocked', 'broken']
 const SUPERVISOR_KEYWORDS = ['repeat', 'unsafe', 'hazard', 'blocked', 'emergency', 'urgent']
@@ -218,18 +229,34 @@ export default function AppClosureReviewPage() {
       <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            Closure Review Workflow
+            Closure Review Workbench
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-            Use rules, Needs Attention signals, and staff review packets to accelerate complaint resolution without
-            automated enforcement.
+            AI automates research, analysis, and draft preparation for staff approved closure responses — gathering
+            complaint context, trend signals, and resident friendly draft language. Staff approve every closure and
+            every resident communication.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Pill tone="emerald">Live Supabase</Pill>
-          <Pill tone="navy">Human approval required</Pill>
+          <Pill tone="navy">Staff approval required</Pill>
         </div>
       </div>
+
+      {/* 1b. Workbench workflow strip — the six steps from queue to approval. */}
+      <ol className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {WORKBENCH_STEPS.map((s, i) => (
+          <li key={s.title} className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-navy-900">
+              <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-accent-100 text-[10px] font-semibold text-accent-700">
+                {i + 1}
+              </span>
+              {s.title}
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-ink-subtle">{s.detail}</p>
+          </li>
+        ))}
+      </ol>
 
       {/* 2. Top summary cards — kept to four so the first impression reads as a
           focused queue, not a metrics dump. */}
@@ -257,9 +284,10 @@ export default function AppClosureReviewPage() {
           {/* Left — case queue */}
           <section className="card overflow-hidden">
             <div className="border-b border-slate-100 px-5 py-3">
-              <h2 className="text-sm font-semibold text-navy-900">Case queue</h2>
+              <h2 className="text-sm font-semibold text-navy-900">Complaint review queue</h2>
               <p className="text-xs text-ink-subtle">
-                Ordered by Needs Attention score (highest first). {rows.length} cases loaded.
+                Ordered by Needs Attention score (highest first) so staff review the right files first. {rows.length}{' '}
+                cases loaded.
               </p>
             </div>
             <ul className="max-h-[640px] divide-y divide-slate-100 overflow-y-auto">

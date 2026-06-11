@@ -67,7 +67,7 @@ export default function LoginPage() {
           <Logo className="h-9 w-9" />
           <h2 className="mt-6 text-2xl font-semibold text-white">Proactive Enforcement Intelligence</h2>
           <p className="mt-3 text-navy-100">
-            Sign in to review AI assisted triage recommendations, case briefings, and operational dashboards on live data.
+            Sign in to the Closure Review Workbench — AI assisted research, analysis, and draft closure responses for staff approval, on live data.
           </p>
           <ul className="mt-8 space-y-3 text-sm text-navy-100">
             {['Passwordless magic-link sign in', 'Access limited to authorized project users', 'Live data stays behind login'].map((t) => (
@@ -79,7 +79,7 @@ export default function LoginPage() {
           </ul>
           <p className="mt-10 text-xs text-white/70">
             Not a reviewer yet? The public site explains the POC, how it works, and our data and governance approach —
-            the Closure Review workspace and case data stay behind login.
+            the Closure Review Workbench and case data stay behind login.
           </p>
         </div>
       </div>
