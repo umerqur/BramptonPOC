@@ -727,15 +727,21 @@ type MapEntry = {
  */
 function extractRings(geometry: unknown): LngLat[][] {
   if (!geometry) return []
-  let geo: any = geometry
-  if (typeof geo === 'string') {
+  let parsed: unknown = geometry
+  if (typeof parsed === 'string') {
     try {
-      geo = JSON.parse(geo)
+      parsed = JSON.parse(parsed)
     } catch {
       return []
     }
   }
-  if (!geo || typeof geo !== 'object') return []
+  if (!parsed || typeof parsed !== 'object') return []
+  const geo = parsed as {
+    type?: string
+    geometry?: unknown
+    features?: unknown
+    coordinates?: unknown
+  }
   if (geo.type === 'Feature') return extractRings(geo.geometry)
   if (geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
     return geo.features.flatMap((f: unknown) => extractRings(f))
