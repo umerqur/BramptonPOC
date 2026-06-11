@@ -11,6 +11,54 @@
 const AI_REVIEW_PACKET_ENDPOINT = '/.netlify/functions/generate-ai-review-packet'
 const ASK_CASE_AGENT_ENDPOINT = '/.netlify/functions/ask-case-agent'
 
+/**
+ * Linked operational records the case workspace already retrieved (with the
+ * staff member's authenticated Supabase session) and sends along so the AI
+ * packet is grounded in them. Patrol logs, ticket records, and the closure
+ * template are SYNTHETIC POC operational context linked to real benchmark
+ * case ids; the complaint trend is generated from the Toronto 311 public
+ * benchmark data. Optional: older callers or cases with no linked records
+ * simply omit pieces.
+ */
+export type OperationalContextPayload = {
+  patrolLogs: Array<{
+    patrol_date: string | null
+    officer_unit: string | null
+    patrol_type: string | null
+    observed_issue: string | null
+    observation_result: string | null
+  }>
+  ticketRecords: Array<{
+    ticket_number: string | null
+    ticket_date: string | null
+    enforcement_type: string | null
+    violation_category: string | null
+    outcome: string | null
+    fine_amount: number | null
+    status: string | null
+  }>
+  complaintTrend: {
+    area: string | null
+    complaint_type: string | null
+    period_start: string | null
+    period_end: string | null
+    complaint_count: number
+    prior_period_count: number
+    change_percent: number | null
+    repeat_location_count: number
+    trend_label: string | null
+  } | null
+  closureScenario: string
+  closureTemplate: {
+    complaint_type: string
+    scenario: string
+    template_text: string
+    required_context: string[]
+    policy_note: string | null
+  } | null
+  closureReadiness: Array<{ label: string; status: string }>
+}
+
 /** Exactly what the client sends: case snapshot + ML signal + deterministic context. */
 export type AiReviewPacketRequest = {
   caseSnapshot: {
@@ -31,6 +79,7 @@ export type AiReviewPacketRequest = {
     recommendedAction: string
     missingInformationChecklist: Array<{ label: string; status: string }>
   }
+  operationalContext?: OperationalContextPayload
 }
 
 /**

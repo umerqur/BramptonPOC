@@ -12,9 +12,9 @@ The core of the app is the authenticated Closure Review Workbench (`/app/closure
 
 1. **Complaint enters the review queue** — cases load from the live Toronto 311 benchmark workflow data.
 2. **Needs Attention score helps staff prioritize** — the V2 ML model ranks the queue so staff review the right files first.
-3. **Case workspace gathers context** — complaint details, area, status, assigned department, and trend signals in one place.
-4. **Deterministic rules flag issues** — missing information, safety wording, supervisor review, or closure candidate, with the fired rule always shown.
-5. **AI Review Packet drafts language** — staff summary, recommended next step, resident friendly update, and closure language when appropriate, generated server-side on explicit staff request.
+3. **Case workspace gathers linked records** — complaint details plus related patrol logs, ticket records, and complaint trend context for the selected case. Patrol and ticket records are clearly labelled **synthetic POC operational context** linked to real benchmark case ids; trends are generated from the benchmark complaints.
+4. **Rules check closure readiness** — deterministic flags plus a closure readiness checklist and a matched resident friendly closure template (by complaint type + scenario).
+5. **AI Review Packet drafts language** — the agent workflow reads the selected complaint, retrieves its related patrol logs, ticket records, and complaint trend context, selects the matching closure template, and drafts the staff summary, next step, resident update, and closure language — generated server-side on explicit staff request and returned for staff approval only.
 6. **Staff must approve** — no closure and no resident communication happens without staff approval.
 
 ---
@@ -33,6 +33,10 @@ The current service layer (`src/services/municipalServiceRequests.ts`) reads fro
 | `case_ai_reviews` | Persisted AI-assisted staff review records. |
 | `workload_insights_v1` | v1 workload-density model outputs — one scored location per model run, with full provenance (source city, dataset, model version, feature window). |
 | `workflow_ml_predictions` | V2 workflow ML model outputs — "Needs Attention" score, tier, and rank per scored complaint. Drives the V2 ML results and Closure Review pages. |
+| `patrol_logs` | **Synthetic POC operational context.** Demo patrol log records linked to real benchmark complaint `case_id`s, shown in the Closure Review case workspace. Clearly labelled — not Brampton operational data. |
+| `ticket_records` | **Synthetic POC operational context.** Demo ticket / enforcement outcome records linked to real benchmark complaint `case_id`s. Clearly labelled — not Brampton operational data. |
+| `complaint_trends` | Complaint trend aggregates **generated from the Toronto 311 benchmark complaints**: per area + complaint type, current vs prior period volume, change percent, repeat locations, and a trend label. |
+| `closure_templates` | **Synthetic POC** resident friendly closure response templates matched by complaint type + scenario, with policy notes and required on-file context. Drafting aid only — staff approval required. |
 | `toronto_ward_boundaries` | The 25 real City of Toronto ward polygons (City of Toronto Open Data "City Wards"), used as the geographic base layer. |
 | `v_toronto_ward_workload` | Real Toronto 311 benchmark complaint volume aggregated per Toronto ward from `municipal_complaints`. |
 | `v_workflow_stage_counts` | Live counts by workflow stage for the Operations Workflow Console. |
@@ -49,7 +53,7 @@ VITE_SUPABASE_URL=https://YOUR-PROJECT-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-public-key
 ```
 
-The Supabase schema lives in `supabase/migrations/` (001–008, applied in order). Read access to operational tables is restricted to the `authenticated` role.
+The Supabase schema lives in `supabase/migrations/` (001–010, applied in order). Read access to operational tables is restricted to the `authenticated` role. Migration `010_seed_operational_context.sql` regenerates the linked operational records (complaint trends from the benchmark data; synthetic patrol logs, ticket records, and closure templates linked to the Closure Review queue case ids) and is safe to re-run.
 
 ---
 

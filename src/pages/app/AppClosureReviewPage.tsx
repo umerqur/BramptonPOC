@@ -13,6 +13,14 @@ import {
   type AiReviewPacketResponse,
   type AskCaseAgentResponse,
 } from '../../services/aiReviewPacket'
+import {
+  getCaseOperationalContext,
+  SCENARIO_LABELS,
+  SYNTHETIC_CONTEXT_LABEL,
+  TREND_CONTEXT_LABEL,
+  type CaseOperationalContext,
+  type ClosureScenario,
+} from '../../services/operationalContext'
 
 // Closure Review Workbench — turns the V2 "Needs Attention" model output into a
 // staff review + closure workflow. Cases are read live from Supabase
@@ -26,14 +34,18 @@ import {
 const GOVERNANCE_NOTE =
   'AI automates research, analysis, and draft preparation for staff approved closure responses. It does not make enforcement decisions, close files on its own, or contact residents without staff approval.'
 
+// Data positioning for the linked operational records (migrations 009/010).
+const POSITIONING_NOTE =
+  'Toronto 311 public benchmark data provides the complaint and trend signals. Related patrol logs, ticket records, and closure templates are synthetic POC operational context linked to real benchmark case ids — clearly labelled, and not Brampton operational data.'
+
 // The six-step workbench workflow, shown as a strip under the page header so
 // the screen reads as one closure workflow rather than a set of panels.
 const WORKBENCH_STEPS: Array<{ title: string; detail: string }> = [
   { title: 'Complaint enters review queue', detail: 'Cases load into the queue from the live benchmark workflow data.' },
   { title: 'Needs Attention score prioritizes', detail: 'Staff see which files to review first.' },
-  { title: 'Case workspace gathers context', detail: 'Complaint details, area, status, department, and trend signals.' },
-  { title: 'Deterministic rules flag issues', detail: 'Missing information, safety wording, supervisor review, or closure candidate.' },
-  { title: 'AI Review Packet drafts language', detail: 'Staff summary, next step, resident update, and closure language when appropriate.' },
+  { title: 'Case workspace gathers linked records', detail: 'Complaint details plus related patrol logs, ticket records, and complaint trend context.' },
+  { title: 'Rules check closure readiness', detail: 'Deterministic flags plus a closure readiness checklist and matched closure template.' },
+  { title: 'AI Review Packet drafts language', detail: 'Staff summary, next step, resident update, and closure language grounded in the linked records.' },
   { title: 'Staff approve before anything happens', detail: 'No closure or resident communication without staff approval.' },
 ]
 
@@ -426,20 +438,29 @@ export default function AppClosureReviewPage() {
         </div>
       )}
 
-      {/* 4. Governance note */}
+      {/* 4. Governance + data positioning notes */}
       <div role="note" className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         <span className="font-semibold">Governance:</span> {GOVERNANCE_NOTE}
+      </div>
+      <div role="note" className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-ink-muted">
+        <span className="font-semibold text-navy-900">Data positioning:</span> {POSITIONING_NOTE}
       </div>
     </div>
   )
 }
 
-/** Build the AI review packet request from the case row + deterministic context. */
+/**
+ * Build the AI review packet request from the case row, the deterministic
+ * context, and the linked operational records (patrol logs, ticket records,
+ * trend, closure template, readiness) retrieved by the workspace. The records
+ * ground the server-side draft; `ctx` may be null while loading or on error.
+ */
 function buildPacketRequest(
   row: WorkflowMlPrediction,
   rules: Rule[],
   action: WorkflowAction,
   checks: Check[],
+  ctx: CaseOperationalContext | null,
 ): AiReviewPacketRequest {
   return {
     caseSnapshot: {
@@ -463,6 +484,53 @@ function buildPacketRequest(
         status: c.ok ? 'OK' : 'Needs review',
       })),
     },
+    operationalContext: ctx
+      ? {
+          patrolLogs: ctx.patrolLogs.map((l) => ({
+            patrol_date: l.patrol_date,
+            officer_unit: l.officer_unit,
+            patrol_type: l.patrol_type,
+            observed_issue: l.observed_issue,
+            observation_result: l.observation_result,
+          })),
+          ticketRecords: ctx.ticketRecords.map((t) => ({
+            ticket_number: t.ticket_number,
+            ticket_date: t.ticket_date,
+            enforcement_type: t.enforcement_type,
+            violation_category: t.violation_category,
+            outcome: t.outcome,
+            fine_amount: t.fine_amount,
+            status: t.status,
+          })),
+          complaintTrend: ctx.trend
+            ? {
+                area: ctx.trend.area,
+                complaint_type: ctx.trend.complaint_type,
+                period_start: ctx.trend.period_start,
+                period_end: ctx.trend.period_end,
+                complaint_count: ctx.trend.complaint_count,
+                prior_period_count: ctx.trend.prior_period_count,
+                change_percent: ctx.trend.change_percent,
+                repeat_location_count: ctx.trend.repeat_location_count,
+                trend_label: ctx.trend.trend_label,
+              }
+            : null,
+          closureScenario: ctx.scenario,
+          closureTemplate: ctx.template
+            ? {
+                complaint_type: ctx.template.complaint_type,
+                scenario: ctx.template.scenario,
+                template_text: ctx.template.template_text,
+                required_context: ctx.template.required_context,
+                policy_note: ctx.template.policy_note,
+              }
+            : null,
+          closureReadiness: ctx.readiness.map((r) => ({
+            label: r.label,
+            status: r.ok ? 'Ready' : 'Not ready',
+          })),
+        }
+      : undefined,
   }
 }
 
@@ -482,6 +550,40 @@ function ReviewPacket({
   const checks = checklistFor(row)
   const action = recommendedAction(row)
 
+  // Linked operational records for this case: patrol logs + ticket records
+  // (synthetic POC, by case_id), benchmark-derived complaint trend, derived
+  // closure scenario, matched closure template, and the closure readiness
+  // checklist. Loaded once per selected case (this component remounts via key).
+  const [ctx, setCtx] = useState<CaseOperationalContext | null>(null)
+  const [ctxState, setCtxState] = useState<'loading' | 'success' | 'error'>('loading')
+  const [ctxError, setCtxError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getCaseOperationalContext({
+      caseId: row.source_record_id,
+      area: row.ward_or_area,
+      complaintType: row.complaint_type,
+      status: row.status,
+      description: row.description,
+    })
+      .then((data) => {
+        if (!active) return
+        setCtx(data)
+        setCtxState('success')
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        setCtxError(err instanceof Error ? err.message : String(err))
+        setCtxState('error')
+      })
+    return () => {
+      active = false
+    }
+    // The component is remounted per case via key, so this runs once per case.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // AI Assisted Review Packet state. This component is remounted per selected
   // case (via key), so the AI draft never leaks across cases.
   const [aiState, setAiState] = useState<AiState>('idle')
@@ -492,7 +594,7 @@ function ReviewPacket({
     setAiState('loading')
     setAiError(null)
     try {
-      const packet = await generateAiReviewPacket(buildPacketRequest(row, rules, action, checks))
+      const packet = await generateAiReviewPacket(buildPacketRequest(row, rules, action, checks, ctx))
       setAiPacket(packet)
       setAiState('success')
     } catch (err) {
@@ -529,7 +631,7 @@ function ReviewPacket({
           <button
             className="btn-accent text-sm"
             onClick={handleGenerate}
-            disabled={aiState === 'loading'}
+            disabled={aiState === 'loading' || ctxState === 'loading'}
             aria-busy={aiState === 'loading'}
           >
             {aiState === 'loading' && (
@@ -542,7 +644,9 @@ function ReviewPacket({
           </span>
         </div>
         <p className="mt-2 text-[11px] text-ink-subtle">
-          AI prepares a draft only. Staff approval is required before any action.
+          {ctxState === 'loading'
+            ? 'Gathering linked patrol logs, ticket records, and trend context…'
+            : 'AI prepares a draft only, grounded in the linked records below. Staff approval is required before any action.'}
         </p>
         {aiState === 'error' && (
           <div
@@ -558,7 +662,7 @@ function ReviewPacket({
       {/* Ask this case — lightweight agentic chat scoped to the selected case.
           Sits just below the AI packet button. State is local and resets with the
           ReviewPacket remount (key={selectedId}). */}
-      <AskThisCase row={row} rules={rules} action={action} checks={checks} />
+      <AskThisCase row={row} rules={rules} action={action} checks={checks} ctx={ctx} />
 
       {/* A. Case Snapshot */}
       <PacketSection letter="A" title="Case Snapshot">
@@ -590,8 +694,174 @@ function ReviewPacket({
         </p>
       </PacketSection>
 
-      {/* C. Rules Fired */}
-      <PacketSection letter="C" title="Rules Fired">
+      {/* C–G. Linked operational records: patrol logs, ticket records, trend
+          context, closure readiness, matched closure template. Loaded per case
+          from Supabase (read only). Patrol/ticket/template records are clearly
+          labelled synthetic POC operational context linked to the real
+          benchmark case id; the trend is benchmark derived. */}
+      {ctxState === 'loading' ? (
+        <div className="px-5 py-4 text-sm text-ink-subtle">Loading linked operational records…</div>
+      ) : ctxState === 'error' ? (
+        <div className="px-5 py-4">
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <span className="font-semibold">Linked operational records unavailable.</span> {ctxError} The
+            deterministic packet below remains available for staff review.
+          </div>
+        </div>
+      ) : ctx ? (
+        <>
+          <PacketSection letter="C" title="Related Patrol Logs" badge="Synthetic POC records">
+            {ctx.patrolLogs.length ? (
+              <ul className="space-y-2">
+                {ctx.patrolLogs.map((log) => (
+                  <li key={log.id} className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-subtle">
+                      <span className="font-semibold text-navy-900">{log.patrol_type || 'Patrol'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{log.patrol_date || 'Date not recorded'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{log.officer_unit || 'Unit not recorded'}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-navy-900">
+                      {log.observed_issue || 'No observed issue recorded.'}
+                    </p>
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      Result: <span className="font-medium text-navy-900">{log.observation_result || 'Not recorded'}</span>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-ink-subtle italic">No linked patrol logs on file for this case.</p>
+            )}
+            <p className="mt-2 text-[10px] text-ink-subtle">{SYNTHETIC_CONTEXT_LABEL}</p>
+          </PacketSection>
+
+          <PacketSection letter="D" title="Related Ticket Records" badge="Synthetic POC records">
+            {ctx.ticketRecords.length ? (
+              <ul className="space-y-2">
+                {ctx.ticketRecords.map((t) => (
+                  <li key={t.id} className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-subtle">
+                      <span className="font-semibold text-navy-900">{t.ticket_number || 'Ticket'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{t.ticket_date || 'Date not recorded'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{t.status || 'Status not recorded'}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-navy-900">
+                      {t.enforcement_type || 'Enforcement'} — {t.violation_category || 'category not recorded'}
+                    </p>
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      Outcome: <span className="font-medium text-navy-900">{t.outcome || 'Not recorded'}</span>
+                      {t.fine_amount != null && t.fine_amount > 0 && (
+                        <span> · Fine ${t.fine_amount.toFixed(0)} (staff view only — never shared with residents)</span>
+                      )}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-ink-subtle italic">No linked ticket records on file for this case.</p>
+            )}
+            <p className="mt-2 text-[10px] text-ink-subtle">{SYNTHETIC_CONTEXT_LABEL}</p>
+          </PacketSection>
+
+          <PacketSection letter="E" title="Complaint Trend Context" badge="Benchmark derived">
+            {ctx.trend ? (
+              <>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <MiniStat label="This period" value={String(ctx.trend.complaint_count)} />
+                  <MiniStat label="Prior period" value={String(ctx.trend.prior_period_count)} />
+                  <MiniStat
+                    label="Change"
+                    value={ctx.trend.change_percent == null ? 'New' : `${ctx.trend.change_percent > 0 ? '+' : ''}${ctx.trend.change_percent}%`}
+                  />
+                  <MiniStat label="Repeat locations" value={String(ctx.trend.repeat_location_count)} />
+                </div>
+                <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+                  <span className="font-medium text-navy-900">{ctx.trend.trend_label || 'Trend'}</span>
+                  {' — '}
+                  {ctx.trend.complaint_type || 'this complaint type'} in {ctx.trend.area || 'the recorded area'}
+                  {ctx.trend.period_start && ctx.trend.period_end && (
+                    <span>
+                      {' '}({ctx.trend.period_start} to {ctx.trend.period_end} vs the prior period)
+                    </span>
+                  )}
+                  . Area context only — implies no outcome for this case.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-ink-subtle italic">
+                No benchmark trend row matched this area and complaint type.
+              </p>
+            )}
+            <p className="mt-2 text-[10px] text-ink-subtle">{TREND_CONTEXT_LABEL}</p>
+          </PacketSection>
+
+          <PacketSection letter="F" title="Closure Readiness Checklist">
+            <p className="mb-2 text-xs text-ink-subtle">
+              {ctx.readiness.filter((r) => r.ok).length} of {ctx.readiness.length} checks ready · advisory only —
+              staff decide every closure.
+            </p>
+            <ul className="space-y-1.5">
+              {ctx.readiness.map((item) => (
+                <li key={item.label} className="flex items-start justify-between gap-2 text-sm">
+                  <span>
+                    <span className="text-navy-900">{item.label}</span>
+                    <span className="block text-xs text-ink-subtle">{item.detail}</span>
+                  </span>
+                  {item.ok ? (
+                    <span className="inline-flex shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                      Ready
+                    </span>
+                  ) : (
+                    <span className="inline-flex shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                      Not ready
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </PacketSection>
+
+          <PacketSection letter="G" title="Matched Closure Template" badge="Synthetic POC template">
+            {ctx.template ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex rounded-full bg-accent-100 px-2.5 py-1 font-semibold text-accent-700">
+                    {SCENARIO_LABELS[ctx.scenario as ClosureScenario] ?? ctx.scenario}
+                  </span>
+                  <span className="text-ink-subtle">
+                    Matched for {ctx.template.complaint_type === 'Any' ? 'any complaint type' : ctx.template.complaint_type}
+                  </span>
+                </div>
+                <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-navy-900">
+                  {ctx.template.template_text}
+                </p>
+                {ctx.template.policy_note && (
+                  <p className="mt-2 text-xs text-amber-900">
+                    <span className="font-semibold">Policy note:</span> {ctx.template.policy_note}
+                  </p>
+                )}
+                {ctx.template.required_context.length > 0 && (
+                  <p className="mt-1.5 text-[11px] text-ink-subtle">
+                    Required on file: {ctx.template.required_context.join(', ').replace(/_/g, ' ')}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-ink-subtle italic">
+                No active closure template matched the derived scenario (
+                {SCENARIO_LABELS[ctx.scenario as ClosureScenario] ?? ctx.scenario}).
+              </p>
+            )}
+          </PacketSection>
+        </>
+      ) : null}
+
+      {/* H. Rules Fired */}
+      <PacketSection letter="H" title="Rules Fired">
         <ul className="space-y-2">
           {rules.map((r) => (
             <li key={r.label} className="flex gap-2 text-sm">
@@ -605,8 +875,8 @@ function ReviewPacket({
         </ul>
       </PacketSection>
 
-      {/* D. Recommended Workflow Action */}
-      <PacketSection letter="D" title="Recommended Workflow Action">
+      {/* I. Recommended Workflow Action */}
+      <PacketSection letter="I" title="Recommended Workflow Action">
         <div className="flex items-center gap-3">
           <ActionChip action={action} />
           <span className="text-xs text-ink-subtle">Deterministic suggestion — staff confirm or override.</span>
@@ -624,8 +894,8 @@ function ReviewPacket({
         <AgentTraceSection trace={aiPacket.agentTrace} />
       )}
 
-      {/* E. Missing Information Checklist — relabeled as baseline when an AI packet exists. */}
-      <PacketSection letter="E" title={hasAiPacket ? 'Baseline checklist' : 'Missing Information Checklist'}>
+      {/* J. Missing Information Checklist — relabeled as baseline when an AI packet exists. */}
+      <PacketSection letter="J" title={hasAiPacket ? 'Baseline checklist' : 'Missing Information Checklist'}>
         <ul className="space-y-1.5">
           {checks.map((c) => (
             <li key={c.label} className="flex items-center justify-between gap-2 text-sm">
@@ -644,18 +914,18 @@ function ReviewPacket({
         </ul>
       </PacketSection>
 
-      {/* F. Draft Staff Summary — relabeled as baseline when an AI packet exists. */}
-      <PacketSection letter="F" title={hasAiPacket ? 'Baseline staff summary' : 'Draft Staff Summary'}>
+      {/* K. Draft Staff Summary — relabeled as baseline when an AI packet exists. */}
+      <PacketSection letter="K" title={hasAiPacket ? 'Baseline staff summary' : 'Draft Staff Summary'}>
         <DraftBlock text={draftStaffSummary(row)} />
       </PacketSection>
 
-      {/* G. Draft Resident Update or Closure Language — relabeled as baseline when an AI packet exists. */}
-      <PacketSection letter="G" title={hasAiPacket ? 'Baseline resident update' : 'Draft Resident Update or Closure Language'}>
+      {/* L. Draft Resident Update or Closure Language — relabeled as baseline when an AI packet exists. */}
+      <PacketSection letter="L" title={hasAiPacket ? 'Baseline resident update' : 'Draft Resident Update or Closure Language'}>
         <DraftBlock text={draftResidentLanguage(row)} />
       </PacketSection>
 
-      {/* H. Human Review Controls */}
-      <PacketSection letter="H" title="Human Review Controls">
+      {/* M. Human Review Controls */}
+      <PacketSection letter="M" title="Human Review Controls">
         <div className="flex flex-wrap gap-2">
           <button className="btn-primary text-sm" onClick={() => onControl('Approve Draft')}>
             Approve Draft
@@ -709,11 +979,13 @@ function AskThisCase({
   rules,
   action,
   checks,
+  ctx,
 }: {
   row: WorkflowMlPrediction
   rules: Rule[]
   action: WorkflowAction
   checks: Check[]
+  ctx: CaseOperationalContext | null
 }) {
   const [question, setQuestion] = useState('')
   const [state, setState] = useState<AskState>('idle')
@@ -727,7 +999,7 @@ function AskThisCase({
     setState('loading')
     setError(null)
     try {
-      const res = await askCaseAgent({ ...buildPacketRequest(row, rules, action, checks), question: trimmed })
+      const res = await askCaseAgent({ ...buildPacketRequest(row, rules, action, checks, ctx), question: trimmed })
       setResponse(res)
       setState('success')
     } catch (err) {
@@ -1028,19 +1300,26 @@ function rowKey(row: WorkflowMlPrediction, index: number): string {
 function PacketSection({
   letter,
   title,
+  badge,
   children,
 }: {
   letter: string
   title: string
+  badge?: string
   children: React.ReactNode
 }) {
   return (
     <section className="px-5 py-4">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-navy-900">
+      <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold text-navy-900">
         <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-[11px] font-semibold text-ink-muted">
           {letter}
         </span>
         {title}
+        {badge && (
+          <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+            {badge}
+          </span>
+        )}
       </h3>
       <div className="mt-3">{children}</div>
     </section>

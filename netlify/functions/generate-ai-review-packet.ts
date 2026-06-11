@@ -3,13 +3,19 @@
 //
 // AGENTIC ORCHESTRATION (lightweight)
 // -----------------------------------
-// On each explicit staff click this function runs a small, safe agentic loop:
-// it defines a GOAL, builds a short PLAN, uses ONE read-only backend tool
-// (findSimilarCases) to retrieve up to 3 similar benchmark cases for context,
-// then calls Claude with the selected case plus that retrieved context, and
-// returns the draft packet alongside an agentTrace (goal, plan, tools used,
-// similar cases found, notes). This is decision support drafting only — there
-// is no autonomous action, no enforcement decision, and no write of any kind.
+// On each explicit staff click this function runs a small, safe agentic
+// workflow: read the selected complaint, retrieve its related patrol logs and
+// ticket records (synthetic POC operational context linked to real benchmark
+// case ids, fetched read-only by the authenticated case workspace and sent
+// with the request), retrieve the complaint trend context (generated from the
+// Toronto 311 public benchmark), select the matching closure template, then
+// call Claude to draft the staff summary, next step, resident update, and
+// closure language grounded in those records — and return the draft for staff
+// approval only. One read-only backend tool (findSimilarCases) additionally
+// retrieves up to 3 similar benchmark cases for context. An agentTrace (goal,
+// plan, tools used, notes) travels back with the packet. This is decision
+// support drafting only — no autonomous enforcement, no automatic closure, no
+// resident contact, and no write of any kind.
 //
 // SECURITY
 // --------
@@ -39,7 +45,7 @@
 // Use the same known-working Anthropic model as generate-case-ai-review.ts so
 // this function stays on a model id the account/API actually serves.
 const MODEL = 'claude-sonnet-4-6'
-const PROMPT_VERSION = 'ai-review-packet-v2-agentic'
+const PROMPT_VERSION = 'ai-review-packet-v3-operational-context'
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 const MAX_TOKENS = 900
@@ -49,16 +55,21 @@ const MAX_TOKENS = 900
 // workflow's reasoning is transparent to staff. The plan is deliberately small
 // and read-only — there is no autonomous action step.
 const AGENT_GOAL =
-  'Prepare a staff ready complaint review packet for the selected case. Draft only; staff approval required.'
+  'Prepare a staff ready closure review packet for the selected complaint, grounded in its linked patrol logs, ticket records, complaint trend context, and matched closure template. Draft only; staff approval required.'
 
+// The agent workflow, in order. Steps 2–5 operate over the linked records the
+// authenticated case workspace retrieved (patrol logs, ticket records, trend
+// context, closure template) plus the read-only similar-case lookup; step 6
+// drafts; step 7 returns the draft for staff approval — nothing is closed,
+// no enforcement decision is made, and no resident is contacted.
 const AGENT_PLAN: string[] = [
-  'Review the selected case snapshot.',
-  'Review the Needs Attention signal.',
-  'Review the deterministic rules fired.',
-  'Check whether the case is missing information.',
-  'Retrieve similar cases from Supabase if safe and possible (read only).',
-  'Use the retrieved context to prepare a concise staff review packet.',
-  'Return the draft only, for staff approval.',
+  'Read the selected complaint.',
+  'Retrieve the related patrol logs (synthetic POC records linked by case id).',
+  'Retrieve the related ticket records (synthetic POC records linked by case id).',
+  'Retrieve the complaint trend context (generated from the Toronto 311 public benchmark).',
+  'Select the matching closure template for the complaint type and scenario.',
+  'Draft the staff summary, recommended next step, resident update, and closure language.',
+  'Return the draft for staff approval only.',
 ]
 
 // How many similar benchmark cases to surface as context, at most.
@@ -103,6 +114,15 @@ const SYSTEM_PROMPT = [
   '',
   'The supplied deterministic rules and recommended action are the governance baseline. You may improve the wording and add useful review notes, but do not contradict or override them, and do not assert a final determination.',
   '',
+  'Linked operational records rules:',
+  '- The request may include related patrol logs, ticket records, a complaint trend, a closure scenario, a matched closure template, and a closure readiness checklist for the selected case.',
+  '- Ground the staff summary, next step, resident update, and closure language in these records. Refer to what they actually say; do not invent patrols, tickets, or outcomes that are not listed.',
+  '- Patrol logs, ticket records, and the closure template are SYNTHETIC POC operational context linked to real benchmark complaint case ids. Treat them as the case file for drafting, but never present them as real Brampton operational activity.',
+  '- The complaint trend is generated from Toronto 311 public benchmark data. Use it as area context only; it implies no outcome for this case.',
+  '- Never include ticket numbers, fine amounts, or penalty details in the resident update or closure language.',
+  '- When a matched closure template is supplied, base the closure language on it: keep its structure and tone, and adapt it with the specific facts from the patrol logs and ticket records. Respect its policy note.',
+  '- If the closure readiness checklist shows items that are not ready, reflect that in the recommended next step rather than drafting closure language prematurely.',
+  '',
   'Similar cases rules:',
   '- A list of similar cases may be supplied as context only.',
   '- Use similar cases only if they help staff understand workflow context.',
@@ -142,11 +162,70 @@ type DeterministicContext = {
   missingInformationChecklist: Array<{ label: string; status: string }>
 }
 
+// Linked operational records retrieved by the authenticated case workspace and
+// sent with the request, so the draft is grounded in the actual case file.
+// Patrol logs / ticket records / closure template are synthetic POC context
+// linked to real benchmark case ids; the trend is benchmark-derived.
+type PatrolLogContext = {
+  patrol_date: string | null
+  officer_unit: string | null
+  patrol_type: string | null
+  observed_issue: string | null
+  observation_result: string | null
+}
+
+type TicketRecordContext = {
+  ticket_number: string | null
+  ticket_date: string | null
+  enforcement_type: string | null
+  violation_category: string | null
+  outcome: string | null
+  fine_amount: number | null
+  status: string | null
+}
+
+type ComplaintTrendContext = {
+  area: string | null
+  complaint_type: string | null
+  period_start: string | null
+  period_end: string | null
+  complaint_count: number | null
+  prior_period_count: number | null
+  change_percent: number | null
+  repeat_location_count: number | null
+  trend_label: string | null
+}
+
+type ClosureTemplateContext = {
+  complaint_type: string | null
+  scenario: string | null
+  template_text: string | null
+  required_context: string[]
+  policy_note: string | null
+}
+
+type OperationalContext = {
+  patrolLogs: PatrolLogContext[]
+  ticketRecords: TicketRecordContext[]
+  complaintTrend: ComplaintTrendContext | null
+  closureScenario: string
+  closureTemplate: ClosureTemplateContext | null
+  closureReadiness: Array<{ label: string; status: string }>
+}
+
 type PacketRequest = {
   caseSnapshot: CaseSnapshot
   mlSignal: MlSignal
   deterministic: DeterministicContext
+  operationalContext: OperationalContext | null
 }
+
+// Caps that keep the prompt bounded no matter what the client sends.
+const MAX_PATROL_LOGS = 5
+const MAX_TICKET_RECORDS = 5
+const MAX_READINESS_ITEMS = 12
+const TEMPLATE_TEXT_MAX_LEN = 900
+const CONTEXT_FIELD_MAX_LEN = 200
 
 // A concise, non-sensitive similar-case summary used as context only. No
 // resident identifiers and no source_record_id are ever included here.
@@ -196,6 +275,100 @@ function strArray(value: unknown): string[] {
   return value.map(str).map((s) => s.trim()).filter(Boolean)
 }
 
+// Clamp a nullable free-text field so no single value can bloat the prompt.
+function clamped(value: unknown, maxLen = CONTEXT_FIELD_MAX_LEN): string | null {
+  const s = strOrNull(value)
+  return s ? s.slice(0, maxLen) : null
+}
+
+// Normalize the optional linked-records context. Each piece is individually
+// optional; anything malformed is dropped rather than trusted.
+function sanitizeOperationalContext(raw: unknown): OperationalContext | null {
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+
+  const patrolLogs: PatrolLogContext[] = (Array.isArray(obj.patrolLogs) ? obj.patrolLogs : [])
+    .slice(0, MAX_PATROL_LOGS)
+    .map((l) => {
+      const log = (l ?? {}) as Record<string, unknown>
+      return {
+        patrol_date: clamped(log.patrol_date),
+        officer_unit: clamped(log.officer_unit),
+        patrol_type: clamped(log.patrol_type),
+        observed_issue: clamped(log.observed_issue),
+        observation_result: clamped(log.observation_result),
+      }
+    })
+
+  const ticketRecords: TicketRecordContext[] = (Array.isArray(obj.ticketRecords) ? obj.ticketRecords : [])
+    .slice(0, MAX_TICKET_RECORDS)
+    .map((t) => {
+      const ticket = (t ?? {}) as Record<string, unknown>
+      return {
+        ticket_number: clamped(ticket.ticket_number),
+        ticket_date: clamped(ticket.ticket_date),
+        enforcement_type: clamped(ticket.enforcement_type),
+        violation_category: clamped(ticket.violation_category),
+        outcome: clamped(ticket.outcome),
+        fine_amount: num(ticket.fine_amount),
+        status: clamped(ticket.status),
+      }
+    })
+
+  let complaintTrend: ComplaintTrendContext | null = null
+  if (obj.complaintTrend && typeof obj.complaintTrend === 'object') {
+    const tr = obj.complaintTrend as Record<string, unknown>
+    complaintTrend = {
+      area: clamped(tr.area),
+      complaint_type: clamped(tr.complaint_type),
+      period_start: clamped(tr.period_start),
+      period_end: clamped(tr.period_end),
+      complaint_count: num(tr.complaint_count),
+      prior_period_count: num(tr.prior_period_count),
+      change_percent: num(tr.change_percent),
+      repeat_location_count: num(tr.repeat_location_count),
+      trend_label: clamped(tr.trend_label),
+    }
+  }
+
+  let closureTemplate: ClosureTemplateContext | null = null
+  if (obj.closureTemplate && typeof obj.closureTemplate === 'object') {
+    const tpl = obj.closureTemplate as Record<string, unknown>
+    closureTemplate = {
+      complaint_type: clamped(tpl.complaint_type),
+      scenario: clamped(tpl.scenario),
+      template_text: clamped(tpl.template_text, TEMPLATE_TEXT_MAX_LEN),
+      required_context: strArray(tpl.required_context),
+      policy_note: clamped(tpl.policy_note, 400),
+    }
+  }
+
+  const closureReadiness = (Array.isArray(obj.closureReadiness) ? obj.closureReadiness : [])
+    .slice(0, MAX_READINESS_ITEMS)
+    .map((c) => {
+      const cc = (c ?? {}) as Record<string, unknown>
+      return { label: str(cc.label).slice(0, CONTEXT_FIELD_MAX_LEN), status: str(cc.status).slice(0, 40) }
+    })
+    .filter((c) => c.label)
+
+  const hasAnything =
+    patrolLogs.length > 0 ||
+    ticketRecords.length > 0 ||
+    complaintTrend != null ||
+    closureTemplate != null ||
+    closureReadiness.length > 0
+  if (!hasAnything) return null
+
+  return {
+    patrolLogs,
+    ticketRecords,
+    complaintTrend,
+    closureScenario: str(obj.closureScenario).slice(0, 60),
+    closureTemplate,
+    closureReadiness,
+  }
+}
+
 // Lightly validate and normalize the incoming request so the prompt stays
 // predictable. Anything unexpected is coerced or dropped rather than trusted.
 function sanitizeRequest(raw: unknown): PacketRequest | null {
@@ -233,6 +406,7 @@ function sanitizeRequest(raw: unknown): PacketRequest | null {
         })
         .filter((c) => c.label),
     },
+    operationalContext: sanitizeOperationalContext(obj.operationalContext),
   }
 }
 
@@ -368,6 +542,67 @@ function buildUserPrompt(input: PacketRequest, similarCases: SimilarCase[]): str
 
   const rules = d.rulesFired.length ? d.rulesFired.map((r) => `- ${r}`).join('\n') : '- (none fired)'
 
+  const ctx = input.operationalContext
+  const patrolLines = ctx?.patrolLogs.length
+    ? ctx.patrolLogs
+        .map((l, i) =>
+          [
+            `- Patrol log ${i + 1}:`,
+            `    patrol_date: ${l.patrol_date ?? '(not provided)'}`,
+            `    officer_unit: ${l.officer_unit ?? '(not provided)'}`,
+            `    patrol_type: ${l.patrol_type ?? '(not provided)'}`,
+            `    observed_issue: ${l.observed_issue ?? '(not provided)'}`,
+            `    observation_result: ${l.observation_result ?? '(not provided)'}`,
+          ].join('\n'),
+        )
+        .join('\n')
+    : '- (no linked patrol logs on file)'
+
+  const ticketLines = ctx?.ticketRecords.length
+    ? ctx.ticketRecords
+        .map((t, i) =>
+          [
+            `- Ticket record ${i + 1}:`,
+            `    ticket_date: ${t.ticket_date ?? '(not provided)'}`,
+            `    enforcement_type: ${t.enforcement_type ?? '(not provided)'}`,
+            `    violation_category: ${t.violation_category ?? '(not provided)'}`,
+            `    outcome: ${t.outcome ?? '(not provided)'}`,
+            `    status: ${t.status ?? '(not provided)'}`,
+          ].join('\n'),
+        )
+        .join('\n')
+    : '- (no linked ticket records on file)'
+
+  const trend = ctx?.complaintTrend
+  const trendLines = trend
+    ? [
+        `area: ${trend.area ?? '(not provided)'}`,
+        `complaint_type: ${trend.complaint_type ?? '(not provided)'}`,
+        `period: ${trend.period_start ?? '?'} to ${trend.period_end ?? '?'}`,
+        `complaint_count: ${trend.complaint_count ?? '(not provided)'}`,
+        `prior_period_count: ${trend.prior_period_count ?? '(not provided)'}`,
+        `change_percent: ${trend.change_percent ?? '(not available)'}`,
+        `repeat_location_count: ${trend.repeat_location_count ?? '(not provided)'}`,
+        `trend_label: ${trend.trend_label ?? '(not provided)'}`,
+      ].join('\n')
+    : '(no matching trend row for this area and complaint type)'
+
+  const template = ctx?.closureTemplate
+  const templateLines = template
+    ? [
+        `matched_for_complaint_type: ${template.complaint_type ?? '(not provided)'}`,
+        `scenario: ${template.scenario ?? '(not provided)'}`,
+        `required_context: ${template.required_context.length ? template.required_context.join(', ') : '(none)'}`,
+        `policy_note: ${template.policy_note ?? '(none)'}`,
+        'template_text:',
+        template.template_text ?? '(not provided)',
+      ].join('\n')
+    : '(no matching closure template — draft closure language only if status is completed or closed, using the standard rules above)'
+
+  const readinessLines = ctx?.closureReadiness.length
+    ? ctx.closureReadiness.map((c) => `- ${c.label}: ${c.status || '(unknown)'}`).join('\n')
+    : '- (not provided)'
+
   const similar = similarCases.length
     ? similarCases
         .map((s, i) =>
@@ -411,6 +646,23 @@ function buildUserPrompt(input: PacketRequest, similarCases: SimilarCase[]): str
     rules,
     'missing_information_checklist:',
     checklist,
+    '',
+    'RELATED PATROL LOGS (synthetic POC operational context linked to this benchmark case id)',
+    patrolLines,
+    '',
+    'RELATED TICKET RECORDS (synthetic POC operational context linked to this benchmark case id)',
+    ticketLines,
+    '',
+    'COMPLAINT TREND CONTEXT (generated from Toronto 311 public benchmark data — area context only)',
+    trendLines,
+    '',
+    `CLOSURE SCENARIO (deterministic): ${ctx?.closureScenario || '(not derived)'}`,
+    '',
+    'MATCHED CLOSURE TEMPLATE (base the closure language on this; adapt with the facts above)',
+    templateLines,
+    '',
+    'CLOSURE READINESS CHECKLIST',
+    readinessLines,
     '',
     'SIMILAR CASES (context only — same complaint area from the public benchmark set).',
     'These are NOT the selected case and imply no outcome, policy, or precedent for it.',
@@ -499,6 +751,33 @@ export default async function handler(req: Request): Promise<Response> {
   const similar = await findSimilarCases(input.caseSnapshot)
   const agentNotes = [...similar.notes]
 
+  // Linked operational records (patrol logs, ticket records, trend, closure
+  // template, readiness) were retrieved read-only by the authenticated case
+  // workspace and arrive with the request. Record what the draft is grounded in.
+  const ctx = input.operationalContext
+  const contextTools: string[] = []
+  if (ctx) {
+    contextTools.push(
+      'getPatrolLogsForCase (read only, via case workspace)',
+      'getTicketRecordsForCase (read only, via case workspace)',
+      'getComplaintTrendForCase (read only, via case workspace)',
+      'getMatchingClosureTemplate (read only, via case workspace)',
+    )
+    agentNotes.push(
+      `Grounded in ${ctx.patrolLogs.length} patrol log(s) and ${ctx.ticketRecords.length} ticket record(s) — synthetic POC operational context linked to the benchmark case id.`,
+      ctx.complaintTrend
+        ? `Complaint trend context: ${ctx.complaintTrend.trend_label ?? 'n/a'} for ${ctx.complaintTrend.complaint_type ?? 'this type'} in ${ctx.complaintTrend.area ?? 'the area'} (benchmark derived).`
+        : 'No matching complaint trend row for this area and complaint type.',
+      ctx.closureTemplate
+        ? `Matched closure template: ${ctx.closureTemplate.scenario ?? 'unknown scenario'} (${ctx.closureTemplate.complaint_type ?? 'Any'}).`
+        : 'No matching closure template; closure language follows the standard status rules.',
+    )
+  } else {
+    agentNotes.push(
+      'No linked operational records were supplied; the draft is grounded in the case snapshot and deterministic context only.',
+    )
+  }
+
   let anthropicRes: Response
   try {
     anthropicRes = await fetch(ANTHROPIC_API_URL, {
@@ -564,7 +843,7 @@ export default async function handler(req: Request): Promise<Response> {
   const agentTrace: AgentTrace = {
     goal: AGENT_GOAL,
     plan: AGENT_PLAN,
-    toolsUsed: similar.toolUsed ? ['findSimilarCases (read only)'] : [],
+    toolsUsed: [...contextTools, ...(similar.toolUsed ? ['findSimilarCases (read only)'] : [])],
     similarCasesFound: similar.cases.length,
     notes: agentNotes,
   }
