@@ -276,6 +276,8 @@ export default async function handler(req: Request): Promise<Response> {
         Subject: content.subject,
         TextPart: content.text,
         HTMLPart: content.html,
+        // Trace any resident email back to its request by case id in Mailjet.
+        CustomID: input.caseId,
       },
     ],
   }
@@ -309,24 +311,31 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'Email service error. Please check the server logs.' }, 502)
   }
 
-  // Mailjet returns { Messages: [{ Status, To: [{ MessageID, ... }] }] }.
+  // Mailjet returns { Messages: [{ Status, Errors?, To: [{ MessageID, ... }] }] }.
+  // MessageID is numeric; Status is per-message ("success" or "error").
   let messageId: string | null = null
   let messageStatus: string | null = null
+  type MjMessage = {
+    Status?: string
+    Errors?: Array<{ ErrorCode?: string; ErrorMessage?: string; ErrorRelatedTo?: string[] }>
+    To?: Array<{ MessageID?: string | number }>
+  }
+  let first: MjMessage | undefined
   try {
-    const data = (await mailjetRes.json()) as {
-      Messages?: Array<{ Status?: string; To?: Array<{ MessageID?: string }> }>
-    }
-    const first = data.Messages?.[0]
+    const data = (await mailjetRes.json()) as { Messages?: MjMessage[] }
+    first = data.Messages?.[0]
     messageStatus = first?.Status ?? null
-    messageId = first?.To?.[0]?.MessageID ?? null
+    const id = first?.To?.[0]?.MessageID
+    messageId = id != null ? String(id) : null
   } catch {
     // A 2xx with an unreadable body still means the send was accepted.
   }
 
   // Mailjet returns 200 even when an individual message errors; treat a
-  // non-"success" per-message status as a failure so the caller knows.
+  // non-"success" per-message status as a failure so the caller knows, and log
+  // Mailjet's structured error (e.g. send-0008 "sender not authorized").
   if (messageStatus && messageStatus.toLowerCase() !== 'success') {
-    console.error('Mailjet per-message status was not success:', messageStatus)
+    console.error('Mailjet per-message status was not success:', messageStatus, JSON.stringify(first?.Errors ?? []))
     return json({ error: 'Email was not accepted by the email service.' }, 502)
   }
 
