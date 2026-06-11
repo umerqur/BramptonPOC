@@ -1,5 +1,6 @@
-// Server-side Netlify function that sends resident-facing transactional email
-// for the Resident Intake Demo flow, through Brevo (https://www.brevo.com).
+// Server-side Netlify function that sends resident-facing and staff-facing
+// transactional email for the Resident Intake Demo flow, through Brevo
+// (https://www.brevo.com).
 //
 // SECURITY
 // --------
@@ -8,27 +9,23 @@
 // browser, never exposed through a VITE_* variable, and never logged. Do NOT
 // create VITE_BREVO_API_KEY — the key must stay server side.
 //
-// SENDER
-// ------
+// SENDER & STAFF NOTIFICATIONS
+// ----------------------------
 // The "from" address must be a sender that is configured and verified in the
 // Brevo account. It is read from BREVO_SENDER_EMAIL (and optional
-// BREVO_SENDER_NAME) so the verified sender can change without a code change.
+// BREVO_SENDER_NAME). Staff "new request" notifications go to the server-owned
+// BREVO_NOTIFY_EMAIL address — the recipient is NEVER taken from the client, so
+// the public form cannot redirect staff notifications anywhere.
 //
 // SCOPE & GOVERNANCE
 // ------------------
-// Two payload types only:
-//   * 'confirmation'  — sent once when a resident submits a request.
-//   * 'status_update' — sent when authorized staff explicitly advance a request
-//                       in the workbench (one email per explicit staff action).
+// Three payload types only:
+//   * 'confirmation'       — to the resident, once on submission.
+//   * 'status_update'      — to the resident, on an explicit staff status change.
+//   * 'admin_notification' — to municipal staff (BREVO_NOTIFY_EMAIL), when a new
+//                            resident request is submitted.
 // This function only sends the single email described by the request body. It
-// does not read or write any database, does not loop over recipients, and is
-// never invoked automatically — the frontend calls it on an explicit resident
-// submission or an explicit staff status-change click.
-
-// Netlify Functions v2 web-standard handler. Node 20 provides a global fetch,
-// so no Brevo SDK dependency is required. The client calls the reserved
-// /.netlify/functions/send-resident-email endpoint, which the SPA catch-all
-// redirect never shadows.
+// does not read or write any database and is never invoked automatically.
 
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
 
@@ -59,7 +56,7 @@ const STATUS_NEXT: Record<string, string> = {
   completed: 'Your request has been marked completed. Thank you for helping keep the city in good shape.',
 }
 
-type EmailType = 'confirmation' | 'status_update'
+type EmailType = 'confirmation' | 'status_update' | 'admin_notification'
 
 type EmailRequest = {
   type: EmailType
@@ -107,7 +104,7 @@ function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
-// HTML-escape any resident-supplied text before it goes into htmlContent.
+// HTML-escape any caller-supplied text before it goes into htmlContent.
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -127,7 +124,7 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
   const obj = raw as Record<string, unknown>
 
   const type = str(obj.type).trim()
-  if (type !== 'confirmation' && type !== 'status_update') return null
+  if (type !== 'confirmation' && type !== 'status_update' && type !== 'admin_notification') return null
 
   return {
     type,
@@ -140,8 +137,7 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
   }
 }
 
-const DEMO_FOOTER_TEXT =
-  'This is an automated message from a proof-of-concept demo. Please do not reply.'
+const DEMO_FOOTER_TEXT = 'This is an automated message from a proof-of-concept demo. Please do not reply.'
 
 function senderFromEnv(): { name: string; email: string } {
   const email = (process.env.BREVO_SENDER_EMAIL || '').trim() || DEFAULT_SENDER_EMAIL
@@ -150,7 +146,7 @@ function senderFromEnv(): { name: string; email: string } {
 }
 
 // Helper payload builder for the resident confirmation email.
-function buildConfirmationPayload(input: EmailRequest): BrevoPayload {
+function buildConfirmationPayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
   const name = input.residentName || 'there'
   const safeName = escapeHtml(name)
   const caseId = escapeHtml(input.caseId)
@@ -162,7 +158,7 @@ function buildConfirmationPayload(input: EmailRequest): BrevoPayload {
   const detailRows = [
     `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Reference</td><td style="font-weight:600">${caseId}</td></tr>`,
     requestType
-      ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Request type</td><td>${requestType}</td></tr>`
+      ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Problem type</td><td>${requestType}</td></tr>`
       : '',
     location
       ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Location</td><td>${location}</td></tr>`
@@ -184,7 +180,7 @@ function buildConfirmationPayload(input: EmailRequest): BrevoPayload {
     'Thanks for reaching out. We have received your service request and created a reference for it.',
     '',
     `Reference: ${input.caseId}`,
-    input.requestType ? `Request type: ${input.requestType}` : '',
+    input.requestType ? `Problem type: ${input.requestType}` : '',
     input.location ? `Location: ${input.location}` : '',
     '',
     'Municipal staff will review your request. We will email you as the status changes — submitted, received, under review, and completed.',
@@ -194,11 +190,11 @@ function buildConfirmationPayload(input: EmailRequest): BrevoPayload {
     .filter((line) => line !== '')
     .join('\n')
 
-  return { sender: senderFromEnv(), to: [{ email: input.to, name }], subject, htmlContent, textContent }
+  return { sender: senderFromEnv(), to, subject, htmlContent, textContent }
 }
 
 // Helper payload builder for the status-update email.
-function buildStatusUpdatePayload(input: EmailRequest): BrevoPayload {
+function buildStatusUpdatePayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
   const name = input.residentName || 'there'
   const safeName = escapeHtml(name)
   const caseId = escapeHtml(input.caseId)
@@ -229,11 +225,53 @@ function buildStatusUpdatePayload(input: EmailRequest): BrevoPayload {
     DEMO_FOOTER_TEXT,
   ].join('\n')
 
-  return { sender: senderFromEnv(), to: [{ email: input.to, name }], subject, htmlContent, textContent }
+  return { sender: senderFromEnv(), to, subject, htmlContent, textContent }
 }
 
-function buildPayload(input: EmailRequest): BrevoPayload {
-  return input.type === 'confirmation' ? buildConfirmationPayload(input) : buildStatusUpdatePayload(input)
+// Helper payload builder for the staff "new request" notification.
+function buildAdminNotificationPayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
+  const caseId = escapeHtml(input.caseId)
+  const residentName = input.residentName ? escapeHtml(input.residentName) : 'Unknown'
+  const requestType = input.requestType ? escapeHtml(input.requestType) : 'Service request'
+  const location = input.location ? escapeHtml(input.location) : 'Not provided'
+
+  const subject = `New resident request ${input.caseId} — ${input.requestType || 'service request'}`
+
+  const rows = [
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Reference</td><td style="font-weight:600">${caseId}</td></tr>`,
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Resident</td><td>${residentName}</td></tr>`,
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Problem type</td><td>${requestType}</td></tr>`,
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Location</td><td>${location}</td></tr>`,
+  ].join('')
+
+  const htmlContent = `
+    <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:560px">
+      <p>A new resident service request has been submitted.</p>
+      <table style="font-size:14px;margin:12px 0">${rows}</table>
+      <p>Open the Resident Intake workbench (/app/resident-intake) to review and action it.</p>
+      <p style="color:#64748b;font-size:12px;margin-top:24px">${DEMO_FOOTER_TEXT}</p>
+    </div>`
+
+  const textContent = [
+    'A new resident service request has been submitted.',
+    '',
+    `Reference: ${input.caseId}`,
+    `Resident: ${input.residentName || 'Unknown'}`,
+    `Problem type: ${input.requestType || 'Service request'}`,
+    `Location: ${input.location || 'Not provided'}`,
+    '',
+    'Open the Resident Intake workbench (/app/resident-intake) to review and action it.',
+    '',
+    DEMO_FOOTER_TEXT,
+  ].join('\n')
+
+  return { sender: senderFromEnv(), to, subject, htmlContent, textContent }
+}
+
+function buildPayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
+  if (input.type === 'confirmation') return buildConfirmationPayload(input, to)
+  if (input.type === 'status_update') return buildStatusUpdatePayload(input, to)
+  return buildAdminNotificationPayload(input, to)
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -255,19 +293,36 @@ export default async function handler(req: Request): Promise<Response> {
 
   const input = sanitizeRequest(body)
   if (!input) {
-    return json({ error: 'A valid email request (type confirmation or status_update) is required.' }, 400)
-  }
-  if (!input.to || !isLikelyEmail(input.to)) {
-    return json({ error: 'A valid recipient email address is required.' }, 400)
+    return json({ error: 'A valid email request type is required.' }, 400)
   }
   if (!input.caseId) {
     return json({ error: 'A case id is required.' }, 400)
   }
-  if (input.type === 'status_update' && !input.status) {
-    return json({ error: 'A status is required for a status update email.' }, 400)
+
+  // Resolve the recipient. For staff notifications the address is server-owned
+  // (BREVO_NOTIFY_EMAIL) and never taken from the client.
+  let recipient: Array<{ email: string; name?: string }>
+  if (input.type === 'admin_notification') {
+    const notify = (process.env.BREVO_NOTIFY_EMAIL || '').trim().toLowerCase()
+    if (!notify) {
+      // Not configured — skip quietly so the resident submission still succeeds.
+      return json({ ok: false, skipped: true, reason: 'BREVO_NOTIFY_EMAIL not set' }, 200)
+    }
+    if (!isLikelyEmail(notify)) {
+      return json({ error: 'BREVO_NOTIFY_EMAIL is not a valid email address.' }, 500)
+    }
+    recipient = [{ email: notify, name: 'Municipal staff' }]
+  } else {
+    if (!input.to || !isLikelyEmail(input.to)) {
+      return json({ error: 'A valid recipient email address is required.' }, 400)
+    }
+    if (input.type === 'status_update' && !input.status) {
+      return json({ error: 'A status is required for a status update email.' }, 400)
+    }
+    recipient = [{ email: input.to, name: input.residentName || undefined }]
   }
 
-  const payload = buildPayload(input)
+  const payload = buildPayload(input, recipient)
 
   let brevoRes: Response
   try {

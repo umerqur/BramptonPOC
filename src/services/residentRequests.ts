@@ -231,7 +231,7 @@ export function generateCaseId(): string {
  * the environment, e.g. local dev without BREVO_API_KEY).
  */
 export async function sendResidentEmail(payload: {
-  type: 'confirmation' | 'status_update'
+  type: 'confirmation' | 'status_update' | 'admin_notification'
   to: string
   residentName: string
   caseId: string
@@ -305,6 +305,18 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
 
   const emailSent = await sendResidentEmail({
     type: 'confirmation',
+    to: row.resident_email,
+    residentName: row.resident_name,
+    caseId,
+    requestType: row.request_type,
+    location: row.location,
+  })
+
+  // Notify municipal staff that a new request arrived. The recipient is
+  // server-owned (BREVO_NOTIFY_EMAIL); `to` here is ignored by the function.
+  // Best-effort — never blocks or fails the resident submission.
+  void sendResidentEmail({
+    type: 'admin_notification',
     to: row.resident_email,
     residentName: row.resident_name,
     caseId,
