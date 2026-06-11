@@ -1,0 +1,50 @@
+import { Link, NavLink, Outlet } from 'react-router-dom'
+import Logo from '../Logo'
+
+// Public resident portal shell for the Resident Intake Demo. Intentionally
+// distinct from both the marketing Header (staff sign-in) and the authenticated
+// AppLayout, so the resident persona feels like a separate self-serve portal.
+export default function ResidentLayout() {
+  return (
+    <div className="min-h-screen flex flex-col bg-slate-50">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
+        <div className="container-page flex h-16 items-center justify-between">
+          <Link to="/resident" className="flex items-center gap-2.5">
+            <Logo className="h-7 w-7" />
+            <div className="leading-tight">
+              <div className="text-sm font-semibold text-navy-900">Resident Services</div>
+              <div className="text-[11px] text-ink-subtle">311 service requests · Demo</div>
+            </div>
+          </Link>
+
+          <nav className="flex items-center gap-2">
+            <NavLink
+              to="/resident/new-request"
+              className={({ isActive }) =>
+                `px-3 py-2 rounded-md text-sm font-medium transition ${
+                  isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
+                }`
+              }
+            >
+              New request
+            </NavLink>
+            <Link to="/resident/new-request" className="btn-primary text-sm py-2 px-4">
+              Submit a request
+            </Link>
+          </nav>
+        </div>
+      </header>
+
+      <main className="flex-1">
+        <Outlet />
+      </main>
+
+      <footer className="border-t border-slate-200 bg-white mt-16">
+        <div className="container-page py-6 text-xs text-ink-subtle flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <span>© {new Date().getFullYear()} Resident Services — Proof of Concept demo.</span>
+          <span>Demo only. Do not enter real personal information.</span>
+        </div>
+      </footer>
+    </div>
+  )
+}
