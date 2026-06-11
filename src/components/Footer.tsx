@@ -11,8 +11,9 @@ export default function Footer() {
             <span className="text-sm font-semibold text-navy-900">Proactive Enforcement Intelligence</span>
           </div>
           <p className="mt-3 text-sm text-ink-muted max-w-sm">
-            A municipal AI proof of concept for triage, prioritization, and operational intelligence. Built using public
-            and synthetic data.
+            A Closure Review Workbench proof of concept for Enforcement and By-law complaint responses. AI automates
+            research, analysis, and draft preparation for staff approved closure responses. Built using Toronto 311
+            public benchmark data and synthetic records.
           </p>
         </div>
         <div>

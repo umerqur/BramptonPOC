@@ -4,33 +4,33 @@ import SectionHeading from '../components/SectionHeading'
 const steps = [
   {
     n: '01',
-    title: 'Ingest',
-    body: 'Pulls public benchmark municipal service request data and Brampton ward boundaries into a unified case model, using synthetic placeholders only for non public internal fields such as patrol logs and ticket history.',
+    title: 'Complaint enters the review queue',
+    body: 'Enforcement and By-law complaint responses load into the Closure Review Workbench queue, built on Toronto 311 public benchmark data normalized into a Brampton compatible schema.',
   },
   {
     n: '02',
-    title: 'Normalize',
-    body: 'Standardizes addresses, categories, and timestamps so complaints across channels can be compared and clustered.',
+    title: 'Needs Attention score prioritizes',
+    body: 'A transparent ML Needs Attention score ranks the queue so staff review the files that need attention first.',
   },
   {
     n: '03',
-    title: 'Detect patterns',
-    body: 'Identifies repeat complaints, geographic clusters, and category escalation signals across rolling time windows.',
+    title: 'Case workspace gathers context',
+    body: 'The workspace shows complaint context, area, status, assigned department, and trend signals — including patrol or ticket style records where available — in one place.',
   },
   {
     n: '04',
-    title: 'Score risk',
-    body: 'Combines transparent rules with ML ready features to produce a 0–100 score and a Low / Medium / High / Critical label.',
+    title: 'Deterministic rules flag issues',
+    body: 'Explainable rules flag missing information, safety wording, supervisor review, or closure candidates. Staff always see which rule fired and why.',
   },
   {
     n: '05',
-    title: 'Summarize',
-    body: 'Generates plain language case summaries, risk explanations, and officer ready briefing notes.',
+    title: 'AI Review Packet drafts language',
+    body: 'On staff request, AI drafts a staff summary, recommended next step, resident friendly update, and closure language when appropriate.',
   },
   {
     n: '06',
-    title: 'Recommend',
-    body: 'Suggests a next operational action (monitor, notice, schedule inspection, escalate) for staff review and decision.',
+    title: 'Staff approve before anything happens',
+    body: 'Every draft is advisory. Staff must approve before any closure or resident communication — the AI never closes a case on its own.',
   },
 ]
 
@@ -39,8 +39,8 @@ export default function HowItWorksPage() {
     <div className="container-page py-12">
       <SectionHeading
         eyebrow="How It Works"
-        title="From raw complaints to officer ready briefings"
-        description="A six step pipeline. Every step is transparent, every output is reviewable, and staff make every final decision."
+        title="From complaint intake to staff approved closure"
+        description="The Closure Review Workbench in six steps. AI automates research, analysis, and draft preparation — staff approve every closure and every resident communication."
       />
 
       <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -66,10 +66,10 @@ export default function HowItWorksPage() {
           <h3 className="text-base font-semibold text-navy-900">What this system does not do</h3>
           <ul className="mt-3 space-y-2 text-sm text-ink">
             {[
+              'Close cases or contact residents without staff approval',
               'Issue notices or penalties automatically',
               'Replace officer judgment or supervisor review',
               'Use private City data in this POC phase',
-              'Make irreversible decisions without a human in the loop',
             ].map((t) => (
               <li key={t} className="flex items-start gap-2">
                 <svg className="mt-1 text-red-500 shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -82,10 +82,10 @@ export default function HowItWorksPage() {
           <h3 className="text-base font-semibold text-navy-900">What it does do</h3>
           <ul className="mt-3 space-y-2 text-sm text-ink">
             {[
-              'Surfaces repeat complaint patterns staff might otherwise miss',
-              'Produces explainable risk scores with named drivers',
-              'Prepares officer briefings with citations to source complaints',
-              'Reduces preparation time for inspections and field visits',
+              'Gathers enforcement context, complaint trends, and patrol or ticket style records',
+              'Prioritizes the review queue with an explainable Needs Attention score',
+              'Drafts staff summaries and resident friendly closure messages for approval',
+              'Reduces the research and writing time behind each closure response',
             ].map((t) => (
               <li key={t} className="flex items-start gap-2">
                 <svg className="mt-1 text-accent-600 shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
@@ -97,7 +97,7 @@ export default function HowItWorksPage() {
       </div>
 
       <div className="mt-12 flex flex-col sm:flex-row gap-3">
-        <Link to="/login" className="btn-primary">Sign in to Workflow Console</Link>
+        <Link to="/login" className="btn-primary">Sign in to the Closure Review Workbench</Link>
         <Link to="/methodology" className="btn-secondary">Read the methodology</Link>
       </div>
     </div>
@@ -106,7 +106,7 @@ export default function HowItWorksPage() {
 
 function PipelineDiagram() {
   const nodes = [
-    { x: 30, label: 'Public benchmark data' },
+    { x: 30, label: 'Toronto 311 benchmark' },
     { x: 175, label: 'Synthetic records' },
     { x: 320, label: 'Geospatial data' },
   ]
@@ -127,17 +127,17 @@ function PipelineDiagram() {
       ))}
 
       <rect x="30" y="100" width="420" height="50" rx="8" fill="#0f1a30" />
-      <text x="240" y="129" textAnchor="middle" fontSize="12" fill="#fff" fontWeight="600">Normalize · Cluster · Score</text>
+      <text x="240" y="129" textAnchor="middle" fontSize="12" fill="#fff" fontWeight="600">Normalize · Queue · Score</text>
 
       <line x1="450" y1="125" x2="510" y2="125" stroke="#94a4c5" markerEnd="url(#arrow)" />
 
       <rect x="510" y="100" width="200" height="50" rx="8" fill="#205c4b" />
-      <text x="610" y="129" textAnchor="middle" fontSize="12" fill="#fff" fontWeight="600">AI summaries</text>
+      <text x="610" y="129" textAnchor="middle" fontSize="12" fill="#fff" fontWeight="600">AI Review Packet</text>
 
       <line x1="710" y1="125" x2="770" y2="125" stroke="#94a4c5" markerEnd="url(#arrow)" />
 
       <rect x="770" y="100" width="180" height="50" rx="8" fill="#fff" stroke="#cbd5e1" />
-      <text x="860" y="129" textAnchor="middle" fontSize="12" fill="#0f1a30">Staff review &amp; action</text>
+      <text x="860" y="129" textAnchor="middle" fontSize="12" fill="#0f1a30">Staff approval</text>
 
       <line x1="240" y1="150" x2="240" y2="180" stroke="#94a4c5" markerEnd="url(#arrow)" />
       <rect x="120" y="180" width="240" height="40" rx="8" fill="#fff" stroke="#cbd5e1" />

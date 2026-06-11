@@ -130,7 +130,7 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
       </div>
 
       <div className="mt-3 text-[11px] text-ink-subtle">
-        Public benchmark municipal service request data used to demonstrate the workflow. Not Brampton operational
+        Toronto 311 public benchmark data used to demonstrate the workflow. Not Brampton operational
         complaint data. Workflow and closure tracking with staff reviewed decision support.
       </div>
 

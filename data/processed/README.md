@@ -1,62 +1,21 @@
 # Processed Municipal Data
 
-This folder is for cleaned CSV outputs generated from raw municipal open data.
+This folder is for cleaned CSV outputs generated from the Toronto 311 public benchmark raw data.
 
-Generated files are ignored by Git and should be recreated locally from scripts.
+Generated files are ignored by Git and should be recreated locally from the scripts in `scripts/`.
 
-Expected local output:
+## Current pipeline
 
-```text
-municipal_service_requests.csv
-```
+The Toronto 311 public benchmark data is normalized into the Brampton compatible complaint workflow schema and uploaded to Supabase:
 
-This processed file is the one to upload into Supabase after running the cleaning pipeline.
+- **`municipal_complaints`** — the active complaints table read by the app (cleaned, normalized Toronto 311 records).
+- **`workload_insights_v1`** — v1 workload-density model outputs, produced by `scripts/train_workload_density_v1.py` and uploaded with `scripts/upload_workload_insights_v1.py`.
+- **`workflow_ml_predictions`** — V2 "Needs Attention" model outputs, produced by `scripts/train_workflow_ml_v2.py` / `scripts/score_workflow_ml_v2_full.py` and uploaded with `scripts/upload_workflow_ml_predictions_v2.py`.
 
-## Normalized schema
+Exploratory analysis of the normalized Toronto 311 dataset lives in `scripts/eda_toronto311.py`, with outputs written to `reports/eda/`.
 
-The cleaning pipeline maps raw NYC 311 columns into Brampton POC friendly columns:
+Every model output row carries provenance (source city, source dataset, model version, scoring period) and an advisory disclaimer: this is Toronto 311 public benchmark data, not Brampton operational data, and all outputs are decision support for staff approval only.
 
-| Raw NYC 311 column | Normalized column |
-| --- | --- |
-| Unique Key | source_id |
-| Created Date | opened_at |
-| Closed Date | closed_at |
-| Agency | agency |
-| Agency Name | agency_name |
-| Problem (formerly Complaint Type) | category |
-| Problem Detail (formerly Descriptor) | subcategory |
-| Additional Details | issue_detail |
-| Location Type | location_type |
-| Incident Zip | postal_code |
-| Incident Address | address_label |
-| Street Name | street_name |
-| City | city |
-| Status | status |
-| Resolution Description | closure_text |
-| Community Board | community_board |
-| Council District | council_district |
-| Borough | district |
-| Open Data Channel Type | channel |
-| Latitude | latitude |
-| Longitude | longitude |
+## Legacy
 
-The processed output also adds:
-
-```text
-source_city
-source_dataset
-days_open
-is_closed
-risk_score
-risk_level
-recommended_action
-risk_drivers
-```
-
-## Upload target
-
-Upload `municipal_service_requests.csv` into the Supabase table created by:
-
-```text
-supabase/migrations/001_create_municipal_service_requests.sql
-```
+An earlier iteration of the POC used a different public 311 export normalized into `data/processed/municipal_service_requests.csv` and the legacy `municipal_service_requests` Supabase table (migration 001). That pipeline is legacy and no longer feeds the app.

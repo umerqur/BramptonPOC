@@ -1,10 +1,21 @@
 # Proactive Enforcement Intelligence — Brampton compatible POC
 
-Decision support for municipal enforcement teams — AI-assisted triage, explainable scoring, workload insights, and staff-ready case preparation.
+A **Closure Review Workbench** for Enforcement and By-law complaint responses — AI automates research, analysis, and draft preparation for staff approved closure responses.
 
 This repository contains the proof of concept (POC) website: a Vite + React + TypeScript application styled with Tailwind CSS and routed with React Router. It is designed to be demo-ready for a City of Brampton conversation and deploys cleanly on Netlify.
 
-> **Positioning.** This is a **Brampton compatible Proactive Enforcement Intelligence POC using Toronto 311 public benchmark data**. It is **not Brampton operational data**. Real public Toronto 311 service request data is normalized into a Brampton compatible municipal enforcement schema and used to demonstrate **workflow triage, case queueing, workload insights, ML "Needs Attention" scoring, closure review, and AI-assisted staff review packets**. The system is decision support for authorized municipal staff: it does not make enforcement decisions, issue notices, or act autonomously — a human reviews and decides on every case. No private City data is required for the POC, and the schema is ready for Brampton enforcement data later.
+> **Positioning.** This is a **Brampton compatible Proactive Enforcement Intelligence POC using Toronto 311 public benchmark data**. It is **not Brampton operational data**. Real public Toronto 311 service request data is normalized into a Brampton compatible municipal enforcement schema and used to demonstrate the core buyer workflow: supporting the **closure of Enforcement and By-law complaint responses** by gathering enforcement context, complaint trends, and patrol or ticket style records, and drafting personalized resident friendly closure messages. **AI automates research, analysis, and draft preparation for staff approved closure responses** — it does not make enforcement decisions, close cases on its own, or contact residents without staff approval. No private City data is required for the POC, and the schema is ready for Brampton enforcement data later.
+
+## The Closure Review Workbench workflow
+
+The core of the app is the authenticated Closure Review Workbench (`/app/closure-review`), which communicates a single end-to-end workflow:
+
+1. **Complaint enters the review queue** — cases load from the live Toronto 311 benchmark workflow data.
+2. **Needs Attention score helps staff prioritize** — the V2 ML model ranks the queue so staff review the right files first.
+3. **Case workspace gathers context** — complaint details, area, status, assigned department, and trend signals in one place.
+4. **Deterministic rules flag issues** — missing information, safety wording, supervisor review, or closure candidate, with the fired rule always shown.
+5. **AI Review Packet drafts language** — staff summary, recommended next step, resident friendly update, and closure language when appropriate, generated server-side on explicit staff request.
+6. **Staff must approve** — no closure and no resident communication happens without staff approval.
 
 ---
 
@@ -45,22 +56,22 @@ The Supabase schema lives in `supabase/migrations/` (001–008, applied in order
 ## What it demonstrates
 
 - A public marketing site (landing, how-it-works, methodology, privacy) explaining the POC and the **assistive** role of AI — no public operational data demo.
-- An authenticated app (`/app`, Supabase magic-link login) with:
-  - **Dashboard** — KPI cards and category breakdowns over the live benchmark data.
+- An authenticated app (`/app`, Supabase magic-link login) centred on:
+  - **Closure Review Workbench** (the staff landing page) — the six-step workflow above: attention-ranked complaint review queue, case file workspace with context and trend signals, deterministic rule flags, **AI Review Packet** (staff summary, next step, resident update, closure language), an "Ask this case" assistant, and human review controls. Every draft requires staff approval.
   - **Case queue and case detail** — filterable queue with server-side filtering against `municipal_complaints`, plus per-case detail with explainable triage signals.
   - **Operations Workflow Console** — workflow-stage counts and recent staff workflow events, demonstrating triage and case progression.
-  - **Toronto ward workload context** — real Toronto ward polygons with real Toronto 311 ward-level complaint volume.
   - **Workload insights (v1)** — scored locations from the v1 workload-density model.
   - **V2 ML results** — the full scored benchmark from the V2 workflow ML model ("Needs Attention" score, tier, rank).
-  - **Closure review** — the needs-attention slice of `workflow_ml_predictions`, linked back to source case files, with an **AI-assisted staff review packet** generated server-side on explicit staff request.
-- AI-assisted review packets are produced by Netlify functions (`netlify/functions/`) that hold the Anthropic API key server-side; the browser never sees the key, drafts are advisory only, and nothing is sent to a resident.
+  - **Toronto ward workload context** — real Toronto ward polygons with real Toronto 311 ward-level complaint volume.
+  - **Dashboard** — KPI cards and category breakdowns over the live benchmark data.
+- AI Review Packets are produced by Netlify functions (`netlify/functions/`) that hold the Anthropic API key server-side; the browser never sees the key, drafts are advisory only, and nothing is sent to a resident.
 
 ---
 
 ## Positioning principles
 
-- **Decision support, not automated enforcement.** The system never issues notices or penalties on its own.
-- **Human review by design.** Every score, triage result, and AI-drafted review packet is advisory; authorized municipal staff make every final decision.
+- **AI automates research, analysis, and draft preparation — staff approve closure responses.** The AI never closes a case by itself, never issues notices or penalties, and never contacts residents on its own.
+- **Human review by design.** Every score, rule flag, and AI-drafted review packet is advisory; authorized municipal staff make every final decision.
 - **Explainable scoring.** Scores are published with the drivers and provenance that produced them — no black box. Model outputs carry source city, dataset, model version, and scoring period on every row.
 - **Staff-ready summaries.** Outputs are framed as briefing material for officers to review, not as decisions.
 - **Auditability and governance.** Scores, AI-generated content, and staff workflow events are logged and reviewable.
@@ -190,7 +201,7 @@ Full version lives on the in-app `/methodology` page. Short form:
 2. **Normalize.** Standardize addresses, categories, and timestamps into the Brampton compatible enforcement schema (`municipal_complaints`) so complaints across channels can be compared.
 3. **Detect patterns.** Identify repeat complaints, geographic clusters, and ward-level workload concentration across rolling time windows.
 4. **Score.** Transparent rule-based triage plus two ML layers — the v1 workload-density model (`workload_insights_v1`) and the V2 workflow ML model (`workflow_ml_predictions`, "Needs Attention" score / tier / rank) — every output carrying provenance and an advisory disclaimer.
-5. **Summarize.** Generate plain-language case summaries, triage explanations, and AI-assisted staff review packets (server-side, on explicit staff request).
+5. **Summarize.** Generate AI Review Packets — staff summary, recommended next step, resident friendly update, and closure language when appropriate (server-side, on explicit staff request).
 6. **Recommend.** Suggest a next operational action (Monitor, Merge, Schedule inspection, Escalate for supervisor review, Send notice, Prepare officer visit) **for staff review**.
 
 ### Out of scope for this POC

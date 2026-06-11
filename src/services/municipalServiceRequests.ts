@@ -2,10 +2,9 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
 
 // Primary data source for the authenticated Brampton complaint workflow app.
-// Public benchmark municipal service request data is loaded into
-// `municipal_complaints` to demonstrate the complaint workflow; Brampton ward
-// boundaries provide real local context. This is not Brampton operational
-// complaint data.
+// Toronto 311 public benchmark data is loaded into `municipal_complaints` to
+// demonstrate the closure review workflow; Brampton ward boundaries provide
+// real local context. This is not Brampton operational complaint data.
 export const COMPLAINTS_TABLE = 'municipal_complaints'
 export const WARDS_TABLE = 'brampton_ward_boundaries'
 export const TORONTO_WARDS_TABLE = 'toronto_ward_boundaries'
@@ -25,7 +24,7 @@ export const TRIAGE_ADVISORY =
 
 /** Product positioning note used across the authenticated app. */
 export const DATA_POSITIONING =
-  'Public benchmark municipal service request data is used to demonstrate the complaint workflow. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data.'
+  'Toronto 311 public benchmark data is used to demonstrate the closure review workflow. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data.'
 
 /**
  * Shape of a row in the Supabase `municipal_complaints` table.

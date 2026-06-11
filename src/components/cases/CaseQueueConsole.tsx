@@ -30,7 +30,7 @@ type CaseQueueConsoleProps = {
 // context handled separately — never implying these are Brampton operational
 // complaints.
 const POC_NOTES = [
-  'Public benchmark municipal service request data',
+  'Toronto 311 public benchmark data',
   'Brampton ward context is used separately',
   'Not Brampton operational complaint data',
 ]
