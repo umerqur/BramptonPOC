@@ -91,10 +91,24 @@ cross join bounds b;
 -- ---------------------------------------------------------------------------
 -- 2. patrol_logs — 1–2 synthetic patrol entries per Closure Review queue case.
 --    Deterministic per case_id (md5-derived hash) so reseeding is stable.
+--    Scoped to the top 1000 Needs Attention cases: the queue loads the top 60,
+--    so this gives ample headroom without seeding the full 190k benchmark.
 -- ---------------------------------------------------------------------------
 delete from public.patrol_logs;
 
-with queue_cases as (
+with ranked_queue as (
+  select source_record_id
+  from (
+    select distinct on (source_record_id) source_record_id, needs_attention_score
+    from public.workflow_ml_predictions
+    where prediction_type = 'needs_attention'
+      and source_record_id is not null
+    order by source_record_id, needs_attention_score desc nulls last
+  ) d
+  order by needs_attention_score desc nulls last
+  limit 1000
+),
+queue_cases as (
   select distinct
     mc.case_id,
     coalesce(mc.ward_or_area, mc.fsa_or_area)                  as area,
@@ -103,9 +117,8 @@ with queue_cases as (
     mc.submitted_at,
     ('x' || substr(md5(mc.case_id), 1, 7))::bit(28)::int       as h
   from public.municipal_complaints mc
-  join public.workflow_ml_predictions p
+  join ranked_queue p
     on p.source_record_id = mc.case_id
-   and p.prediction_type = 'needs_attention'
 )
 insert into public.patrol_logs
   (case_id, patrol_date, officer_unit, patrol_type, area, location,
@@ -140,20 +153,32 @@ from queue_cases q
 cross join lateral generate_series(1, 1 + (q.h % 2)) as g(n);
 
 -- ---------------------------------------------------------------------------
--- 3. ticket_records — a synthetic enforcement outcome for ~40% of queue cases.
+-- 3. ticket_records — a synthetic enforcement outcome for ~40% of queue cases
+--    (same top-1000 Needs Attention scope as patrol_logs).
 -- ---------------------------------------------------------------------------
 delete from public.ticket_records;
 
-with queue_cases as (
+with ranked_queue as (
+  select source_record_id
+  from (
+    select distinct on (source_record_id) source_record_id, needs_attention_score
+    from public.workflow_ml_predictions
+    where prediction_type = 'needs_attention'
+      and source_record_id is not null
+    order by source_record_id, needs_attention_score desc nulls last
+  ) d
+  order by needs_attention_score desc nulls last
+  limit 1000
+),
+queue_cases as (
   select distinct
     mc.case_id,
     mc.complaint_type,
     mc.submitted_at,
     ('x' || substr(md5(mc.case_id), 1, 7))::bit(28)::int as h
   from public.municipal_complaints mc
-  join public.workflow_ml_predictions p
+  join ranked_queue p
     on p.source_record_id = mc.case_id
-   and p.prediction_type = 'needs_attention'
 ),
 eligible as (
   select *,
