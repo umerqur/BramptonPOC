@@ -32,7 +32,7 @@ export default function AppDashboardPage() {
       .then(([kpiData, workload, types]) => {
         if (!active) return
         if (!kpiData || kpiData.total_cases === 0) {
-          useMock()
+          applyMock()
         } else {
           setKpis(kpiData)
           setDepartmentWorkload(workload)
@@ -41,11 +41,11 @@ export default function AppDashboardPage() {
       })
       .catch((err) => {
         console.error('Failed to load live dashboard data, falling back to mock:', err)
-        if (active) useMock()
+        if (active) applyMock()
       })
       .finally(() => active && setLoading(false))
 
-    function useMock() {
+    function applyMock() {
       setKpis(mockComplaintKpis())
       setDepartmentWorkload(mockDepartmentWorkload())
       setComplaintTypes(mockComplaintTypes())
