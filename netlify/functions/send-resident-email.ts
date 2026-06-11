@@ -1,21 +1,22 @@
 // Server-side Netlify function that sends resident-facing transactional email
-// for the Resident Intake Demo flow, through Brevo (https://www.brevo.com).
+// for the Resident Intake Demo flow, through Mailjet (https://www.mailjet.com).
 //
 // Only the RESIDENT is ever emailed. Staff receive no email — they drive the
 // workflow, and each staff stage change triggers an email to the resident.
 //
 // SECURITY
 // --------
-// The Brevo API key is read from the Netlify environment variable BREVO_API_KEY
-// and is used ONLY inside this server-side function. It is never sent to the
-// browser, never exposed through a VITE_* variable, and never logged. Do NOT
-// create VITE_BREVO_API_KEY — the key must stay server side.
+// The Mailjet credentials are read from the Netlify environment variables
+// MJ_APIKEY_PUBLIC (API key) and MJ_APIKEY_PRIVATE (secret key), used ONLY
+// inside this server-side function via HTTP Basic Auth. They are never sent to
+// the browser, never exposed through a VITE_* variable, and never logged. Do
+// NOT create VITE_MJ_* variables — the keys must stay server side.
 //
 // SENDER
 // ------
-// The "from" address must be a sender that is configured and verified in the
-// Brevo account. It is read from BREVO_SENDER_EMAIL (and optional
-// BREVO_SENDER_NAME).
+// The "from" address must be a sender (or domain) that is validated in the
+// Mailjet account. It is read from MAILJET_SENDER_EMAIL (and optional
+// MAILJET_SENDER_NAME).
 //
 // SCOPE & GOVERNANCE
 // ------------------
@@ -25,10 +26,14 @@
 // This function only sends the single email described by the request body. It
 // does not read or write any database and is never invoked automatically.
 
-const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
+// Mailjet Send API v3.1. Node 20 provides a global fetch and Buffer, so no
+// Mailjet SDK dependency is required. The client calls the reserved
+// /.netlify/functions/send-resident-email endpoint, which the SPA catch-all
+// redirect never shadows.
+const MAILJET_API_URL = 'https://api.mailjet.com/v3.1/send'
 
-// Fallback sender used only if BREVO_SENDER_EMAIL is not set. This must still be
-// a verified sender in the Brevo account for delivery to succeed.
+// Fallback sender used only if MAILJET_SENDER_EMAIL is not set. This must still
+// be a validated sender in the Mailjet account for delivery to succeed.
 const DEFAULT_SENDER_EMAIL = 'no-reply@bramptonpoc.netlify.app'
 const DEFAULT_SENDER_NAME = 'Brampton 311 Resident Services (Demo)'
 
@@ -66,12 +71,11 @@ type EmailRequest = {
   status: string | null
 }
 
-type BrevoPayload = {
-  sender: { name: string; email: string }
-  to: Array<{ email: string; name?: string }>
+// Neutral, provider-agnostic email content produced by the builders below.
+type EmailContent = {
   subject: string
-  htmlContent: string
-  textContent: string
+  html: string
+  text: string
 }
 
 function json(body: unknown, status = 200): Response {
@@ -96,13 +100,13 @@ function cleanOrNull(value: unknown, max: number): string | null {
   return s ? s : null
 }
 
-// Minimal, defensive email shape check. Brevo does the real validation; this
+// Minimal, defensive email shape check. Mailjet does the real validation; this
 // just rejects obvious non-addresses before we spend an API call.
 function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
-// HTML-escape any caller-supplied text before it goes into htmlContent.
+// HTML-escape any caller-supplied text before it goes into the HTML part.
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -137,14 +141,14 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
 
 const DEMO_FOOTER_TEXT = 'This is an automated message from a proof-of-concept demo. Please do not reply.'
 
-function senderFromEnv(): { name: string; email: string } {
-  const email = (process.env.BREVO_SENDER_EMAIL || '').trim() || DEFAULT_SENDER_EMAIL
-  const name = (process.env.BREVO_SENDER_NAME || '').trim() || DEFAULT_SENDER_NAME
-  return { name, email }
+function senderFromEnv(): { email: string; name: string } {
+  const email = (process.env.MAILJET_SENDER_EMAIL || '').trim() || DEFAULT_SENDER_EMAIL
+  const name = (process.env.MAILJET_SENDER_NAME || '').trim() || DEFAULT_SENDER_NAME
+  return { email, name }
 }
 
-// Helper payload builder for the resident confirmation email.
-function buildConfirmationPayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
+// Helper content builder for the resident confirmation email.
+function buildConfirmationContent(input: EmailRequest): EmailContent {
   const name = input.residentName || 'there'
   const safeName = escapeHtml(name)
   const caseId = escapeHtml(input.caseId)
@@ -163,7 +167,7 @@ function buildConfirmationPayload(input: EmailRequest, to: Array<{ email: string
       : '',
   ].join('')
 
-  const htmlContent = `
+  const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:560px">
       <p>Hi ${safeName},</p>
       <p>Thanks for reaching out. We have received your service request and created a reference for it.</p>
@@ -172,7 +176,7 @@ function buildConfirmationPayload(input: EmailRequest, to: Array<{ email: string
       <p style="color:#64748b;font-size:12px;margin-top:24px">${DEMO_FOOTER_TEXT}</p>
     </div>`
 
-  const textContent = [
+  const text = [
     `Hi ${name},`,
     '',
     'Thanks for reaching out. We have received your service request and created a reference for it.',
@@ -188,11 +192,11 @@ function buildConfirmationPayload(input: EmailRequest, to: Array<{ email: string
     .filter((line) => line !== '')
     .join('\n')
 
-  return { sender: senderFromEnv(), to, subject, htmlContent, textContent }
+  return { subject, html, text }
 }
 
-// Helper payload builder for the status-update email.
-function buildStatusUpdatePayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
+// Helper content builder for the status-update email.
+function buildStatusUpdateContent(input: EmailRequest): EmailContent {
   const name = input.residentName || 'there'
   const safeName = escapeHtml(name)
   const caseId = escapeHtml(input.caseId)
@@ -203,7 +207,7 @@ function buildStatusUpdatePayload(input: EmailRequest, to: Array<{ email: string
 
   const subject = `Update on your service request ${input.caseId} — ${label}`
 
-  const htmlContent = `
+  const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:560px">
       <p>Hi ${safeName},</p>
       <p>There is an update on your service request <strong>${caseId}</strong>.</p>
@@ -212,7 +216,7 @@ function buildStatusUpdatePayload(input: EmailRequest, to: Array<{ email: string
       <p style="color:#64748b;font-size:12px;margin-top:24px">${DEMO_FOOTER_TEXT}</p>
     </div>`
 
-  const textContent = [
+  const text = [
     `Hi ${name},`,
     '',
     `There is an update on your service request ${input.caseId}.`,
@@ -223,13 +227,11 @@ function buildStatusUpdatePayload(input: EmailRequest, to: Array<{ email: string
     DEMO_FOOTER_TEXT,
   ].join('\n')
 
-  return { sender: senderFromEnv(), to, subject, htmlContent, textContent }
+  return { subject, html, text }
 }
 
-function buildPayload(input: EmailRequest, to: Array<{ email: string; name?: string }>): BrevoPayload {
-  return input.type === 'confirmation'
-    ? buildConfirmationPayload(input, to)
-    : buildStatusUpdatePayload(input, to)
+function buildContent(input: EmailRequest): EmailContent {
+  return input.type === 'confirmation' ? buildConfirmationContent(input) : buildStatusUpdateContent(input)
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -237,8 +239,9 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'Method not allowed. Use POST.' }, 405)
   }
 
-  const apiKey = process.env.BREVO_API_KEY
-  if (!apiKey) {
+  const apiKey = process.env.MJ_APIKEY_PUBLIC
+  const secretKey = process.env.MJ_APIKEY_PRIVATE
+  if (!apiKey || !secretKey) {
     return json({ error: 'Resident email is not configured in this environment.' }, 503)
   }
 
@@ -263,43 +266,68 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'A status is required for a status update email.' }, 400)
   }
 
-  const recipient = [{ email: input.to, name: input.residentName || undefined }]
-  const payload = buildPayload(input, recipient)
+  const content = buildContent(input)
+  const sender = senderFromEnv()
+  const mailjetBody = {
+    Messages: [
+      {
+        From: { Email: sender.email, Name: sender.name },
+        To: [{ Email: input.to, Name: input.residentName || input.to }],
+        Subject: content.subject,
+        TextPart: content.text,
+        HTMLPart: content.html,
+      },
+    ],
+  }
 
-  let brevoRes: Response
+  // HTTP Basic Auth: API key as username, secret key as password.
+  const auth = Buffer.from(`${apiKey}:${secretKey}`).toString('base64')
+
+  let mailjetRes: Response
   try {
-    brevoRes = await fetch(BREVO_API_URL, {
+    mailjetRes = await fetch(MAILJET_API_URL, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        accept: 'application/json',
-        'api-key': apiKey,
+        authorization: `Basic ${auth}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(mailjetBody),
     })
   } catch (err) {
-    console.error('Resident email request failed to reach Brevo:', errorText(err))
+    console.error('Resident email request failed to reach Mailjet:', errorText(err))
     return json({ error: 'Could not reach the email service. Try again.' }, 502)
   }
 
-  if (!brevoRes.ok) {
+  if (!mailjetRes.ok) {
     let detail = ''
     try {
-      detail = (await brevoRes.text()).slice(0, 1000)
+      detail = (await mailjetRes.text()).slice(0, 1000)
     } catch (err) {
       detail = `<unreadable response body: ${errorText(err)}>`
     }
-    console.error('Brevo API returned a non-OK status:', brevoRes.status, detail)
+    console.error('Mailjet API returned a non-OK status:', mailjetRes.status, detail)
     return json({ error: 'Email service error. Please check the server logs.' }, 502)
   }
 
+  // Mailjet returns { Messages: [{ Status, To: [{ MessageID, ... }] }] }.
   let messageId: string | null = null
+  let messageStatus: string | null = null
   try {
-    const data = (await brevoRes.json()) as { messageId?: string }
-    messageId = data.messageId ?? null
+    const data = (await mailjetRes.json()) as {
+      Messages?: Array<{ Status?: string; To?: Array<{ MessageID?: string }> }>
+    }
+    const first = data.Messages?.[0]
+    messageStatus = first?.Status ?? null
+    messageId = first?.To?.[0]?.MessageID ?? null
   } catch {
-    // Brevo normally returns { messageId }, but a missing/garbled body is not
-    // fatal — the send already succeeded (2xx). Report ok without an id.
+    // A 2xx with an unreadable body still means the send was accepted.
+  }
+
+  // Mailjet returns 200 even when an individual message errors; treat a
+  // non-"success" per-message status as a failure so the caller knows.
+  if (messageStatus && messageStatus.toLowerCase() !== 'success') {
+    console.error('Mailjet per-message status was not success:', messageStatus)
+    return json({ error: 'Email was not accepted by the email service.' }, 502)
   }
 
   return json({ ok: true, type: input.type, messageId })

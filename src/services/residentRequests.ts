@@ -18,7 +18,7 @@ import { addWorkflowEvent } from './municipalServiceRequests'
 
 export const RESIDENT_REQUESTS_TABLE = 'resident_service_requests'
 
-/** Server-side Netlify function that sends resident email via Brevo. */
+/** Server-side Netlify function that sends resident email via Mailjet. */
 const RESIDENT_EMAIL_ENDPOINT = '/.netlify/functions/send-resident-email'
 
 export const RESIDENT_DEMO_NOTICE =
@@ -232,10 +232,10 @@ export function generateCaseId(): string {
 }
 
 /**
- * Send a resident email through the server-side Brevo function. Best-effort by
+ * Send a resident email through the server-side Mailjet function. Best-effort by
  * design: callers never block the user on email delivery. Returns true on a 2xx
  * from the function, false otherwise (including when email is not configured in
- * the environment, e.g. local dev without BREVO_API_KEY).
+ * the environment, e.g. local dev without Mailjet keys).
  */
 export async function sendResidentEmail(payload: {
   type: 'confirmation' | 'status_update'
