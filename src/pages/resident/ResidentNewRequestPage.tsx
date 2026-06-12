@@ -178,7 +178,11 @@ export default function ResidentNewRequestPage() {
       setStatus({ kind: 'success', caseId: result.caseId, emailSent: result.emailSent })
     } catch (err) {
       console.error('Resident request submission failed:', err)
-      setStatus({ kind: 'error', message: 'Something went wrong submitting your request. Please try again.' })
+      setStatus({
+        kind: 'error',
+        message:
+          'We could not submit the request. Please try again, or open the form in a signed out browser window.',
+      })
     }
   }
 
@@ -282,19 +286,26 @@ export default function ResidentNewRequestPage() {
   return (
     <div className="container-page py-12">
       <div className="mx-auto max-w-4xl">
-        {/* Brampton style title band — anchors the wizard the way the real
-            Service Request Form does, while staying clearly a demo. */}
-        <div className="rounded-lg border border-navy-100 bg-navy-900 px-5 py-4 text-white">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">Service Request Form</div>
-          <h1 className="mt-1 text-2xl sm:text-3xl font-semibold tracking-tight">Report a Parking Infraction</h1>
-          <p className="mt-1 text-sm text-white/80">Demo reconstruction for Proactive Enforcement Response</p>
-        </div>
+        {/* Clean, modern page header — a simple resident service form, not an
+            internal admin dashboard. */}
+        <header>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
+            Report a Parking Infraction
+          </h1>
+          <p className="mt-2 text-sm sm:text-base text-ink-muted">
+            Submit a service request and receive updates by email.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 font-medium text-ink-muted">
+              Demo form
+            </span>
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 font-medium text-ink-muted">
+              Do not enter real personal information
+            </span>
+          </div>
+        </header>
 
         <Stepper step={step} />
-
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
-          {RESIDENT_DEMO_NOTICE}
-        </div>
 
         <form className="mt-8" onSubmit={handleSubmit}>
           {step === 0 && <LocationStep form={form} update={update} />}
@@ -308,8 +319,22 @@ export default function ResidentNewRequestPage() {
             </div>
           )}
           {status.kind === 'error' && (
-            <div className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {status.message}
+            <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-red-100 bg-red-50/70 px-4 py-3 text-sm text-red-700">
+              <svg
+                className="mt-0.5 h-4 w-4 flex-none text-red-400"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{status.message}</span>
             </div>
           )}
 
