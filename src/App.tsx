@@ -13,7 +13,7 @@ import AppCaseDetailPage from './pages/app/AppCaseDetailPage'
 import AppWorkflowPage from './pages/app/AppWorkflowPage'
 import AppTorontoWardContextPage from './pages/app/AppTorontoWardContextPage'
 import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
-import AppV2MlResultsPage from './pages/app/AppV2MlResultsPage'
+import AppStatisticalInsightsPage from './pages/app/AppStatisticalInsightsPage'
 import AppClosureReviewPage from './pages/app/AppClosureReviewPage'
 import AppResidentIntakePage from './pages/app/AppResidentIntakePage'
 import AppStaffHomePage from './pages/app/AppStaffHomePage'
@@ -58,7 +58,9 @@ export default function App() {
         <Route path="workflow" element={<AppWorkflowPage />} />
         <Route path="wards" element={<AppTorontoWardContextPage />} />
         <Route path="insights" element={<AppWorkloadInsightsPage />} />
-        <Route path="v2-ml" element={<AppV2MlResultsPage />} />
+        <Route path="statistical-insights" element={<AppStatisticalInsightsPage />} />
+        {/* Backward-compatible alias for the former V2 ML Results page. */}
+        <Route path="v2-ml" element={<Navigate to="/app/statistical-insights" replace />} />
         <Route path="closure-review" element={<AppClosureReviewPage />} />
         <Route path="resident-intake" element={<AppResidentIntakePage />} />
         <Route path="cases" element={<AppCaseQueuePage />} />

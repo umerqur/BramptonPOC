@@ -14,6 +14,13 @@ export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
 export const WORKLOAD_INSIGHTS_TABLE = 'workload_insights_v1'
 export const WORKFLOW_ML_PREDICTIONS_TABLE = 'workflow_ml_predictions'
 
+// Statistical Queue Insights — the current product direction. A transparent,
+// classical statistical scoring layer (Review Attention Score) that replaces the
+// previous ML framing in the UI. Read from the v_statistical_attention_queue view.
+export const STATISTICAL_CASE_SCORES_TABLE = 'statistical_case_scores'
+export const STATISTICAL_FEATURE_CORRELATIONS_TABLE = 'statistical_feature_correlations'
+export const STATISTICAL_ATTENTION_QUEUE_VIEW = 'v_statistical_attention_queue'
+
 /**
  * Standard advisory disclaimer for AI-assisted triage. The current POC triage is
  * rule based using existing columns in `municipal_complaints` — it is decision
@@ -689,6 +696,88 @@ export async function getClosureReviewCases(limit = 60): Promise<WorkflowMlPredi
 
   if (error) throw error
   return (data ?? []) as WorkflowMlPrediction[]
+}
+
+// ---------------------------------------------------------------------------
+// Statistical Queue Insights (read-only) — Review Attention Score
+// ---------------------------------------------------------------------------
+
+/**
+ * One ranked case from public.v_statistical_attention_queue. The Review
+ * Attention Score is a transparent, RELATIVE queue rank (Higher / Medium /
+ * Lower) built from classical statistics — case aging z-scores, repeat-location
+ * counts, area-volume trends, complaint-type backlog percentiles, and
+ * missing-context checks. It is NOT a probability, NOT a machine-learning model,
+ * and NOT an automated decision. Toronto 311 benchmark data, decision support
+ * only.
+ */
+export type StatisticalCaseScore = {
+  case_id: string | null
+  source_record_id: string | null
+  complaint_type: string | null
+  status: string | null
+  workflow_stage: string | null
+  assigned_department: string | null
+  ward_or_area: string | null
+  address_or_location: string | null
+  attention_score: number | null
+  attention_tier: string | null
+  attention_rank: number | null
+  top_driver_1: string | null
+  top_driver_2: string | null
+  top_driver_3: string | null
+  advisory: string | null
+  score_version: string | null
+}
+
+const STATISTICAL_ATTENTION_QUEUE_COLUMNS =
+  'case_id, source_record_id, complaint_type, status, workflow_stage, assigned_department, ward_or_area, address_or_location, attention_score, attention_tier, attention_rank, top_driver_1, top_driver_2, top_driver_3, advisory, score_version'
+
+/**
+ * Reads the top-ranked Review Attention cases from the
+ * v_statistical_attention_queue view (lowest attention_rank = review first).
+ * Any Supabase error — including the view not existing because scores have not
+ * been generated yet — is thrown so the caller can surface it clearly rather
+ * than silently showing an empty queue.
+ */
+export async function getStatisticalAttentionQueue(limit = 50): Promise<StatisticalCaseScore[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(STATISTICAL_ATTENTION_QUEUE_VIEW)
+    .select(STATISTICAL_ATTENTION_QUEUE_COLUMNS)
+    .order('attention_rank', { ascending: true, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data ?? []) as StatisticalCaseScore[]
+}
+
+/** A feature/target correlation row backing the explainability summary. */
+export type StatisticalFeatureCorrelation = {
+  feature_name: string
+  target_name: string
+  correlation_coefficient: number | null
+  direction: string | null
+  interpretation: string | null
+  sample_size: number | null
+  score_version: string | null
+}
+
+/**
+ * Reads feature/target correlation coefficients (strongest first) from
+ * public.statistical_feature_correlations. Returns an empty array when the table
+ * is not yet populated; the caller shows a clear "not populated yet" placeholder.
+ */
+export async function getStatisticalFeatureCorrelations(limit = 20): Promise<StatisticalFeatureCorrelation[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(STATISTICAL_FEATURE_CORRELATIONS_TABLE)
+    .select('feature_name, target_name, correlation_coefficient, direction, interpretation, sample_size, score_version')
+    .order('correlation_coefficient', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data ?? []) as StatisticalFeatureCorrelation[]
 }
 
 export async function addWorkflowEvent(input: {

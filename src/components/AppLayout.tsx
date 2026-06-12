@@ -5,13 +5,13 @@ import Footer from './Footer'
 import { useAuth } from '../lib/auth'
 
 // Authenticated app shell. Shows a focused staff header (Closure Workbench,
-// Insights, Methodology, Sign out) instead of the public marketing nav. Closure
-// Workbench is the primary staff landing page (attention-ranked review queue +
-// staff ready packet). The broader consoles (Workflow, Dashboard, V2 ML Results, Toronto
-// Ward Context) and individual cases stay available via direct URL
-// (/app/workflow, /app/dashboard, /app/v2-ml, /app/wards, /app/cases,
-// /app/cases/:id) but are intentionally kept out of the top nav to keep the demo
-// focused.
+// Insights, Statistical Insights, Methodology, Sign out) instead of the public
+// marketing nav. Closure Workbench is the primary staff landing page
+// (attention-ranked review queue + staff ready packet). The broader consoles
+// (Workflow, Dashboard, Toronto Ward Context) and individual cases stay
+// available via direct URL (/app/workflow, /app/dashboard, /app/wards,
+// /app/cases, /app/cases/:id) but are intentionally kept out of the top nav to
+// keep the demo focused.
 export default function AppLayout() {
   const [open, setOpen] = useState(false)
   const { session, signOut } = useAuth()
@@ -41,6 +41,7 @@ export default function AppLayout() {
             <StaffLink to="/app/resident-intake">Resident Intake</StaffLink>
             <StaffLink to="/app/closure-review">Closure Review</StaffLink>
             <StaffLink to="/app/insights">Insights</StaffLink>
+            <StaffLink to="/app/statistical-insights">Statistical Insights</StaffLink>
             <StaffLink to="/methodology">Methodology</StaffLink>
             {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
             <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
@@ -66,6 +67,7 @@ export default function AppLayout() {
               <StaffLink to="/app/resident-intake" onClick={() => setOpen(false)}>Resident Intake</StaffLink>
               <StaffLink to="/app/closure-review" onClick={() => setOpen(false)}>Closure Review</StaffLink>
               <StaffLink to="/app/insights" onClick={() => setOpen(false)}>Insights</StaffLink>
+              <StaffLink to="/app/statistical-insights" onClick={() => setOpen(false)}>Statistical Insights</StaffLink>
               <StaffLink to="/methodology" onClick={() => setOpen(false)}>Methodology</StaffLink>
               <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
             </div>

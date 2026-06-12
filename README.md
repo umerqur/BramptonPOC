@@ -11,7 +11,7 @@ This repository contains the proof of concept (POC) website: a Vite + React + Ty
 The core of the app is the authenticated Closure Review Workbench (`/app/closure-review`), which communicates a single end-to-end workflow:
 
 1. **Complaint enters the review queue** — cases load from the live Toronto 311 benchmark workflow data.
-2. **Needs Attention score helps staff prioritize** — the V2 ML model ranks the queue so staff review the right files first.
+2. **Review Attention Score helps staff prioritize** — a transparent statistical queue rank surfaces the files staff should review first.
 3. **Case workspace gathers linked records** — complaint details plus related patrol logs, ticket records, and complaint trend context for the selected case. Patrol and ticket records are clearly labelled **synthetic POC operational context** linked to real benchmark case ids; trends are generated from the benchmark complaints.
 4. **Rules check closure readiness** — deterministic flags plus a closure readiness checklist and a matched resident friendly closure template (by complaint type + scenario).
 5. **AI Review Packet drafts language** — the agent workflow reads the selected complaint, retrieves its related patrol logs, ticket records, and complaint trend context, selects the matching closure template, and drafts the staff summary, next step, resident update, and closure language — generated server-side on explicit staff request and returned for staff approval only.
@@ -65,7 +65,12 @@ The current service layer (`src/services/municipalServiceRequests.ts`) reads fro
 | `ai_triage_results` | Rule-based POC triage outputs (advisory only). |
 | `case_ai_reviews` | Persisted AI-assisted staff review records. |
 | `workload_insights_v1` | v1 workload-density model outputs — one scored location per model run, with full provenance (source city, dataset, model version, feature window). |
-| `workflow_ml_predictions` | V2 workflow ML model outputs — "Needs Attention" score, tier, and rank per scored complaint. Drives the V2 ML results and Closure Review pages. |
+| `statistical_case_scores` | **Review Attention Score** — one row per scored complaint: a transparent statistical queue rank (Higher/Medium/Lower) with its drivers (aging z-score, repeat-location count, area trend, type backlog percentile, missing-context count). Drives the Statistical Queue Insights page. |
+| `statistical_feature_correlations` | Feature/target correlation coefficients from EDA, backing the explainability summary. |
+| `statistical_area_trends` | Per-area, per-complaint-type volume trends (current vs prior period, change %, z-score). |
+| `statistical_model_runs` | Provenance for each scoring run — source city/dataset, target definition, methodology. |
+| `v_statistical_attention_queue` | View joining `statistical_case_scores` to benchmark complaint context; the read source for Statistical Queue Insights. |
+| `workflow_ml_predictions` | **Legacy** workflow attention outputs ("Needs Attention" score, tier, rank). Retained for rollback; the Closure Review queue still reads it, while Statistical Queue Insights now reads the statistical tables above. |
 | `patrol_logs` | **Synthetic POC operational context.** Demo patrol log records linked to real benchmark complaint `case_id`s, shown in the Closure Review case workspace. Clearly labelled — not Brampton operational data. |
 | `ticket_records` | **Synthetic POC operational context.** Demo ticket / enforcement outcome records linked to real benchmark complaint `case_id`s. Clearly labelled — not Brampton operational data. |
 | `complaint_trends` | Complaint trend aggregates **generated from the Toronto 311 benchmark complaints**: per area + complaint type, current vs prior period volume, change percent, repeat locations, and a trend label. |
@@ -98,7 +103,7 @@ The Supabase schema lives in `supabase/migrations/` (001–010, applied in order
   - **Case queue and case detail** — filterable queue with server-side filtering against `municipal_complaints`, plus per-case detail with explainable triage signals.
   - **Operations Workflow Console** — workflow-stage counts and recent staff workflow events, demonstrating triage and case progression.
   - **Workload insights (v1)** — scored locations from the v1 workload-density model.
-  - **V2 ML results** — the full scored benchmark from the V2 workflow ML model ("Needs Attention" score, tier, rank).
+  - **Statistical Queue Insights** — the **Review Attention Score** over the benchmark: a transparent, classical statistical queue rank (Higher/Medium/Lower) built from EDA, z-scores, percentiles, repeat counts, and correlation checks. Not an ML model, not a probability — decision support only.
   - **Toronto ward workload context** — real Toronto ward polygons with real Toronto 311 ward-level complaint volume.
   - **Dashboard** — KPI cards and category breakdowns over the live benchmark data.
 - AI Review Packets are produced by Netlify functions (`netlify/functions/`) that hold the Anthropic API key server-side; the browser never sees the key, drafts are advisory only, and nothing is sent to a resident.
@@ -124,7 +129,7 @@ The Supabase schema lives in `supabase/migrations/` (001–010, applied in order
 - **React Router** — page routing
 - **Supabase** — live data layer (`municipal_complaints` and related tables/views above), with a bundled sample dataset (`src/data/`) as fallback
 - **Netlify functions** — server-side AI review packet generation (Anthropic API key never exposed to the browser)
-- **Data and ML pipeline** — local Python scripts (`scripts/`): Toronto 311 EDA, v1 workload-density model training, V2 workflow ML training/scoring, and Supabase upload utilities
+- **Data and statistical pipeline** — local Python scripts (`scripts/`): Toronto 311 EDA, v1 workload-density model training, the Review Attention Score statistical scoring builder (`build_statistical_attention_scores.py`), and Supabase upload utilities. (The legacy V2 workflow ML scripts are retained for rollback.)
 
 ---
 
@@ -166,7 +171,7 @@ src/
                     and the AI review packet client
   pages/            Public site pages, one file per route
   pages/app/        Authenticated app pages (dashboard, workflow, wards, insights,
-                    V2 ML results, closure review, case queue/detail)
+                    statistical insights, closure review, case queue/detail)
   App.tsx           Route definitions
   main.tsx          App entrypoint
   index.css         Tailwind layers + design tokens
@@ -177,10 +182,12 @@ public/
   favicon.svg
 scripts/            Toronto 311 EDA, v1/V2 model training, scoring, and upload scripts
 supabase/
-  migrations/       Schema migrations 001–008 (001 is the legacy
+  migrations/       Schema migrations 001–012 (001 is the legacy
                     municipal_service_requests table; 002+ cover RLS,
                     municipal_complaints workflow, ward context, workload
-                    insights, and workflow ML predictions)
+                    insights, the legacy workflow ML predictions, resident
+                    service requests, and the statistical attention scoring
+                    tables + queue view)
 netlify.toml        Build settings for Netlify
 tailwind.config.js  Design tokens (navy + accent palette)
 ```
@@ -200,7 +207,8 @@ tailwind.config.js  Design tokens (navy + accent palette)
 | `/app/workflow`       | Operations Workflow Console           |
 | `/app/wards`          | Toronto Ward Workload Context         |
 | `/app/insights`       | Workload Insights (v1 model)          |
-| `/app/v2-ml`          | V2 ML Results ("Needs Attention")     |
+| `/app/statistical-insights` | Statistical Queue Insights (Review Attention Score) |
+| `/app/v2-ml`          | → redirects to `/app/statistical-insights` |
 | `/app/closure-review` | Closure Review + AI review packet     |
 
 Old public demo routes (`/dashboard`, `/cases`) redirect to `/login`; the live versions are under `/app`.
@@ -237,7 +245,7 @@ Full version lives on the in-app `/methodology` page. Short form:
 1. **Ingest.** Real public Toronto 311 service request data and real open geospatial reference data (Toronto and Brampton ward boundaries), with synthetic placeholders only for non-public internal records and the clearly labelled Brampton workload overlay.
 2. **Normalize.** Standardize addresses, categories, and timestamps into the Brampton compatible enforcement schema (`municipal_complaints`) so complaints across channels can be compared.
 3. **Detect patterns.** Identify repeat complaints, geographic clusters, and ward-level workload concentration across rolling time windows.
-4. **Score.** Transparent rule-based triage plus two ML layers — the v1 workload-density model (`workload_insights_v1`) and the V2 workflow ML model (`workflow_ml_predictions`, "Needs Attention" score / tier / rank) — every output carrying provenance and an advisory disclaimer.
+4. **Score.** Transparent rule-based triage plus the **Review Attention Score** (`statistical_case_scores`) — a classical statistical queue rank built from EDA, aging z-scores, percentiles, repeat-location counts, area-trend signals, and correlation checks (no black-box model). The v1 workload-density layer (`workload_insights_v1`) remains for location density. Every output carries provenance and an advisory disclaimer, and the score is decision support only.
 5. **Summarize.** Generate AI Review Packets — staff summary, recommended next step, resident friendly update, and closure language when appropriate (server-side, on explicit staff request).
 6. **Recommend.** Suggest a next operational action (Monitor, Merge, Schedule inspection, Escalate for supervisor review, Send notice, Prepare officer visit) **for staff review**.
 
