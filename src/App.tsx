@@ -13,7 +13,6 @@ import AppCaseDetailPage from './pages/app/AppCaseDetailPage'
 import AppWorkflowPage from './pages/app/AppWorkflowPage'
 import AppTorontoWardContextPage from './pages/app/AppTorontoWardContextPage'
 import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
-import AppStatisticalInsightsPage from './pages/app/AppStatisticalInsightsPage'
 import AppClosureReviewPage from './pages/app/AppClosureReviewPage'
 import AppResidentIntakePage from './pages/app/AppResidentIntakePage'
 import AppStaffHomePage from './pages/app/AppStaffHomePage'
@@ -57,10 +56,14 @@ export default function App() {
         <Route path="dashboard" element={<AppDashboardPage />} />
         <Route path="workflow" element={<AppWorkflowPage />} />
         <Route path="wards" element={<AppTorontoWardContextPage />} />
+        {/* Single combined Insights experience (statistical attention queue first,
+            workload/area context below). */}
         <Route path="insights" element={<AppWorkloadInsightsPage />} />
-        <Route path="statistical-insights" element={<AppStatisticalInsightsPage />} />
-        {/* Backward-compatible alias for the former V2 ML Results page. */}
-        <Route path="v2-ml" element={<Navigate to="/app/statistical-insights" replace />} />
+        {/* Backward-compatible redirects to the combined Insights page. The
+            former Statistical Insights tab and the older V2 results alias both
+            land here now. */}
+        <Route path="statistical-insights" element={<Navigate to="/app/insights" replace />} />
+        <Route path="v2-ml" element={<Navigate to="/app/insights" replace />} />
         <Route path="closure-review" element={<AppClosureReviewPage />} />
         <Route path="resident-intake" element={<AppResidentIntakePage />} />
         <Route path="cases" element={<AppCaseQueuePage />} />

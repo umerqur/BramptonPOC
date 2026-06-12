@@ -12,6 +12,11 @@ export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
 export const WORKLOAD_INSIGHTS_TABLE = 'workload_insights_v1'
+// Legacy table retained for rollback but no longer used by the main staff UI.
+// The authenticated app now reads the statistical attention queue
+// (v_statistical_attention_queue) for both Closure Review and Insights. The
+// constant and the read helpers below are kept so a rollback is a one-line
+// swap, not a re-import — no visible ML wording is surfaced from them.
 export const WORKFLOW_ML_PREDICTIONS_TABLE = 'workflow_ml_predictions'
 
 // Statistical Queue Insights — the current product direction. A transparent,
@@ -678,12 +683,13 @@ export async function getWorkflowMlPredictionsV2(limit = 50): Promise<WorkflowMl
 }
 
 /**
- * Reads the V2 Needs Attention predictions for the Closure Review Workflow,
- * highest `needs_attention_score` first, so the case queue surfaces the files
- * staff should review first. Same table and `needs_attention` slice as
- * getWorkflowMlPredictionsV2 — the closure/review workflow layers deterministic,
- * client-side rules on top of these rows (no Supabase writes). Decision support
- * only — never Brampton operational data and never an automated decision.
+ * LEGACY (rollback only) — superseded by getClosureReviewStatisticalCases.
+ *
+ * Reads the former Needs Attention predictions for the Closure Review Workflow
+ * from the legacy workflow_ml_predictions table. The main staff UI no longer
+ * calls this; it is retained unchanged so a rollback is a one-line swap.
+ * Decision support only — never Brampton operational data and never an
+ * automated decision.
  */
 export async function getClosureReviewCases(limit = 60): Promise<WorkflowMlPrediction[]> {
   const client = requireClient()
@@ -750,6 +756,19 @@ export async function getStatisticalAttentionQueue(limit = 50): Promise<Statisti
 
   if (error) throw error
   return (data ?? []) as StatisticalCaseScore[]
+}
+
+/**
+ * Reads the statistical attention queue for the Closure Review Workbench,
+ * highest Review Attention Score first (lowest attention_rank), so the case
+ * queue surfaces the files staff should review first. This is the current
+ * product signal and replaces the former workflow ML predictions slice — the
+ * closure/review workflow layers deterministic, client-side rules on top of
+ * these rows (no Supabase writes). Decision support only — never Brampton
+ * operational data and never an automated decision.
+ */
+export async function getClosureReviewStatisticalCases(limit = 60): Promise<StatisticalCaseScore[]> {
+  return getStatisticalAttentionQueue(limit)
 }
 
 /** A feature/target correlation row backing the explainability summary. */

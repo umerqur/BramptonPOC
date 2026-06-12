@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { isSupabaseConfigured } from '../../lib/supabase'
 import {
-  getClosureReviewCases,
-  type WorkflowMlPrediction,
+  getClosureReviewStatisticalCases,
+  type StatisticalCaseScore,
 } from '../../services/municipalServiceRequests'
 import {
   askCaseAgent,
@@ -22,14 +22,15 @@ import {
   type ClosureScenario,
 } from '../../services/operationalContext'
 
-// Closure Review Workbench — turns the V2 "Needs Attention" model output into a
-// staff review + closure workflow. Cases are read live from Supabase
-// (public.workflow_ml_predictions, needs_attention slice). Everything below the
-// fetch is DETERMINISTIC and client-side: rules, recommended action, missing-info
-// checklist and draft language are computed from the loaded row — no LLM call and
-// no Supabase write. The human-review controls are POC-only UI; in production a
-// staff approval would be logged. Routing fields (predicted_department) are
-// intentionally not part of the workflow surface.
+// Closure Review Workbench — turns the statistical attention queue into a staff
+// review + closure workflow. Cases are read live from Supabase
+// (v_statistical_attention_queue) ranked by Review Attention Score. Everything
+// below the fetch is DETERMINISTIC and client-side: rules, recommended action,
+// missing-info checklist and draft language are computed from the loaded row — no
+// LLM call and no Supabase write. The human-review controls are POC-only UI; in
+// production a staff approval would be logged. The Review Attention Score is a
+// transparent, relative statistical queue rank (Higher / Medium / Lower), not a
+// probability and not an automated decision.
 
 const GOVERNANCE_NOTE =
   'AI automates research, analysis, and draft preparation for staff approved closure responses. It does not make enforcement decisions, close files on its own, or contact residents without staff approval.'
@@ -42,7 +43,7 @@ const POSITIONING_NOTE =
 // the screen reads as one closure workflow rather than a set of panels.
 const WORKBENCH_STEPS: Array<{ title: string; detail: string }> = [
   { title: 'Complaint enters review queue', detail: 'Cases load from live benchmark data.' },
-  { title: 'Needs Attention score prioritizes', detail: 'Highest priority files first.' },
+  { title: 'Review Attention Score prioritizes', detail: 'Highest priority files first.' },
   { title: 'Case workspace gathers linked records', detail: 'Patrol logs, ticket records, and trends.' },
   { title: 'Rules check closure readiness', detail: 'Flags, checklist, and matched template.' },
   { title: 'AI Review Packet drafts language', detail: 'Staff summary, next step, and resident update.' },
@@ -51,12 +52,11 @@ const WORKBENCH_STEPS: Array<{ title: string; detail: string }> = [
 
 const SAFETY_KEYWORDS = ['emergency', 'hazard', 'unsafe', 'blocked', 'broken']
 const SUPERVISOR_KEYWORDS = ['repeat', 'unsafe', 'hazard', 'blocked', 'emergency', 'urgent']
-const SHORT_DESCRIPTION_LEN = 25
 
 type Tier = 'Higher' | 'Medium' | 'Lower' | 'Unknown'
 type WorkflowAction = 'Review First' | 'Needs Follow Up' | 'Closure Candidate' | 'Supervisor Review'
 
-function tierOf(row: WorkflowMlPrediction): Tier {
+function tierOf(row: StatisticalCaseScore): Tier {
   const t = (row.attention_tier ?? '').toLowerCase()
   if (t.includes('high')) return 'Higher'
   if (t.includes('med')) return 'Medium'
@@ -74,9 +74,15 @@ function isClosedStatus(status: string | null): boolean {
   return s.includes('complete') || s.includes('closed')
 }
 
-function descMissingOrShort(row: WorkflowMlPrediction): boolean {
-  const d = (row.description ?? '').trim()
-  return d.length < SHORT_DESCRIPTION_LEN
+/** The statistical attention drivers present on a row (top_driver_1..3). */
+function driversOf(row: StatisticalCaseScore): string[] {
+  return [row.top_driver_1, row.top_driver_2, row.top_driver_3].filter((d): d is string => Boolean(d?.trim()))
+}
+
+/** A driver flags missing closure context (the statistical queue replaces the
+ *  former short-description heuristic — the queue view carries no description). */
+function hasMissingContextDriver(row: StatisticalCaseScore): boolean {
+  return driversOf(row).some((d) => d.toLowerCase().includes('missing'))
 }
 
 function includesAny(haystack: string, words: string[]): boolean {
@@ -87,24 +93,28 @@ function includesAny(haystack: string, words: string[]): boolean {
 /** Deterministic client-side rules fired from the available fields. */
 type Rule = { label: string; detail: string }
 
-function rulesFor(row: WorkflowMlPrediction): Rule[] {
+function rulesFor(row: StatisticalCaseScore): Rule[] {
   const rules: Rule[] = []
   const tier = tierOf(row)
-  const typeAndDesc = `${row.complaint_type ?? ''} ${row.description ?? ''}`
+  const drivers = driversOf(row)
+  const typeAndDrivers = `${row.complaint_type ?? ''} ${drivers.join(' ')}`
 
   if (isOpenStatus(row.status)) {
     rules.push({ label: 'Open case review required', detail: 'Status is New or In Progress.' })
   }
   if (tier === 'Higher') {
-    rules.push({ label: 'Prioritize staff review', detail: 'Attention tier is Higher.' })
+    rules.push({ label: 'Prioritize staff review', detail: 'Review Attention tier is Higher.' })
   }
-  if (descMissingOrShort(row)) {
-    rules.push({ label: 'Missing information check', detail: 'Description is missing or very short.' })
+  if (drivers.length) {
+    rules.push({ label: 'Review Attention drivers', detail: drivers.join(' · ') })
   }
-  if (includesAny(typeAndDesc, SAFETY_KEYWORDS)) {
+  if (hasMissingContextDriver(row)) {
+    rules.push({ label: 'Missing information check', detail: 'A statistical driver flags missing closure context.' })
+  }
+  if (includesAny(typeAndDrivers, SAFETY_KEYWORDS)) {
     rules.push({
       label: 'Safety wording check',
-      detail: 'Complaint text mentions emergency / hazard / unsafe / blocked / broken.',
+      detail: 'Complaint type or drivers mention emergency / hazard / unsafe / blocked / broken.',
     })
   }
   if ((row.assigned_department ?? '').trim()) {
@@ -116,43 +126,48 @@ function rulesFor(row: WorkflowMlPrediction): Rule[] {
 }
 
 /** Deterministic recommended workflow action. */
-function recommendedAction(row: WorkflowMlPrediction): WorkflowAction {
+function recommendedAction(row: StatisticalCaseScore): WorkflowAction {
   const tier = tierOf(row)
-  const typeAndDesc = `${row.complaint_type ?? ''} ${row.description ?? ''}`
+  const typeAndDrivers = `${row.complaint_type ?? ''} ${driversOf(row).join(' ')}`
 
-  if (tier === 'Higher' && includesAny(typeAndDesc, SUPERVISOR_KEYWORDS)) return 'Supervisor Review'
+  if (tier === 'Higher' && includesAny(typeAndDrivers, SUPERVISOR_KEYWORDS)) return 'Supervisor Review'
   if (tier === 'Higher' && isOpenStatus(row.status)) return 'Review First'
-  if (descMissingOrShort(row)) return 'Needs Follow Up'
+  if (hasMissingContextDriver(row)) return 'Needs Follow Up'
   if (isClosedStatus(row.status) && tier === 'Lower') return 'Closure Candidate'
   return 'Needs Follow Up'
 }
 
 type Check = { label: string; ok: boolean }
 
-function checklistFor(row: WorkflowMlPrediction): Check[] {
+function checklistFor(row: StatisticalCaseScore): Check[] {
   return [
     { label: 'Location context present', ok: Boolean((row.ward_or_area ?? '').trim()) },
-    { label: 'Description present', ok: Boolean((row.description ?? '').trim()) },
+    { label: 'Address or location present', ok: Boolean((row.address_or_location ?? '').trim()) },
     { label: 'Assigned department present', ok: Boolean((row.assigned_department ?? '').trim()) },
     { label: 'Status present', ok: Boolean((row.status ?? '').trim()) },
     { label: 'Complaint type present', ok: Boolean((row.complaint_type ?? '').trim()) },
   ]
 }
 
-function draftStaffSummary(row: WorkflowMlPrediction): string {
+function draftStaffSummary(row: StatisticalCaseScore): string {
   const type = row.complaint_type || 'an unspecified complaint type'
   const dept = row.assigned_department || 'no assigned department'
   const status = row.status || 'an unknown status'
   const tier = tierOf(row)
+  const drivers = driversOf(row)
+  const driverSentence = drivers.length
+    ? ` Key Review Attention drivers: ${drivers.join('; ')}.`
+    : ''
   return (
     `This complaint relates to ${type} and is currently assigned to ${dept}. ` +
-    `The file is marked ${status} and appears in the ${tier} attention tier based on queue attention signals. ` +
-    `Staff should review the case details, confirm whether any information is missing, and determine whether the ` +
+    `The file is marked ${status} and appears in the ${tier} Review Attention tier based on statistical queue signals.` +
+    driverSentence +
+    ` Staff should review the case details, confirm whether any information is missing, and determine whether the ` +
     `file is ready for follow up or closure.`
   )
 }
 
-function draftResidentLanguage(row: WorkflowMlPrediction): string {
+function draftResidentLanguage(row: StatisticalCaseScore): string {
   if (isClosedStatus(row.status)) {
     const status = row.status || 'reviewed'
     return (
@@ -168,11 +183,15 @@ function draftResidentLanguage(row: WorkflowMlPrediction): string {
 }
 
 export default function AppClosureReviewPage() {
-  const [rows, setRows] = useState<WorkflowMlPrediction[]>([])
+  const [rows, setRows] = useState<StatisticalCaseScore[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [controlNote, setControlNote] = useState<string | null>(null)
+  // Optional deep-link from Insights: /app/closure-review?case=<source_record_id>
+  // preselects that case in the queue when it is present in the loaded set.
+  const [searchParams] = useSearchParams()
+  const requestedCase = searchParams.get('case')
   // The right "Case File Workspace" panel. Used to scroll the opened case file
   // into view when staff pick a different queue row (mobile / small screens).
   const workspaceRef = useRef<HTMLElement>(null)
@@ -184,18 +203,26 @@ export default function AppClosureReviewPage() {
       setLoading(false)
       return
     }
-    getClosureReviewCases(60)
+    getClosureReviewStatisticalCases(60)
       .then((data) => {
         if (!active) return
         setRows(data)
-        if (data.length) setSelectedId(rowKey(data[0], 0))
+        if (data.length) {
+          // Preselect the deep-linked case if it is in the loaded set; otherwise
+          // fall back to the top-ranked case.
+          const matchIndex = requestedCase
+            ? data.findIndex((r) => r.source_record_id === requestedCase || r.case_id === requestedCase)
+            : -1
+          const initial = matchIndex >= 0 ? matchIndex : 0
+          setSelectedId(rowKey(data[initial], initial))
+        }
       })
       .catch((err: unknown) => active && setError(err instanceof Error ? err.message : String(err)))
       .finally(() => active && setLoading(false))
     return () => {
       active = false
     }
-  }, [])
+  }, [requestedCase])
 
   const summary = useMemo(() => {
     let higher = 0
@@ -288,7 +315,7 @@ export default function AppClosureReviewPage() {
           <pre className="mt-1.5 whitespace-pre-wrap break-words font-mono text-xs text-ink-subtle">{error}</pre>
         </div>
       ) : rows.length === 0 ? (
-        <div className="mt-6 card px-5 py-6 text-sm text-ink-subtle">No workflow ML predictions found.</div>
+        <div className="mt-6 card px-5 py-6 text-sm text-ink-subtle">No statistical attention scores found.</div>
       ) : (
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
           {/* Left — case queue */}
@@ -296,7 +323,7 @@ export default function AppClosureReviewPage() {
             <div className="border-b border-slate-100 px-5 py-3">
               <h2 className="text-sm font-semibold text-navy-900">Complaint review queue</h2>
               <p className="text-xs text-ink-subtle">
-                Ordered by Needs Attention score (highest first) so staff review the right files first. {rows.length}{' '}
+                Ordered by Review Attention Score (highest first) so staff review the right files first. {rows.length}{' '}
                 cases loaded.
               </p>
             </div>
@@ -344,11 +371,11 @@ export default function AppClosureReviewPage() {
                           <span>{r.ward_or_area || 'Area not recorded'}</span>
                           <span aria-hidden>·</span>
                           <span className="tabular-nums">
-                            score {r.needs_attention_score == null ? '—' : r.needs_attention_score.toFixed(3)}
+                            score {r.attention_score == null ? '—' : r.attention_score.toFixed(3)}
                           </span>
                         </div>
-                        {r.description?.trim() && (
-                          <p className="mt-1 line-clamp-1 text-xs text-ink-muted">{r.description}</p>
+                        {driversOf(r).length > 0 && (
+                          <p className="mt-1 line-clamp-1 text-xs text-ink-muted">{driversOf(r).join(' · ')}</p>
                         )}
                       </button>
                       <div className="px-4 pb-3">
@@ -395,10 +422,10 @@ export default function AppClosureReviewPage() {
                       <span>Rank {selected.attention_rank == null ? '—' : `#${selected.attention_rank}`}</span>
                       <span aria-hidden>·</span>
                       <span>
-                        Needs Attention{' '}
-                        {selected.needs_attention_score == null
+                        Review Attention{' '}
+                        {selected.attention_score == null
                           ? '—'
-                          : selected.needs_attention_score.toFixed(3)}
+                          : selected.attention_score.toFixed(3)}
                       </span>
                       <span aria-hidden>·</span>
                       <span>{selected.ward_or_area || 'Source area not recorded'}</span>
@@ -454,7 +481,7 @@ export default function AppClosureReviewPage() {
  * ground the server-side draft; `ctx` may be null while loading or on error.
  */
 function buildPacketRequest(
-  row: WorkflowMlPrediction,
+  row: StatisticalCaseScore,
   rules: Rule[],
   action: WorkflowAction,
   checks: Check[],
@@ -464,13 +491,19 @@ function buildPacketRequest(
     caseSnapshot: {
       source_record_id: row.source_record_id,
       complaint_type: row.complaint_type,
-      description: row.description,
+      // The statistical attention queue view carries no free-text description;
+      // the address/location is the closest available context. Handled safely
+      // so the backend never receives an undefined field.
+      description: row.address_or_location,
       ward_or_area: row.ward_or_area,
       status: row.status,
       assigned_department: row.assigned_department,
     },
+    // The backend AI Review Packet function still expects the `mlSignal` key for
+    // type compatibility; we feed it the statistical attention values. No ML
+    // wording is surfaced in the UI.
     mlSignal: {
-      needs_attention_score: row.needs_attention_score,
+      needs_attention_score: row.attention_score,
       attention_tier: row.attention_tier,
       attention_rank: row.attention_rank,
     },
@@ -539,7 +572,7 @@ function ReviewPacket({
   controlNote,
   onControl,
 }: {
-  row: WorkflowMlPrediction
+  row: StatisticalCaseScore
   controlNote: string | null
   onControl: (label: string) => void
 }) {
@@ -563,7 +596,9 @@ function ReviewPacket({
       area: row.ward_or_area,
       complaintType: row.complaint_type,
       status: row.status,
-      description: row.description,
+      // The statistical attention queue view carries no free-text description;
+      // pass null so scenario / readiness derivation handles it safely.
+      description: null,
     })
       .then((data) => {
         if (!active) return
@@ -670,18 +705,18 @@ function ReviewPacket({
           <Field label="Status" value={row.status} />
           <Field label="Ward or area" value={row.ward_or_area} />
           <div className="sm:col-span-2">
-            <Field label="Description" value={row.description} />
+            <Field label="Address or location" value={row.address_or_location} />
           </div>
         </dl>
       </PacketSection>
 
-      {/* B. Needs Attention Signal */}
-      <PacketSection letter="B" title="Needs Attention Signal">
+      {/* B. Review Attention Signal */}
+      <PacketSection letter="B" title="Review Attention Signal">
         <div className="grid grid-cols-3 gap-3">
           <MiniStat label="Tier" value={tier} />
           <MiniStat
             label="Score"
-            value={row.needs_attention_score == null ? '—' : row.needs_attention_score.toFixed(3)}
+            value={row.attention_score == null ? '—' : row.attention_score.toFixed(3)}
           />
           <MiniStat label="Rank" value={row.attention_rank == null ? '—' : `#${row.attention_rank}`} />
         </div>
@@ -968,8 +1003,8 @@ type AskState = 'idle' | 'loading' | 'success' | 'error'
 /**
  * "Ask this case" — a compact agentic assistant scoped to the selected case.
  * Staff type or pick a question; the backend answers using only the selected
- * case context, deterministic rules, and Needs Attention signal. Draft guidance
- * only — nothing is submitted, written, or acted on. State is local and resets
+ * case context, deterministic rules, and the Review Attention Score. Draft
+ * guidance only — nothing is submitted, written, or acted on. State resets
  * with the ReviewPacket remount (key={selectedId}).
  */
 function AskThisCase({
@@ -979,7 +1014,7 @@ function AskThisCase({
   checks,
   ctx,
 }: {
-  row: WorkflowMlPrediction
+  row: StatisticalCaseScore
   rules: Rule[]
   action: WorkflowAction
   checks: Check[]
@@ -1015,7 +1050,7 @@ function AskThisCase({
         Ask this case
       </h3>
       <p className="mt-1 text-[11px] text-ink-subtle">
-        Ask about the selected case. Answers use the case context, rules, and Needs Attention signal only.
+        Ask about the selected case. Answers use the case context, rules, and Review Attention Score only.
       </p>
 
       {/* Starter chips */}
@@ -1291,7 +1326,7 @@ function AiListBlock({
 // Small presentational helpers (match the existing app design system)
 // ---------------------------------------------------------------------------
 
-function rowKey(row: WorkflowMlPrediction, index: number): string {
+function rowKey(row: StatisticalCaseScore, index: number): string {
   return row.source_record_id ?? `row-${index}`
 }
 

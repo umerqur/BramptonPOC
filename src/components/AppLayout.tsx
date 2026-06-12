@@ -4,14 +4,15 @@ import Logo from './Logo'
 import Footer from './Footer'
 import { useAuth } from '../lib/auth'
 
-// Authenticated app shell. Shows a focused staff header (Closure Workbench,
-// Insights, Statistical Insights, Methodology, Sign out) instead of the public
-// marketing nav. Closure Workbench is the primary staff landing page
-// (attention-ranked review queue + staff ready packet). The broader consoles
-// (Workflow, Dashboard, Toronto Ward Context) and individual cases stay
-// available via direct URL (/app/workflow, /app/dashboard, /app/wards,
-// /app/cases, /app/cases/:id) but are intentionally kept out of the top nav to
-// keep the demo focused.
+// Authenticated app shell. Shows a focused staff header (Home, Intake, Closure
+// Review, Insights, Sign out) instead of the public marketing nav. Insights is a
+// single combined experience (statistical attention queue first, workload/area
+// context below) — there is no separate Statistical Insights tab. Methodology
+// lives on the public landing site only and is intentionally kept out of the
+// authenticated nav. The broader consoles (Workflow, Dashboard, Toronto Ward
+// Context) and individual cases stay available via direct URL (/app/workflow,
+// /app/dashboard, /app/wards, /app/cases, /app/cases/:id) but are kept out of the
+// top nav to keep the workspace focused.
 export default function AppLayout() {
   const [open, setOpen] = useState(false)
   const { session, signOut } = useAuth()
@@ -38,11 +39,9 @@ export default function AppLayout() {
 
           <nav className="hidden lg:flex items-center gap-2">
             <StaffLink to="/app" end>Home</StaffLink>
-            <StaffLink to="/app/resident-intake">Resident Intake</StaffLink>
+            <StaffLink to="/app/resident-intake">Intake</StaffLink>
             <StaffLink to="/app/closure-review">Closure Review</StaffLink>
             <StaffLink to="/app/insights">Insights</StaffLink>
-            <StaffLink to="/app/statistical-insights">Statistical Insights</StaffLink>
-            <StaffLink to="/methodology">Methodology</StaffLink>
             {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
             <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
               Sign out
@@ -64,11 +63,9 @@ export default function AppLayout() {
           <div className="lg:hidden border-t border-slate-200 bg-white">
             <div className="container-page py-3 flex flex-col gap-1">
               <StaffLink to="/app" end onClick={() => setOpen(false)}>Home</StaffLink>
-              <StaffLink to="/app/resident-intake" onClick={() => setOpen(false)}>Resident Intake</StaffLink>
+              <StaffLink to="/app/resident-intake" onClick={() => setOpen(false)}>Intake</StaffLink>
               <StaffLink to="/app/closure-review" onClick={() => setOpen(false)}>Closure Review</StaffLink>
               <StaffLink to="/app/insights" onClick={() => setOpen(false)}>Insights</StaffLink>
-              <StaffLink to="/app/statistical-insights" onClick={() => setOpen(false)}>Statistical Insights</StaffLink>
-              <StaffLink to="/methodology" onClick={() => setOpen(false)}>Methodology</StaffLink>
               <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
             </div>
           </div>

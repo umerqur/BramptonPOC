@@ -59,7 +59,12 @@ export type OperationalContextPayload = {
   closureReadiness: Array<{ label: string; status: string }>
 }
 
-/** Exactly what the client sends: case snapshot + ML signal + deterministic context. */
+/**
+ * Exactly what the client sends: case snapshot + attention signal + deterministic
+ * context. The `mlSignal` key name is retained only for backend type
+ * compatibility with the existing AI Review Packet function — it is now fed the
+ * statistical Review Attention values (no ML model is involved).
+ */
 export type AiReviewPacketRequest = {
   caseSnapshot: {
     source_record_id: string | null
