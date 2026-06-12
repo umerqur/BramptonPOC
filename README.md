@@ -37,6 +37,8 @@ This is not the 311 Self Serve Customer Service Agent use case. It is a Proactiv
 
 **Email deliverability:** During the demo, Mailjet emails may appear in junk or spam depending on sender domain authentication. The resident confirmation screen and confirmation email remind users to check junk or spam. For production, configure sender domain authentication in DNS.
 
+**Status tracking link:** Resident emails (confirmation and status update) include a "Track request status" button/link to `/resident/status/:caseId`, built from `PUBLIC_SITE_URL`, falling back to the Netlify deployment URL (`URL`, then `DEPLOY_PRIME_URL`) and finally `https://bramptonpoc.netlify.app`.
+
 ---
 
 ## Demo entry points

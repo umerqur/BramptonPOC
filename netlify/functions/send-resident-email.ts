@@ -152,6 +152,41 @@ function senderFromEnv(): { email: string; name: string } {
   return { email, name }
 }
 
+// Public production default used only if no environment URL is configured.
+const DEFAULT_PUBLIC_SITE_URL = 'https://bramptonpoc.netlify.app'
+
+// Resolve the public site base URL for resident-facing links. Prefer an explicit
+// PUBLIC_SITE_URL, then the Netlify-provided deploy URLs (URL, DEPLOY_PRIME_URL),
+// then the production default. Any trailing slash is trimmed so joined paths
+// never produce a double slash.
+function siteBaseUrl(): string {
+  const raw =
+    (process.env.PUBLIC_SITE_URL || '').trim() ||
+    (process.env.URL || '').trim() ||
+    (process.env.DEPLOY_PRIME_URL || '').trim() ||
+    DEFAULT_PUBLIC_SITE_URL
+  return raw.replace(/\/+$/, '')
+}
+
+/** Public resident status-tracking URL for a given case id. */
+function statusUrlForCase(caseId: string): string {
+  return `${siteBaseUrl()}/resident/status/${encodeURIComponent(caseId)}`
+}
+
+// Email-safe "Track request status" CTA button: dark navy background, white
+// text, rounded corners, all via inline styles so it renders without any
+// external CSS. `url` is HTML-escaped for the href.
+function statusButton(url: string): string {
+  const safeUrl = escapeHtml(url)
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:18px 0 0;">
+      <tr>
+        <td style="border-radius:8px;background-color:#0f172a;">
+          <a href="${safeUrl}" target="_blank" style="display:inline-block;padding:12px 22px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;line-height:1;color:#ffffff;text-decoration:none;border-radius:8px;">Track request status</a>
+        </td>
+      </tr>
+    </table>`
+}
+
 // Render a labelled detail table (reference / request type / location / status)
 // using email-safe inline styles. Values must already be HTML-escaped.
 function detailTable(rows: Array<[string, string]>): string {
@@ -204,6 +239,7 @@ function buildConfirmationContent(input: EmailRequest): EmailContent {
   const caseId = escapeHtml(input.caseId)
   const requestType = input.requestType ? escapeHtml(input.requestType) : '—'
   const location = input.location ? escapeHtml(input.location) : '—'
+  const statusUrl = statusUrlForCase(input.caseId)
 
   const subject = `Proactive Enforcement Demo: Request received ${input.caseId}`
 
@@ -216,6 +252,8 @@ function buildConfirmationContent(input: EmailRequest): EmailContent {
       ['Location', location],
     ])}
     <p style="margin:0;"><strong>Next step</strong><br />City staff would review the request and move it through the intake workflow.</p>
+    <p style="margin:18px 0 0;">You can track this request anytime using the link below.</p>
+    ${statusButton(statusUrl)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0 0;">
       <tr>
         <td style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;color:#92400e;font-size:13px;line-height:1.5;">
@@ -237,6 +275,9 @@ function buildConfirmationContent(input: EmailRequest): EmailContent {
     '',
     'Next step: City staff would review the request and move it through the intake workflow.',
     '',
+    'You can track this request anytime using the link below.',
+    `Track request status: ${statusUrl}`,
+    '',
     'If you do not see future emails, check your junk or spam folder.',
     '',
     DEMO_FOOTER_TEXT,
@@ -257,6 +298,7 @@ function buildStatusUpdateContent(input: EmailRequest): EmailContent {
   // Keep the per-status next-step guidance, presented in a cleaner layout.
   const next = (input.status && STATUS_NEXT[input.status]) || 'Your request status has been updated.'
   const safeNext = escapeHtml(next)
+  const statusUrl = statusUrlForCase(input.caseId)
 
   const subject = `Proactive Enforcement Demo: Status update for ${input.caseId}`
 
@@ -269,7 +311,8 @@ function buildStatusUpdateContent(input: EmailRequest): EmailContent {
       ['Request type', requestType],
       ['Location', location],
     ])}
-    <p style="margin:0;"><strong>Next step</strong><br />${safeNext}</p>`
+    <p style="margin:0;"><strong>Next step</strong><br />${safeNext}</p>
+    ${statusButton(statusUrl)}`
 
   const html = htmlShell(inner)
 
@@ -284,6 +327,8 @@ function buildStatusUpdateContent(input: EmailRequest): EmailContent {
     `Location: ${input.location || '—'}`,
     '',
     `Next step: ${next}`,
+    '',
+    `Track request status: ${statusUrl}`,
     '',
     DEMO_FOOTER_TEXT,
   ].join('\n')
