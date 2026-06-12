@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom'
 
 // Short, two-path landing page for the Proactive Enforcement Response POC.
-// A premium image hero with a dark navy gradient overlay, followed by two
-// large persona cards (Resident / City staff). Kept deliberately minimal so the
-// demo opens on a clear choice rather than a long marketing read.
+// A premium image hero with a light, left-weighted navy overlay (the image
+// stays visible and the page feels bright and modern, while the left-aligned
+// text keeps enough contrast to read), followed by two large persona cards
+// (Resident / City staff). Kept deliberately minimal so the demo opens on a
+// clear choice rather than a long marketing read.
 export default function LandingPage() {
   return (
     <div>
@@ -16,7 +18,7 @@ export default function LandingPage() {
           className="absolute inset-0 -z-10 h-full w-full object-cover"
         />
         <div
-          className="absolute inset-0 -z-10 bg-gradient-to-br from-navy-950/95 via-navy-900/85 to-navy-800/70"
+          className="absolute inset-0 -z-10 bg-gradient-to-r from-navy-950/80 via-navy-900/45 to-navy-800/15"
           aria-hidden="true"
         />
         <div className="container-page py-24 lg:py-32">
