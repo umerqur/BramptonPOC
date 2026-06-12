@@ -19,17 +19,18 @@ export default function ResidentLayout() {
 
           <nav className="flex items-center gap-2">
             <NavLink
-              to="/resident/new-request"
+              to="/resident"
+              end
               className={({ isActive }) =>
                 `px-3 py-2 rounded-md text-sm font-medium transition ${
                   isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
                 }`
               }
             >
-              New request
+              Check status
             </NavLink>
             <Link to="/resident/new-request" className="btn-primary text-sm py-2 px-4">
-              Submit a request
+              File a complaint
             </Link>
           </nav>
         </div>

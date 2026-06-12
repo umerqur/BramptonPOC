@@ -10,10 +10,10 @@ import {
   type ResidentRequestInput,
 } from '../../services/residentRequests'
 
-// This flow mirrors the City of Brampton 311 "Report a Parking Infraction"
-// Service Request Form: a consent gate, then a four-step wizard
-// (Location → Details → Contact → Review). It is a demo reconstruction — do not
-// enter real personal information.
+// A clean, modern resident service-request flow: a short consent gate, then a
+// four-step wizard (Issue → Location → Contact → Review). It is a demo
+// reconstruction of a parking-complaint intake — do not enter real personal
+// information.
 
 type FormState = {
   // Location of concern
@@ -70,7 +70,7 @@ const INITIAL: FormState = {
   methodOfContact: '',
 }
 
-const STEPS = ['Location', 'Details', 'Contact', 'Review'] as const
+const STEPS = ['Issue', 'Location', 'Contact', 'Review'] as const
 
 type Status =
   | { kind: 'idle' }
@@ -92,24 +92,26 @@ export default function ResidentNewRequestPage() {
   }
 
   function validateStep(index: number): string | null {
+    // Step 0 — Issue
     if (index === 0) {
+      if (!form.requestType) return 'Please choose a problem type.'
+      if (!form.vehicleThereNow) return 'Please tell us whether the vehicle is there now.'
+    }
+    // Step 1 — Location
+    if (index === 1) {
       if (!form.addressType) return 'Please choose a type of address.'
       if (!form.location.trim()) return 'Please provide the address or nearest intersection.'
       if (!form.city.trim()) return 'Please provide a city.'
       if (!form.province.trim()) return 'Please provide a province.'
     }
-    if (index === 1) {
-      if (!form.requestType) return 'Please choose a problem type.'
-      if (!form.vehicleThereNow) return 'Please tell us whether the vehicle is there now.'
-    }
+    // Step 2 — Contact. The contact mailing address is optional in this flow, so
+    // we only require how staff can identify and reach the resident.
     if (index === 2) {
       if (!form.firstName.trim()) return 'Please enter your first name.'
       if (!form.lastName.trim()) return 'Please enter your last name.'
-      if (!form.contactStreetAddress.trim()) return 'Please enter your street address.'
-      if (!form.contactPostalCode.trim()) return 'Please enter your postal code.'
-      if (!form.phone.trim()) return 'Please enter a contact phone number.'
       if (!form.email.trim()) return 'Please enter a contact email address.'
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Please enter a valid email address.'
+      if (!form.phone.trim()) return 'Please enter a contact phone number.'
       if (!form.methodOfContact) return 'Please choose a method of contact.'
     }
     return null
@@ -233,45 +235,23 @@ export default function ResidentNewRequestPage() {
   if (!agreed) {
     return (
       <div className="container-page py-12">
-        <div className="mx-auto max-w-2xl">
-          <div className="section-eyebrow">Service Request Form</div>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            Report a Parking Infraction
+        <div className="mx-auto max-w-xl">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
+            File a parking complaint
           </h1>
+          <p className="mt-2 text-sm sm:text-base text-ink-muted">
+            Tell us what happened, where it is, and how staff can update you. It takes about two minutes.
+          </p>
 
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            {RESIDENT_DEMO_NOTICE}
-          </div>
-
-          <div className="mt-6 card p-6 text-sm text-ink leading-relaxed space-y-4">
-            <p className="font-semibold text-navy-900">
-              Please read these terms carefully. They contain important information about the investigative process and
-              timelines.
+          <div className="mt-6 card p-6 text-sm text-ink leading-relaxed space-y-3">
+            <p>
+              Enter your details accurately — staff may contact you for more information while they review the request.
             </p>
             <p>
-              The accuracy and completeness of the information provided will assist in the investigative process. Please
-              enter your information completely and accurately, as you may be contacted for additional information.
+              Do not use this form to report an emergency. If you need urgent help, contact your local police or dial
+              911.
             </p>
-            <p>
-              Once a concern has been registered, an officer will be assigned to investigate. Each investigation is
-              unique in some way and there are varying levels of complexity and time requirements. The investigating
-              officer will review the information and determine what action, if any, should be taken.
-            </p>
-            <p>
-              This online portal should not be used to report incidents presenting an immediate threat to life or
-              property. If you require emergency assistance, contact Peel Regional Police or dial 911.
-            </p>
-            <h2 className="text-base font-semibold text-navy-900 pt-2">Collection of Personal Information</h2>
-            <p>
-              Personal information is collected under the authority of the Municipal Act, 2001, S.O. 2001, c. 25. The
-              information will be used or disclosed only to communicate with you in regard to inquiries and processing
-              service requests, or for a purpose consistent with the Municipal Freedom of Information and Protection of
-              Privacy Act.
-            </p>
-            <p className="text-xs text-ink-subtle">
-              Demo notice: this is a proof-of-concept reconstruction of the City of Brampton 311 form and is not
-              operated by the City of Brampton.
-            </p>
+            <p className="text-xs text-ink-subtle">{RESIDENT_DEMO_NOTICE}</p>
           </div>
 
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -279,7 +259,7 @@ export default function ResidentNewRequestPage() {
               ← Cancel
             </Link>
             <button type="button" className="btn-primary" onClick={() => setAgreed(true)}>
-              I Agree, Continue
+              Start request
             </button>
           </div>
         </div>
@@ -297,10 +277,10 @@ export default function ResidentNewRequestPage() {
             internal admin dashboard. */}
         <header>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            Report a Parking Infraction
+            File a parking complaint
           </h1>
           <p className="mt-2 text-sm sm:text-base text-ink-muted">
-            Submit a service request and receive updates by email.
+            Tell us what happened, where it is, and how staff can update you.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
             <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 font-medium text-ink-muted">
@@ -315,8 +295,8 @@ export default function ResidentNewRequestPage() {
         <Stepper step={step} />
 
         <form className="mt-8" onSubmit={handleSubmit}>
-          {step === 0 && <LocationStep form={form} update={update} />}
-          {step === 1 && <DetailsStep form={form} update={update} />}
+          {step === 0 && <IssueStep form={form} update={update} />}
+          {step === 1 && <LocationStep form={form} update={update} />}
           {step === 2 && <ContactStep form={form} update={update} />}
           {step === 3 && <ReviewStep form={form} onEdit={setStep} />}
 
@@ -417,15 +397,11 @@ type StepProps = {
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void
 }
 
-// ---- Step 1: Location -----------------------------------------------------
+// ---- Step 2: Location -----------------------------------------------------
 function LocationStep({ form, update }: StepProps) {
   return (
-    <section>
-      <h2 className="text-xl font-semibold text-navy-900">Location of Concern</h2>
-      <p className="mt-1 text-sm text-ink-muted">
-        Please provide the address or nearest intersection of the request you are submitting.
-      </p>
-      <div className="mt-6 grid gap-8 lg:grid-cols-2">
+    <StepCard title="Where is it?" subtitle="Give us the address or nearest intersection.">
+      <div className="grid gap-8 lg:grid-cols-2">
         {/* Left — address fields */}
         <div className="space-y-5">
           <Field label="Type of Address" required>
@@ -495,7 +471,7 @@ function LocationStep({ form, update }: StepProps) {
         {/* Right — geolocation message + map preview */}
         <MapPreview location={form.location} />
       </div>
-    </section>
+    </StepCard>
   )
 }
 
@@ -524,63 +500,62 @@ function MapPreview({ location }: { location: string }) {
   )
 }
 
-// ---- Step 2: Details ------------------------------------------------------
-function DetailsStep({ form, update }: StepProps) {
+// ---- Step 1: Issue --------------------------------------------------------
+function IssueStep({ form, update }: StepProps) {
   return (
-    <section>
-      <h2 className="text-xl font-semibold text-navy-900">Details</h2>
-      <p className="mt-1 text-sm text-ink-muted">
-        Please answer the following questions so the city can manage your request.
-      </p>
-      <div className="mt-6 space-y-5">
-        <Field label="Problem Type" required hint="search for parking infraction types here">
-          <select value={form.requestType} onChange={(e) => update('requestType', e.target.value)} className={inputClass}>
-            <option value="">Select…</option>
-            {PARKING_PROBLEM_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
+    <StepCard title="What's the issue?" subtitle="Tell us what you're reporting.">
+      <Field label="Problem Type" required>
+        <select value={form.requestType} onChange={(e) => update('requestType', e.target.value)} className={inputClass}>
+          <option value="">Select a parking issue…</option>
+          {PARKING_PROBLEM_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label="Is the vehicle there now?" required>
+        <select
+          value={form.vehicleThereNow}
+          onChange={(e) => update('vehicleThereNow', e.target.value)}
+          className={inputClass}
+        >
+          <option value="">Select…</option>
+          <option value="Yes">Yes</option>
+          <option value="No">No</option>
+        </select>
+      </Field>
+
+      <Field label="Additional Information" hint="optional">
+        <textarea
+          value={form.description}
+          onChange={(e) => update('description', e.target.value)}
+          className={`${inputClass} min-h-[120px] resize-y`}
+          placeholder="Describe the issue so staff can act on it."
+        />
+      </Field>
+
+      <div>
+        <span className="text-sm font-medium text-navy-900">Photos or documents</span>
+        <p className="mt-0.5 text-xs text-ink-subtle">Optional. Demo only — file names are recorded for staff context; files are not uploaded or stored.</p>
+        {form.uploadedFileNames.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {form.uploadedFileNames.map((name) => (
+              <li
+                key={name}
+                className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink"
+              >
+                <svg className="h-4 w-4 flex-none text-ink-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+                <span className="truncate">{name}</span>
+              </li>
             ))}
-          </select>
-        </Field>
-
-        <Field label="Is the vehicle there now?" required>
-          <select
-            value={form.vehicleThereNow}
-            onChange={(e) => update('vehicleThereNow', e.target.value)}
-            className={inputClass}
-          >
-            <option value="">Select…</option>
-            <option value="Yes">Yes</option>
-            <option value="No">No</option>
-          </select>
-        </Field>
-
-        <Field label="Additional Information">
-          <textarea
-            value={form.description}
-            onChange={(e) => update('description', e.target.value)}
-            className={`${inputClass} min-h-[120px] resize-y`}
-            placeholder="Describe the issue so staff can act on it."
-          />
-        </Field>
-
-        <div className="rounded-md border border-amber-200 bg-amber-50">
-          <div className="border-b border-amber-100 px-4 py-3 text-lg font-semibold text-navy-900">Uploaded Files List</div>
-          <div className="px-4 py-4 text-sm text-amber-900">
-            {form.uploadedFileNames.length > 0 ? (
-              <ul className="list-disc pl-5">
-                {form.uploadedFileNames.map((name) => (
-                  <li key={name}>{name}</li>
-                ))}
-              </ul>
-            ) : (
-              'There are no notes to display.'
-            )}
-          </div>
-        </div>
-
-        <div>
+          </ul>
+        )}
+        <div className="mt-3">
           <input
             id="resident-demo-files"
             type="file"
@@ -594,144 +569,57 @@ function DetailsStep({ form, update }: StepProps) {
             }
           />
           <label htmlFor="resident-demo-files" className="btn-secondary inline-flex cursor-pointer">
-            Upload File
+            Upload file
           </label>
-          <p className="mt-1.5 text-xs text-ink-subtle">
-            Demo only — file names are recorded for staff context; files are not uploaded or stored.
-          </p>
         </div>
       </div>
-    </section>
+    </StepCard>
   )
 }
 
 // ---- Step 3: Contact ------------------------------------------------------
 function ContactStep({ form, update }: StepProps) {
   return (
-    <section>
-      <h2 className="text-xl font-semibold text-navy-900">Contact</h2>
-      <p className="mt-1 text-sm text-ink-muted">
-        Please provide your contact information so you can receive updates on your service request. Valid contact
-        information is required — anonymous service requests will not be accepted.
-      </p>
-      <div className="mt-6 space-y-5">
-        <div className="grid gap-5 md:grid-cols-2">
-          <Field label="First Name" required>
-            <input
-              type="text"
-              value={form.firstName}
-              onChange={(e) => update('firstName', e.target.value)}
-              className={inputClass}
-              autoComplete="given-name"
-            />
-          </Field>
-          <Field label="Last Name" required>
-            <input
-              type="text"
-              value={form.lastName}
-              onChange={(e) => update('lastName', e.target.value)}
-              className={inputClass}
-              autoComplete="family-name"
-            />
-          </Field>
-          <Field label="Unit Number" hint="optional">
-            <input
-              type="text"
-              value={form.contactUnitNumber}
-              onChange={(e) => update('contactUnitNumber', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Street Address" required>
-            <input
-              type="text"
-              value={form.contactStreetAddress}
-              onChange={(e) => update('contactStreetAddress', e.target.value)}
-              className={inputClass}
-              autoComplete="address-line1"
-              placeholder="e.g. 24 Main St N"
-            />
-          </Field>
-          <Field label="City">
-            <input
-              type="text"
-              value={form.contactCity}
-              onChange={(e) => update('contactCity', e.target.value)}
-              className={inputClass}
-              autoComplete="address-level2"
-            />
-          </Field>
-          <Field label="Province">
-            <input
-              type="text"
-              value={form.contactProvince}
-              onChange={(e) => update('contactProvince', e.target.value)}
-              className={inputClass}
-              autoComplete="address-level1"
-            />
-          </Field>
-          <Field label="Postal Code" required>
-            <input
-              type="text"
-              value={form.contactPostalCode}
-              onChange={(e) => update('contactPostalCode', e.target.value)}
-              className={inputClass}
-              autoComplete="postal-code"
-              placeholder="A1A 1A1"
-            />
-          </Field>
-          <Field label="Country">
-            <input
-              type="text"
-              value={form.country}
-              onChange={(e) => update('country', e.target.value)}
-              className={inputClass}
-              autoComplete="country-name"
-            />
-          </Field>
-          <Field label="Contact Phone Number" required>
-            <input
-              type="tel"
-              value={form.phone}
-              onChange={(e) => update('phone', e.target.value)}
-              className={inputClass}
-              autoComplete="tel"
-              placeholder="Provide a telephone number"
-            />
-          </Field>
-          <Field label="Contact Email Address" required>
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => update('email', e.target.value)}
-              className={inputClass}
-              autoComplete="email"
-              placeholder="you@example.com"
-            />
-          </Field>
-        </div>
-
-        <div>
-          <span className="text-sm font-medium text-navy-900">Resolution Followup Requested</span>
-          <p className="mt-0.5 text-xs text-ink-subtle">Resolution follow up has a built in delay for security reasons.</p>
-          <div className="mt-2 flex gap-4">
-            {[
-              { label: 'No', value: false },
-              { label: 'Yes', value: true },
-            ].map((opt) => (
-              <label key={opt.label} className="inline-flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="resolutionFollowup"
-                  checked={form.resolutionFollowup === opt.value}
-                  onChange={() => update('resolutionFollowup', opt.value)}
-                />
-                {opt.label}
-              </label>
-            ))}
-          </div>
-        </div>
-
+    <StepCard title="How can we reach you?" subtitle="We'll only use this to send updates on your request.">
+      <div className="grid gap-5 md:grid-cols-2">
+        <Field label="First Name" required>
+          <input
+            type="text"
+            value={form.firstName}
+            onChange={(e) => update('firstName', e.target.value)}
+            className={inputClass}
+            autoComplete="given-name"
+          />
+        </Field>
+        <Field label="Last Name" required>
+          <input
+            type="text"
+            value={form.lastName}
+            onChange={(e) => update('lastName', e.target.value)}
+            className={inputClass}
+            autoComplete="family-name"
+          />
+        </Field>
+        <Field label="Contact Email Address" required>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => update('email', e.target.value)}
+            className={inputClass}
+            autoComplete="email"
+            placeholder="you@example.com"
+          />
+        </Field>
+        <Field label="Contact Phone Number" required>
+          <input
+            type="tel"
+            value={form.phone}
+            onChange={(e) => update('phone', e.target.value)}
+            className={inputClass}
+            autoComplete="tel"
+            placeholder="Provide a telephone number"
+          />
+        </Field>
         <Field label="Method Of Contact" required>
           <select
             value={form.methodOfContact}
@@ -747,7 +635,92 @@ function ContactStep({ form, update }: StepProps) {
           </select>
         </Field>
       </div>
-    </section>
+
+      <div>
+        <span className="text-sm font-medium text-navy-900">Resolution Followup Requested</span>
+        <p className="mt-0.5 text-xs text-ink-subtle">Resolution follow up has a built in delay for security reasons.</p>
+        <div className="mt-2 flex gap-4">
+          {[
+            { label: 'No', value: false },
+            { label: 'Yes', value: true },
+          ].map((opt) => (
+            <label key={opt.label} className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="resolutionFollowup"
+                checked={form.resolutionFollowup === opt.value}
+                onChange={() => update('resolutionFollowup', opt.value)}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Optional mailing address — secondary to the core contact details. */}
+      <details className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+        <summary className="cursor-pointer select-none text-sm font-medium text-navy-900">
+          Contact address <span className="font-normal text-ink-subtle">(optional)</span>
+        </summary>
+        <div className="mt-4 grid gap-5 md:grid-cols-2">
+          <Field label="Street Address" hint="optional">
+            <input
+              type="text"
+              value={form.contactStreetAddress}
+              onChange={(e) => update('contactStreetAddress', e.target.value)}
+              className={inputClass}
+              autoComplete="address-line1"
+              placeholder="e.g. 24 Main St N"
+            />
+          </Field>
+          <Field label="Unit Number" hint="optional">
+            <input
+              type="text"
+              value={form.contactUnitNumber}
+              onChange={(e) => update('contactUnitNumber', e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="City" hint="optional">
+            <input
+              type="text"
+              value={form.contactCity}
+              onChange={(e) => update('contactCity', e.target.value)}
+              className={inputClass}
+              autoComplete="address-level2"
+            />
+          </Field>
+          <Field label="Province" hint="optional">
+            <input
+              type="text"
+              value={form.contactProvince}
+              onChange={(e) => update('contactProvince', e.target.value)}
+              className={inputClass}
+              autoComplete="address-level1"
+            />
+          </Field>
+          <Field label="Postal Code" hint="optional">
+            <input
+              type="text"
+              value={form.contactPostalCode}
+              onChange={(e) => update('contactPostalCode', e.target.value)}
+              className={inputClass}
+              autoComplete="postal-code"
+              placeholder="A1A 1A1"
+            />
+          </Field>
+          <Field label="Country" hint="optional">
+            <input
+              type="text"
+              value={form.country}
+              onChange={(e) => update('country', e.target.value)}
+              className={inputClass}
+              autoComplete="country-name"
+            />
+          </Field>
+        </div>
+      </details>
+    </StepCard>
   )
 }
 
@@ -755,20 +728,11 @@ function ContactStep({ form, update }: StepProps) {
 function ReviewStep({ form, onEdit }: { form: FormState; onEdit: (step: number) => void }) {
   return (
     <section>
-      <h2 className="text-xl font-semibold text-navy-900">Review</h2>
-      <p className="mt-1 text-sm text-ink-muted">Please review your request before submitting.</p>
+      <h2 className="text-xl sm:text-2xl font-semibold text-navy-900">Review your request</h2>
+      <p className="mt-1 text-sm text-ink-muted">Check the details below, then submit.</p>
 
       <div className="mt-6 space-y-4">
-        <ReviewGroup title="Location" onEdit={() => onEdit(0)}>
-          <ReviewItem label="Type of Address" value={form.addressType} />
-          <ReviewItem label={form.addressType === 'Intersection' ? 'Nearest Intersection' : 'Street Address'} value={form.location} />
-          <ReviewItem label="Unit or Apartment Number" value={form.concernUnitNumber || '—'} />
-          <ReviewItem label="City" value={form.city} />
-          <ReviewItem label="Province" value={form.province} />
-          <ReviewItem label="Postal Code" value={form.concernPostalCode || '—'} />
-        </ReviewGroup>
-
-        <ReviewGroup title="Details" onEdit={() => onEdit(1)}>
+        <ReviewGroup title="Issue" onEdit={() => onEdit(0)}>
           <ReviewItem label="Problem Type" value={form.requestType} />
           <ReviewItem label="Is the vehicle there now?" value={form.vehicleThereNow || '—'} />
           <ReviewItem label="Additional Information" value={form.description || '—'} />
@@ -778,18 +742,27 @@ function ReviewStep({ form, onEdit }: { form: FormState; onEdit: (step: number) 
           />
         </ReviewGroup>
 
+        <ReviewGroup title="Location" onEdit={() => onEdit(1)}>
+          <ReviewItem label="Type of Address" value={form.addressType} />
+          <ReviewItem label={form.addressType === 'Intersection' ? 'Nearest Intersection' : 'Street Address'} value={form.location} />
+          <ReviewItem label="Unit or Apartment Number" value={form.concernUnitNumber || '—'} />
+          <ReviewItem label="City" value={form.city} />
+          <ReviewItem label="Province" value={form.province} />
+          <ReviewItem label="Postal Code" value={form.concernPostalCode || '—'} />
+        </ReviewGroup>
+
         <ReviewGroup title="Contact" onEdit={() => onEdit(2)}>
           <ReviewItem label="Name" value={`${form.firstName} ${form.lastName}`.trim()} />
-          <ReviewItem label="Unit Number" value={form.contactUnitNumber || '—'} />
+          <ReviewItem label="Email" value={form.email} />
+          <ReviewItem label="Phone" value={form.phone} />
+          <ReviewItem label="Method Of Contact" value={form.methodOfContact} />
+          <ReviewItem label="Resolution Followup" value={form.resolutionFollowup ? 'Yes' : 'No'} />
           <ReviewItem label="Street Address" value={form.contactStreetAddress || '—'} />
+          <ReviewItem label="Unit Number" value={form.contactUnitNumber || '—'} />
           <ReviewItem label="City" value={form.contactCity || '—'} />
           <ReviewItem label="Province" value={form.contactProvince || '—'} />
-          <ReviewItem label="Postal Code" value={form.contactPostalCode} />
-          <ReviewItem label="Country" value={form.country} />
-          <ReviewItem label="Phone" value={form.phone} />
-          <ReviewItem label="Email" value={form.email} />
-          <ReviewItem label="Resolution Followup" value={form.resolutionFollowup ? 'Yes' : 'No'} />
-          <ReviewItem label="Method Of Contact" value={form.methodOfContact} />
+          <ReviewItem label="Postal Code" value={form.contactPostalCode || '—'} />
+          <ReviewItem label="Country" value={form.country || '—'} />
         </ReviewGroup>
       </div>
     </section>
@@ -819,7 +792,28 @@ function ReviewItem({ label, value }: { label: string; value: string }) {
   )
 }
 
-// ---- Shared field helpers -------------------------------------------------
+// ---- Shared step + field helpers ------------------------------------------
+
+// A clean white card that frames each wizard step with a large title and short
+// helper text, keeping the form modern and uncluttered.
+function StepCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="card p-6 sm:p-8">
+      <h2 className="text-xl sm:text-2xl font-semibold text-navy-900">{title}</h2>
+      {subtitle && <p className="mt-1 text-sm text-ink-muted">{subtitle}</p>}
+      <div className="mt-6 space-y-5">{children}</div>
+    </section>
+  )
+}
+
 const inputClass =
   'mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500'
 

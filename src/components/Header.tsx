@@ -10,13 +10,10 @@ export default function Header() {
       <div className="container-page flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2.5">
           <Logo className="h-7 w-7" />
-          <div className="leading-tight">
-            <div className="text-sm font-semibold text-navy-900">Proactive Enforcement Intelligence</div>
-            <div className="text-[11px] text-ink-subtle">Municipal AI Proof of Concept</div>
-          </div>
+          <span className="text-sm font-semibold text-navy-900">Proactive Enforcement Response</span>
         </Link>
 
-        <nav className="hidden lg:flex items-center gap-2">
+        <nav className="hidden lg:flex items-center gap-1">
           <NavLink
             to="/methodology"
             className={({ isActive }) =>
@@ -29,11 +26,14 @@ export default function Header() {
           >
             Methodology
           </NavLink>
-          <Link to="/resident/new-request" className="btn-secondary text-sm py-2 px-4">
-            File a complaint
-          </Link>
-          <Link to="/login" className="btn-primary text-sm py-2 px-4">
+          <Link
+            to="/login"
+            className="px-3 py-2 rounded-md text-sm font-medium text-ink-muted hover:text-navy-900 hover:bg-slate-50 transition"
+          >
             Staff sign in
+          </Link>
+          <Link to="/resident/new-request" className="btn-primary text-sm py-2 px-4 ml-1">
+            File a complaint
           </Link>
         </nav>
 
@@ -62,11 +62,15 @@ export default function Header() {
             >
               Methodology
             </NavLink>
-            <Link to="/resident/new-request" onClick={() => setOpen(false)} className="btn-secondary mt-2">
-              File a complaint
-            </Link>
-            <Link to="/login" onClick={() => setOpen(false)} className="btn-primary mt-2">
+            <Link
+              to="/login"
+              onClick={() => setOpen(false)}
+              className="px-3 py-2 rounded-md text-sm font-medium text-ink-muted"
+            >
               Staff sign in
+            </Link>
+            <Link to="/resident/new-request" onClick={() => setOpen(false)} className="btn-primary mt-2">
+              File a complaint
             </Link>
           </div>
         </div>
