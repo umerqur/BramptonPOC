@@ -204,11 +204,18 @@ export default function ResidentNewRequestPage() {
             <div className="text-xs uppercase tracking-wide text-ink-subtle">Reference number</div>
             <div className="mt-1 text-xl font-semibold tracking-wide text-navy-900">{status.caseId}</div>
           </div>
-          <p className="mt-4 text-sm text-ink-muted">
-            {status.emailSent
-              ? 'We emailed a confirmation to the address you provided.'
-              : 'Your request was recorded. (The confirmation email could not be sent in this environment.)'}
-          </p>
+          {status.emailSent ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-900">
+              <div className="font-semibold">Email sent</div>
+              <p className="mt-0.5">
+                We sent a confirmation email. If you do not see it, please check your junk or spam folder.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-ink-muted">
+              Your request was recorded. (The confirmation email could not be sent in this environment.)
+            </p>
+          )}
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Link to={`/resident/status/${encodeURIComponent(status.caseId)}`} className="btn-primary">
               View request status

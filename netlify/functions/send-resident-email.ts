@@ -139,7 +139,12 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
   }
 }
 
-const DEMO_FOOTER_TEXT = 'This is an automated message from a proof-of-concept demo. Please do not reply.'
+// Branded, image-free text header shown at the top of every resident email.
+const EMAIL_HEADER_TITLE = 'Proactive Enforcement Response'
+const EMAIL_HEADER_SUBTITLE = 'Resident service request demo'
+
+// Footer disclaimer on every email — this is a demo, not an official service.
+const DEMO_FOOTER_TEXT = 'This is a proof of concept demo and is not an official City of Brampton service.'
 
 function senderFromEnv(): { email: string; name: string } {
   const email = (process.env.MAILJET_SENDER_EMAIL || '').trim() || DEFAULT_SENDER_EMAIL
@@ -147,50 +152,95 @@ function senderFromEnv(): { email: string; name: string } {
   return { email, name }
 }
 
+// Render a labelled detail table (reference / request type / location / status)
+// using email-safe inline styles. Values must already be HTML-escaped.
+function detailTable(rows: Array<[string, string]>): string {
+  const body = rows
+    .map(
+      ([label, value]) =>
+        `<tr>
+          <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;color:#64748b;font-size:13px;width:150px;vertical-align:top;">${label}</td>
+          <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;color:#0f172a;font-size:14px;font-weight:600;">${value}</td>
+        </tr>`,
+    )
+    .join('')
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0;border-top:1px solid #f1f5f9;">${body}</table>`
+}
+
+// Wrap email body content in the shared branded card shell. No external images
+// and no tracking pixels — the header is plain styled text.
+function htmlShell(innerHtml: string): string {
+  return `<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background-color:#f1f5f9;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:560px;max-width:100%;background-color:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;">
+            <tr>
+              <td style="background-color:#0f172a;padding:22px 28px;">
+                <div style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.2px;">${EMAIL_HEADER_TITLE}</div>
+                <div style="color:#94a3b8;font-size:13px;margin-top:3px;">${EMAIL_HEADER_SUBTITLE}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px;color:#0f172a;font-size:14px;line-height:1.6;">${innerHtml}</td>
+            </tr>
+            <tr>
+              <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 28px;color:#64748b;font-size:12px;line-height:1.5;">${DEMO_FOOTER_TEXT}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`
+}
+
 // Helper content builder for the resident confirmation email.
 function buildConfirmationContent(input: EmailRequest): EmailContent {
   const name = input.residentName || 'there'
   const safeName = escapeHtml(name)
   const caseId = escapeHtml(input.caseId)
-  const requestType = input.requestType ? escapeHtml(input.requestType) : null
-  const location = input.location ? escapeHtml(input.location) : null
+  const requestType = input.requestType ? escapeHtml(input.requestType) : '—'
+  const location = input.location ? escapeHtml(input.location) : '—'
 
-  const subject = `We received your service request — ${input.caseId}`
+  const subject = `Proactive Enforcement Demo: Request received ${input.caseId}`
 
-  const detailRows = [
-    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Reference</td><td style="font-weight:600">${caseId}</td></tr>`,
-    requestType
-      ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Problem type</td><td>${requestType}</td></tr>`
-      : '',
-    location
-      ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Location</td><td>${location}</td></tr>`
-      : '',
-  ].join('')
+  const inner = `
+    <p style="margin:0 0 14px;">Hi ${safeName},</p>
+    <p style="margin:0;font-size:16px;font-weight:600;">Your parking infraction request has been received.</p>
+    ${detailTable([
+      ['Reference number', caseId],
+      ['Request type', requestType],
+      ['Location', location],
+    ])}
+    <p style="margin:0;"><strong>Next step</strong><br />City staff would review the request and move it through the intake workflow.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0 0;">
+      <tr>
+        <td style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;color:#92400e;font-size:13px;line-height:1.5;">
+          If you do not see future emails, check your junk or spam folder.
+        </td>
+      </tr>
+    </table>`
 
-  const html = `
-    <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:560px">
-      <p>Hi ${safeName},</p>
-      <p>Thanks for reaching out. We have received your service request and created a reference for it.</p>
-      <table style="font-size:14px;margin:12px 0">${detailRows}</table>
-      <p>Municipal staff will review your request. We will email you as the status changes — submitted, received, assigned, under review, and closed.</p>
-      <p style="color:#64748b;font-size:12px;margin-top:24px">${DEMO_FOOTER_TEXT}</p>
-    </div>`
+  const html = htmlShell(inner)
 
   const text = [
     `Hi ${name},`,
     '',
-    'Thanks for reaching out. We have received your service request and created a reference for it.',
+    'Your parking infraction request has been received.',
     '',
-    `Reference: ${input.caseId}`,
-    input.requestType ? `Problem type: ${input.requestType}` : '',
-    input.location ? `Location: ${input.location}` : '',
+    `Reference number: ${input.caseId}`,
+    `Request type: ${input.requestType || '—'}`,
+    `Location: ${input.location || '—'}`,
     '',
-    'Municipal staff will review your request. We will email you as the status changes — submitted, received, assigned, under review, and closed.',
+    'Next step: City staff would review the request and move it through the intake workflow.',
+    '',
+    'If you do not see future emails, check your junk or spam folder.',
     '',
     DEMO_FOOTER_TEXT,
-  ]
-    .filter((line) => line !== '')
-    .join('\n')
+  ].join('\n')
 
   return { subject, html, text }
 }
@@ -202,27 +252,38 @@ function buildStatusUpdateContent(input: EmailRequest): EmailContent {
   const caseId = escapeHtml(input.caseId)
   const label = statusLabel(input.status)
   const safeLabel = escapeHtml(label)
+  const requestType = input.requestType ? escapeHtml(input.requestType) : '—'
+  const location = input.location ? escapeHtml(input.location) : '—'
+  // Keep the per-status next-step guidance, presented in a cleaner layout.
   const next = (input.status && STATUS_NEXT[input.status]) || 'Your request status has been updated.'
   const safeNext = escapeHtml(next)
 
-  const subject = `Update on your service request ${input.caseId} — ${label}`
+  const subject = `Proactive Enforcement Demo: Status update for ${input.caseId}`
 
-  const html = `
-    <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:560px">
-      <p>Hi ${safeName},</p>
-      <p>There is an update on your service request <strong>${caseId}</strong>.</p>
-      <p style="font-size:16px">New status: <strong>${safeLabel}</strong></p>
-      <p>${safeNext}</p>
-      <p style="color:#64748b;font-size:12px;margin-top:24px">${DEMO_FOOTER_TEXT}</p>
-    </div>`
+  const inner = `
+    <p style="margin:0 0 14px;">Hi ${safeName},</p>
+    <p style="margin:0;font-size:16px;font-weight:600;">Your request status has changed.</p>
+    ${detailTable([
+      ['Reference number', caseId],
+      ['New status', safeLabel],
+      ['Request type', requestType],
+      ['Location', location],
+    ])}
+    <p style="margin:0;"><strong>Next step</strong><br />${safeNext}</p>`
+
+  const html = htmlShell(inner)
 
   const text = [
     `Hi ${name},`,
     '',
-    `There is an update on your service request ${input.caseId}.`,
+    'Your request status has changed.',
     '',
+    `Reference number: ${input.caseId}`,
     `New status: ${label}`,
-    next,
+    `Request type: ${input.requestType || '—'}`,
+    `Location: ${input.location || '—'}`,
+    '',
+    `Next step: ${next}`,
     '',
     DEMO_FOOTER_TEXT,
   ].join('\n')
