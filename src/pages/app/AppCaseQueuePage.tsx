@@ -148,7 +148,7 @@ export default function AppCaseQueuePage() {
 
   return (
     <CaseQueueConsole
-      eyebrow="Live Case Queue"
+      eyebrow="Benchmark records"
       casesPath="/app/cases"
       rows={rows}
       options={options}

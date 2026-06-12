@@ -9,6 +9,10 @@ import { CaseQueueSplit, formatDate } from './CaseQueuePanel'
 
 type CaseQueueConsoleProps = {
   eyebrow: string
+  /** Page title. Defaults to the benchmark browser framing. */
+  title?: string
+  /** Page subtitle shown under the title. */
+  subtitle?: string
   /** Base path used for case links, e.g. "/app/cases". */
   casesPath: string
   rows: ComplaintRow[]
@@ -43,6 +47,8 @@ const POC_NOTES = [
  */
 export default function CaseQueueConsole({
   eyebrow,
+  title = 'Benchmark case browser',
+  subtitle = 'Search and inspect normalized Toronto 311 benchmark records. The active staff workflow uses Intake, Insights, and Closure Review.',
   casesPath,
   rows,
   options,
@@ -81,11 +87,8 @@ export default function CaseQueueConsole({
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <div className="section-eyebrow">{eyebrow}</div>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Case queue</h1>
-          <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-            Staff work queue for individual complaints. Aggregate stages and program metrics live in the Workflow
-            console; open a case for the full investigation record.
-          </p>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">{title}</h1>
+          <p className="mt-2 text-sm text-ink-muted max-w-3xl">{subtitle}</p>
         </div>
         {statusSlot}
       </div>

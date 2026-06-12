@@ -354,7 +354,7 @@ export function PreviewPanel({
               <span className="text-xs font-semibold text-navy-900">Rule based triage</span>
               <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
                 <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                POC · not ML
+                POC · not automated enforcement
               </span>
             </div>
             <div className="mt-2.5 space-y-2.5">
