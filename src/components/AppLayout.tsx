@@ -28,7 +28,7 @@ export default function AppLayout() {
     <div className="min-h-screen flex flex-col bg-slate-50">
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
         <div className="container-page flex h-16 items-center justify-between">
-          <Link to="/app/closure-review" className="flex items-center gap-2.5">
+          <Link to="/app" className="flex items-center gap-2.5">
             <Logo className="h-7 w-7" />
             <div className="leading-tight">
               <div className="text-sm font-semibold text-navy-900">Proactive Enforcement Intelligence</div>
@@ -37,8 +37,9 @@ export default function AppLayout() {
           </Link>
 
           <nav className="hidden lg:flex items-center gap-2">
-            <StaffLink to="/app/closure-review">Closure Workbench</StaffLink>
+            <StaffLink to="/app" end>Home</StaffLink>
             <StaffLink to="/app/resident-intake">Resident Intake</StaffLink>
+            <StaffLink to="/app/closure-review">Closure Review</StaffLink>
             <StaffLink to="/app/insights">Insights</StaffLink>
             <StaffLink to="/methodology">Methodology</StaffLink>
             {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
@@ -61,8 +62,9 @@ export default function AppLayout() {
         {open && (
           <div className="lg:hidden border-t border-slate-200 bg-white">
             <div className="container-page py-3 flex flex-col gap-1">
-              <StaffLink to="/app/closure-review" onClick={() => setOpen(false)}>Closure Workbench</StaffLink>
+              <StaffLink to="/app" end onClick={() => setOpen(false)}>Home</StaffLink>
               <StaffLink to="/app/resident-intake" onClick={() => setOpen(false)}>Resident Intake</StaffLink>
+              <StaffLink to="/app/closure-review" onClick={() => setOpen(false)}>Closure Review</StaffLink>
               <StaffLink to="/app/insights" onClick={() => setOpen(false)}>Insights</StaffLink>
               <StaffLink to="/methodology" onClick={() => setOpen(false)}>Methodology</StaffLink>
               <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
@@ -79,10 +81,11 @@ export default function AppLayout() {
   )
 }
 
-function StaffLink({ to, children, onClick }: { to: string; children: React.ReactNode; onClick?: () => void }) {
+function StaffLink({ to, children, onClick, end }: { to: string; children: React.ReactNode; onClick?: () => void; end?: boolean }) {
   return (
     <NavLink
       to={to}
+      end={end}
       onClick={onClick}
       className={({ isActive }) =>
         `px-3 py-2 rounded-md text-sm font-medium transition ${

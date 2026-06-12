@@ -29,20 +29,11 @@ export default function Header() {
           >
             Methodology
           </NavLink>
-          <NavLink
-            to="/how-it-works"
-            className={({ isActive }) =>
-              `px-3 py-2 rounded-md text-sm font-medium transition ${
-                isActive
-                  ? 'text-navy-900 bg-slate-100'
-                  : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
-              }`
-            }
-          >
-            How it works
-          </NavLink>
+          <Link to="/resident/new-request" className="btn-secondary text-sm py-2 px-4">
+            File a complaint
+          </Link>
           <Link to="/login" className="btn-primary text-sm py-2 px-4">
-            Sign in to the Closure Review Workbench
+            Staff sign in
           </Link>
         </nav>
 
@@ -71,19 +62,11 @@ export default function Header() {
             >
               Methodology
             </NavLink>
-            <NavLink
-              to="/how-it-works"
-              onClick={() => setOpen(false)}
-              className={({ isActive }) =>
-                `px-3 py-2 rounded-md text-sm font-medium ${
-                  isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted'
-                }`
-              }
-            >
-              How it works
-            </NavLink>
+            <Link to="/resident/new-request" onClick={() => setOpen(false)} className="btn-secondary mt-2">
+              File a complaint
+            </Link>
             <Link to="/login" onClick={() => setOpen(false)} className="btn-primary mt-2">
-              Sign in to the Closure Review Workbench
+              Staff sign in
             </Link>
           </div>
         </div>

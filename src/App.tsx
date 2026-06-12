@@ -16,6 +16,7 @@ import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
 import AppV2MlResultsPage from './pages/app/AppV2MlResultsPage'
 import AppClosureReviewPage from './pages/app/AppClosureReviewPage'
 import AppResidentIntakePage from './pages/app/AppResidentIntakePage'
+import AppStaffHomePage from './pages/app/AppStaffHomePage'
 import ResidentLayout from './components/resident/ResidentLayout'
 import ResidentHomePage from './pages/resident/ResidentHomePage'
 import ResidentNewRequestPage from './pages/resident/ResidentNewRequestPage'
@@ -51,7 +52,8 @@ export default function App() {
 
       {/* Authenticated app (live Supabase data) */}
       <Route path="/app" element={<ProtectedRoute />}>
-        <Route index element={<Navigate to="/app/closure-review" replace />} />
+        <Route index element={<AppStaffHomePage />} />
+        <Route path="home" element={<AppStaffHomePage />} />
         <Route path="dashboard" element={<AppDashboardPage />} />
         <Route path="workflow" element={<AppWorkflowPage />} />
         <Route path="wards" element={<AppTorontoWardContextPage />} />

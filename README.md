@@ -37,6 +37,19 @@ This is not the 311 Self Serve Customer Service Agent use case. It is a Proactiv
 
 ---
 
+## Demo entry points
+
+Resident:
+Use `/resident/new-request` to file a demo parking complaint.
+Use `/resident` to check request status.
+
+Staff:
+Use `/login` to sign in.
+After sign in, staff land on `/app`.
+Start with Resident Intake, then use Closure Review.
+
+---
+
 ## Data layer
 
 **The app uses Supabase live data when configured, and falls back to bundled sample (mock) data when it is not.**

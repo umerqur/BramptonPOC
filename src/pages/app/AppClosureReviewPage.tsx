@@ -41,12 +41,12 @@ const POSITIONING_NOTE =
 // The six-step workbench workflow, shown as a strip under the page header so
 // the screen reads as one closure workflow rather than a set of panels.
 const WORKBENCH_STEPS: Array<{ title: string; detail: string }> = [
-  { title: 'Complaint enters review queue', detail: 'Cases load into the queue from the live benchmark workflow data.' },
-  { title: 'Needs Attention score prioritizes', detail: 'Staff see which files to review first.' },
-  { title: 'Case workspace gathers linked records', detail: 'Complaint details plus related patrol logs, ticket records, and complaint trend context.' },
-  { title: 'Rules check closure readiness', detail: 'Deterministic flags plus a closure readiness checklist and matched closure template.' },
-  { title: 'AI Review Packet drafts language', detail: 'Staff summary, next step, resident update, and closure language grounded in the linked records.' },
-  { title: 'Staff approve before anything happens', detail: 'No closure or resident communication without staff approval.' },
+  { title: 'Complaint enters review queue', detail: 'Cases load from live benchmark data.' },
+  { title: 'Needs Attention score prioritizes', detail: 'Highest priority files first.' },
+  { title: 'Case workspace gathers linked records', detail: 'Patrol logs, ticket records, and trends.' },
+  { title: 'Rules check closure readiness', detail: 'Flags, checklist, and matched template.' },
+  { title: 'AI Review Packet drafts language', detail: 'Staff summary, next step, and resident update.' },
+  { title: 'Staff approve before anything happens', detail: 'No action without staff approval.' },
 ]
 
 const SAFETY_KEYWORDS = ['emergency', 'hazard', 'unsafe', 'blocked', 'broken']
@@ -244,9 +244,7 @@ export default function AppClosureReviewPage() {
             Closure Review Workbench
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-            AI automates research, analysis, and draft preparation for staff approved closure responses — gathering
-            complaint context, trend signals, and resident friendly draft language. Staff approve every closure and
-            every resident communication.
+            Use enforcement context and AI drafted language to prepare staff approved closure responses.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

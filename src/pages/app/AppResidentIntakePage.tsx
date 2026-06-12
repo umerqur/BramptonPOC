@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import SectionHeading from '../../components/SectionHeading'
 import {
   STAFF_ACTIONS,
@@ -19,11 +20,11 @@ type LoadState = {
 type ActionFeedback = { caseId: string; message: string; tone: 'ok' | 'warn' }
 
 const STAFF_LIFECYCLE = [
-  { key: 'submitted', label: 'Submitted', description: 'Resident created the request' },
-  { key: 'received', label: 'Received', description: 'Enforcement intake acknowledged' },
-  { key: 'assigned', label: 'Assigned', description: 'Officer or staff owner assigned' },
-  { key: 'in_review', label: 'Under review', description: 'Review or investigation underway' },
-  { key: 'closed', label: 'Closed', description: 'Final status sent to resident' },
+  { key: 'submitted', label: 'Submitted', description: 'Resident filed request' },
+  { key: 'received', label: 'Received', description: 'Intake acknowledged' },
+  { key: 'assigned', label: 'Assigned', description: 'Owner assigned' },
+  { key: 'in_review', label: 'Under review', description: 'Review underway' },
+  { key: 'closed', label: 'Closed', description: 'Final update sent' },
 ] as const
 
 function StaffLifecycleStrip() {
@@ -45,8 +46,7 @@ function StaffLifecycleStrip() {
         ))}
       </div>
       <p className="mt-4 text-xs text-ink-subtle">
-        Staff actions are explicit. Each status change logs a workflow event and sends the resident an update. No
-        automated enforcement decision is made.
+        Each status change is staff initiated and sends a resident update.
       </p>
     </div>
   )
@@ -119,11 +119,9 @@ export default function AppResidentIntakePage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="section-eyebrow">Staff Workspace</div>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Resident Intake Demo</h1>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Resident Intake</h1>
           <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-            Requests submitted by residents through the public parking infraction form appear here for Enforcement and
-            By Law staff review. Staff explicitly move each request through received, assigned, under review, and closed.
-            Each action logs a workflow event and sends the resident a status update.
+            Review resident submitted parking complaints and send status updates through explicit staff actions.
           </p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={state.loading}>
@@ -132,9 +130,7 @@ export default function AppResidentIntakePage() {
       </div>
 
       <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
-        Demo resident intake flow for the Proactive Enforcement Response POC. Submissions are demo data stored
-        separately from municipal_complaints and the Toronto 311 benchmark analytics layer. Status actions email the
-        resident and write to the workflow audit trail.
+        Demo data only. Requests here are separate from the Toronto 311 benchmark analytics layer.
       </div>
 
       <StaffLifecycleStrip />
@@ -150,9 +146,23 @@ export default function AppResidentIntakePage() {
         ) : state.loading ? (
           <div className="mt-5 card p-8 text-center text-sm text-ink-subtle">Loading resident requests…</div>
         ) : state.rows.length === 0 ? (
-          <div className="mt-5 card p-8 text-center text-sm text-ink-subtle">
-            No resident requests yet. Submit one from the public portal at <span className="font-medium">/resident</span>{' '}
-            to see it here.
+          <div className="mt-5 card p-8 text-center">
+            <h3 className="text-base font-semibold text-navy-900">No resident requests yet</h3>
+            <p className="mx-auto mt-2 max-w-md text-sm text-ink-muted">
+              Submit a demo parking infraction request from the public resident form, then return here to review it as
+              staff.
+            </p>
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
+              <Link to="/resident/new-request" className="btn-primary text-sm py-2 px-4">
+                Open resident form
+              </Link>
+              <Link to="/resident" className="btn-secondary text-sm py-2 px-4">
+                Check resident portal
+              </Link>
+            </div>
+            <p className="mt-4 text-xs text-ink-subtle">
+              Once submitted, the request appears here and the resident receives a confirmation email.
+            </p>
           </div>
         ) : (
           <ul className="mt-5 space-y-4">
