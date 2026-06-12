@@ -65,11 +65,12 @@ The current service layer (`src/services/municipalServiceRequests.ts`) reads fro
 | `ai_triage_results` | Rule-based POC triage outputs (advisory only). |
 | `case_ai_reviews` | Persisted AI-assisted staff review records. |
 | `workload_insights_v1` | v1 workload-density model outputs — one scored location per model run, with full provenance (source city, dataset, model version, feature window). |
-| `statistical_case_scores` | **Review Attention Score** — one row per scored complaint: a transparent statistical queue rank (Higher/Medium/Lower) with its drivers (aging z-score, repeat-location count, area trend, type backlog percentile, missing-context count). Drives the Statistical Queue Insights page. |
-| `statistical_feature_correlations` | Feature/target correlation coefficients from EDA, backing the explainability summary. |
+| `statistical_attention_queue_upload` | **Direct-upload Review Attention Score queue** — the scored SR2026 CSV (`statistical_attention_queue_upload.csv`) loaded one row per case, self-contained with all the context the Statistical Queue Insights page renders. Generated case ids (`SR2026-NNNNNN`) — does not join to `municipal_complaints`. |
+| `statistical_case_scores` | **Review Attention Score** — one row per scored complaint: a transparent statistical queue rank (Higher/Medium/Lower) with its drivers (aging z-score, repeat-location count, area trend, type backlog percentile, missing-context count). Retained from the join-based scoring path. |
+| `statistical_feature_correlations` | Feature/target correlation coefficients from EDA, backing the explainability summary on `/app/statistical-insights`. |
 | `statistical_area_trends` | Per-area, per-complaint-type volume trends (current vs prior period, change %, z-score). |
 | `statistical_model_runs` | Provenance for each scoring run — source city/dataset, target definition, methodology. |
-| `v_statistical_attention_queue` | View joining `statistical_case_scores` to benchmark complaint context; the read source for Statistical Queue Insights. |
+| `v_statistical_attention_queue` | The read source for Statistical Queue Insights. Now a **direct select from `statistical_attention_queue_upload`** (no join to `municipal_complaints`, since the SR2026 generated ids do not match it). |
 | `workflow_ml_predictions` | **Legacy** workflow attention outputs ("Needs Attention" score, tier, rank). Retained for rollback; the Closure Review queue still reads it, while Statistical Queue Insights now reads the statistical tables above. |
 | `patrol_logs` | **Synthetic POC operational context.** Demo patrol log records linked to real benchmark complaint `case_id`s, shown in the Closure Review case workspace. Clearly labelled — not Brampton operational data. |
 | `ticket_records` | **Synthetic POC operational context.** Demo ticket / enforcement outcome records linked to real benchmark complaint `case_id`s. Clearly labelled — not Brampton operational data. |
@@ -103,10 +104,18 @@ The Supabase schema lives in `supabase/migrations/` (001–010, applied in order
   - **Case queue and case detail** — filterable queue with server-side filtering against `municipal_complaints`, plus per-case detail with explainable triage signals.
   - **Operations Workflow Console** — workflow-stage counts and recent staff workflow events, demonstrating triage and case progression.
   - **Workload insights (v1)** — scored locations from the v1 workload-density model.
-  - **Statistical Queue Insights** — the **Review Attention Score** over the benchmark: a transparent, classical statistical queue rank (Higher/Medium/Lower) built from EDA, z-scores, percentiles, repeat counts, and correlation checks. Not an ML model, not a probability — decision support only.
+  - **Statistical Queue Insights** — the **Review Attention Score** over the benchmark: a transparent, classical statistical queue rank (Higher/Medium/Lower) built from EDA, z-scores, percentiles, repeat counts, and correlation checks. Not an ML model, not a probability — decision support only. See **SR2026 Review Attention Score** below for how the scored queue is generated.
   - **Toronto ward workload context** — real Toronto ward polygons with real Toronto 311 ward-level complaint volume.
   - **Dashboard** — KPI cards and category breakdowns over the live benchmark data.
 - AI Review Packets are produced by Netlify functions (`netlify/functions/`) that hold the Anthropic API key server-side; the browser never sees the key, drafts are advisory only, and nothing is sent to a resident.
+
+### SR2026 Review Attention Score
+
+The SR2026 statistical score was generated from **190,511 Toronto 311 benchmark rows**. The **Review Attention Score** prioritizes cases likely to need more staff review effort, using transparent statistical features — case aging percentiles, repeat-location counts, area-trend z-scores, complaint-type backlog percentiles, and missing-context checks. Each ranked case publishes its top drivers so the rank is fully explainable.
+
+**This is not ML and not an enforcement decision.** The score is a relative tier (Higher / Medium / Lower), not a probability or prediction, and staff review every case.
+
+The scored queue is delivered as a single CSV (`statistical_attention_queue_upload.csv`) loaded into `public.statistical_attention_queue_upload`; the `v_statistical_attention_queue` view reads directly from that table and drives `/app/statistical-insights`. The source SR2026 file has no real case id, so generated ids (`SR2026-000001`, `SR2026-000002`, …) are used — these are self-contained and do **not** join to `municipal_complaints`. The companion `statistical_feature_correlations_upload.csv` populates `statistical_feature_correlations`, which backs the correlation summary card on the same page.
 
 ---
 
