@@ -3,16 +3,27 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import Logo from './Logo'
 import Footer from './Footer'
 import { useAuth } from '../lib/auth'
+import { WorkflowProvider } from '../lib/workflowStore'
 
-// Authenticated app shell. Shows a focused staff header (Home, Intake, Closure
-// Review, Insights, Sign out) instead of the public marketing nav. Insights is a
-// single combined experience (statistical attention queue first, workload/area
-// context below) — there is no separate Statistical Insights tab. Methodology
-// lives on the public landing site only and is intentionally kept out of the
-// authenticated nav. The broader consoles (Workflow, Dashboard, Toronto Ward
-// Context) and individual cases stay available via direct URL (/app/workflow,
-// /app/dashboard, /app/wards, /app/cases, /app/cases/:id) but are kept out of the
-// top nav to keep the workspace focused.
+// Authenticated app shell for the redesigned product: the end-to-end AI-assisted
+// closure-response demo flow. The top nav follows the workflow order — Demo Flow,
+// Intake, Triage, Workbench, Closure, Insights, Audit. The prior queue /
+// dashboard / statistical-attention consoles are kept as supporting operational
+// views under Supervisor Insights and via direct URL (/app/dashboard,
+// /app/workflow, /app/wards, /app/cases, /app/legacy-insights). The whole app is
+// wrapped in WorkflowProvider so the synthetic case state is shared across pages.
+
+// Primary navigation, in workflow order.
+const NAV: { to: string; label: string; end?: boolean }[] = [
+  { to: '/app', label: 'Demo Flow', end: true },
+  { to: '/app/intake', label: 'Intake' },
+  { to: '/app/triage', label: 'Triage' },
+  { to: '/app/workbench', label: 'Workbench' },
+  { to: '/app/closure', label: 'Closure' },
+  { to: '/app/insights', label: 'Insights' },
+  { to: '/app/audit', label: 'Audit' },
+]
+
 export default function AppLayout() {
   const [open, setOpen] = useState(false)
   const { session, signOut } = useAuth()
@@ -26,57 +37,61 @@ export default function AppLayout() {
   const email = session?.user?.email
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
-        <div className="container-page flex h-16 items-center justify-between">
-          <Link to="/app" className="flex items-center gap-2.5">
-            <Logo className="h-7 w-7" />
-            <div className="leading-tight">
-              <div className="text-sm font-semibold text-navy-900">Proactive Enforcement Intelligence</div>
-              <div className="text-[11px] text-ink-subtle">Authenticated staff workspace</div>
-            </div>
-          </Link>
+    <WorkflowProvider>
+      <div className="min-h-screen flex flex-col bg-slate-50">
+        <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
+          <div className="container-page flex h-16 items-center justify-between gap-4">
+            <Link to="/app" className="flex items-center gap-2.5 shrink-0">
+              <Logo className="h-7 w-7" />
+              <div className="leading-tight">
+                <div className="text-sm font-semibold text-navy-900">Proactive Enforcement Response</div>
+                <div className="text-[11px] text-ink-subtle">AI-assisted closure workflow · POC</div>
+              </div>
+            </Link>
 
-          <nav className="hidden lg:flex items-center gap-2">
-            <StaffLink to="/app" end>Home</StaffLink>
-            <StaffLink to="/app/resident-intake">Intake</StaffLink>
-            <StaffLink to="/app/closure-review">Closure Review</StaffLink>
-            <StaffLink to="/app/insights">Insights</StaffLink>
-            {email && <span className="ml-2 text-xs text-ink-subtle">{email}</span>}
-            <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
-              Sign out
+            <nav className="hidden xl:flex items-center gap-1">
+              {NAV.map((item) => (
+                <StaffLink key={item.to} to={item.to} end={item.end}>
+                  {item.label}
+                </StaffLink>
+              ))}
+              <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4 ml-1">
+                Sign out
+              </button>
+            </nav>
+
+            <button
+              className="xl:hidden inline-flex items-center justify-center p-2 rounded-md text-ink-muted hover:text-navy-900 hover:bg-slate-100"
+              onClick={() => setOpen((v) => !v)}
+              aria-label="Toggle menu"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {open ? <path d="M18 6 6 18M6 6l12 12" /> : <path d="M3 6h18M3 12h18M3 18h18" />}
+              </svg>
             </button>
-          </nav>
-
-          <button
-            className="lg:hidden inline-flex items-center justify-center p-2 rounded-md text-ink-muted hover:text-navy-900 hover:bg-slate-100"
-            onClick={() => setOpen((v) => !v)}
-            aria-label="Toggle menu"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              {open ? <path d="M18 6 6 18M6 6l12 12" /> : <path d="M3 6h18M3 12h18M3 18h18" />}
-            </svg>
-          </button>
-        </div>
-
-        {open && (
-          <div className="lg:hidden border-t border-slate-200 bg-white">
-            <div className="container-page py-3 flex flex-col gap-1">
-              <StaffLink to="/app" end onClick={() => setOpen(false)}>Home</StaffLink>
-              <StaffLink to="/app/resident-intake" onClick={() => setOpen(false)}>Intake</StaffLink>
-              <StaffLink to="/app/closure-review" onClick={() => setOpen(false)}>Closure Review</StaffLink>
-              <StaffLink to="/app/insights" onClick={() => setOpen(false)}>Insights</StaffLink>
-              <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
-            </div>
           </div>
-        )}
-      </header>
 
-      <main className="flex-1">
-        <Outlet />
-      </main>
-      <Footer />
-    </div>
+          {open && (
+            <div className="xl:hidden border-t border-slate-200 bg-white">
+              <div className="container-page py-3 flex flex-col gap-1">
+                {NAV.map((item) => (
+                  <StaffLink key={item.to} to={item.to} end={item.end} onClick={() => setOpen(false)}>
+                    {item.label}
+                  </StaffLink>
+                ))}
+                {email && <span className="px-3 py-2 text-xs text-ink-subtle">{email}</span>}
+                <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
+              </div>
+            </div>
+          )}
+        </header>
+
+        <main className="flex-1">
+          <Outlet />
+        </main>
+        <Footer />
+      </div>
+    </WorkflowProvider>
   )
 }
 

@@ -15,7 +15,14 @@ import AppTorontoWardContextPage from './pages/app/AppTorontoWardContextPage'
 import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
 import AppClosureReviewPage from './pages/app/AppClosureReviewPage'
 import AppResidentIntakePage from './pages/app/AppResidentIntakePage'
-import AppStaffHomePage from './pages/app/AppStaffHomePage'
+// New AI-assisted closure-response demo flow (the redesigned main product).
+import AppDemoFlowPage from './pages/app/AppDemoFlowPage'
+import AppIntakeAgentPage from './pages/app/AppIntakeAgentPage'
+import AppTriageAutomationPage from './pages/app/AppTriageAutomationPage'
+import AppCaseWorkbenchPage from './pages/app/AppCaseWorkbenchPage'
+import AppClosureDraftsPage from './pages/app/AppClosureDraftsPage'
+import AppSupervisorInsightsPage from './pages/app/AppSupervisorInsightsPage'
+import AppAuditTrailPage from './pages/app/AppAuditTrailPage'
 import ResidentLayout from './components/resident/ResidentLayout'
 import ResidentHomePage from './pages/resident/ResidentHomePage'
 import ResidentNewRequestPage from './pages/resident/ResidentNewRequestPage'
@@ -49,25 +56,36 @@ export default function App() {
         <Route path="/resident/status/:caseId" element={<ResidentStatusPage />} />
       </Route>
 
-      {/* Authenticated app (live Supabase data) */}
+      {/* Authenticated app. The redesigned main product is the end-to-end
+          AI-assisted closure-response demo flow, backed by a self-contained
+          synthetic workflow store (no Supabase dependency to prove the flow).
+          The prior queue / dashboard / insights consoles are kept as supporting
+          operational views under Supervisor Insights. */}
       <Route path="/app" element={<ProtectedRoute />}>
-        <Route index element={<AppStaffHomePage />} />
-        <Route path="home" element={<AppStaffHomePage />} />
+        {/* Primary redesigned flow */}
+        <Route index element={<AppDemoFlowPage />} />
+        <Route path="intake" element={<AppIntakeAgentPage />} />
+        <Route path="triage" element={<AppTriageAutomationPage />} />
+        <Route path="workbench" element={<AppCaseWorkbenchPage />} />
+        <Route path="closure" element={<AppClosureDraftsPage />} />
+        <Route path="insights" element={<AppSupervisorInsightsPage />} />
+        <Route path="audit" element={<AppAuditTrailPage />} />
+
+        {/* Supporting operational views (prior product), reachable from
+            Supervisor Insights and via direct URL. */}
+        <Route path="legacy-insights" element={<AppWorkloadInsightsPage />} />
         <Route path="dashboard" element={<AppDashboardPage />} />
         <Route path="workflow" element={<AppWorkflowPage />} />
         <Route path="wards" element={<AppTorontoWardContextPage />} />
-        {/* Single combined Insights experience (statistical attention queue first,
-            workload/area context below). */}
-        <Route path="insights" element={<AppWorkloadInsightsPage />} />
-        {/* Backward-compatible redirects to the combined Insights page. The
-            former Statistical Insights tab and the older V2 results alias both
-            land here now. */}
-        <Route path="statistical-insights" element={<Navigate to="/app/insights" replace />} />
-        <Route path="v2-ml" element={<Navigate to="/app/insights" replace />} />
         <Route path="closure-review" element={<AppClosureReviewPage />} />
         <Route path="resident-intake" element={<AppResidentIntakePage />} />
         <Route path="cases" element={<AppCaseQueuePage />} />
         <Route path="cases/:id" element={<AppCaseDetailPage />} />
+
+        {/* Backward-compatible redirects for former routes. */}
+        <Route path="home" element={<Navigate to="/app" replace />} />
+        <Route path="statistical-insights" element={<Navigate to="/app/legacy-insights" replace />} />
+        <Route path="v2-ml" element={<Navigate to="/app/legacy-insights" replace />} />
       </Route>
     </Routes>
   )
