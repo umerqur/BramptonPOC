@@ -35,7 +35,13 @@ const MAILJET_API_URL = 'https://api.mailjet.com/v3.1/send'
 // Fallback sender used only if MAILJET_SENDER_EMAIL is not set. This must still
 // be a validated sender in the Mailjet account for delivery to succeed.
 const DEFAULT_SENDER_EMAIL = 'no-reply@bramptonpoc.netlify.app'
-const DEFAULT_SENDER_NAME = 'Brampton 311 Resident Services (Demo)'
+const DEFAULT_SENDER_NAME = 'Neural Forge'
+
+// Reply-To for resident emails. Replies from residents go to a monitored
+// mailbox rather than the no-reply sender. Not a secret — a public contact
+// address — so it is safe to keep as a constant.
+const REPLY_TO_EMAIL = 'umer@neuralforge.ca'
+const REPLY_TO_NAME = 'Neural Forge'
 
 // Keep free-text fields bounded so the email payload stays predictable.
 const MAX_NAME_LEN = 120
@@ -378,6 +384,7 @@ export default async function handler(req: Request): Promise<Response> {
     Messages: [
       {
         From: { Email: sender.email, Name: sender.name },
+        ReplyTo: { Email: REPLY_TO_EMAIL, Name: REPLY_TO_NAME },
         To: [{ Email: input.to, Name: input.residentName || input.to }],
         Subject: content.subject,
         TextPart: content.text,
@@ -444,6 +451,10 @@ export default async function handler(req: Request): Promise<Response> {
     console.error('Mailjet per-message status was not success:', messageStatus, JSON.stringify(first?.Errors ?? []))
     return json({ error: 'Email was not accepted by the email service.' }, 502)
   }
+
+  // Safe success log: email type, Mailjet message id, and case id only. No
+  // recipient address, sender credentials, API keys, or auth headers are logged.
+  console.log('Resident email sent via Mailjet:', input.type, 'caseId:', input.caseId, 'messageId:', messageId ?? 'unknown')
 
   return json({ ok: true, type: input.type, messageId })
 }
