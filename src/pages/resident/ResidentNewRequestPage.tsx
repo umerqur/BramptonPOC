@@ -4,7 +4,7 @@ import { isSupabaseConfigured } from '../../lib/supabase'
 import {
   ADDRESS_TYPES,
   METHOD_OF_CONTACT_OPTIONS,
-  PARKING_PROBLEM_TYPES,
+  ENFORCEMENT_COMPLAINT_TYPES,
   RESIDENT_DEMO_NOTICE,
   submitResidentRequest,
   type ResidentRequestInput,
@@ -12,8 +12,8 @@ import {
 
 // A clean, modern resident service-request flow: a short consent gate, then a
 // four-step wizard (Issue → Location → Contact → Review). It is a demo
-// reconstruction of a parking-complaint intake — do not enter real personal
-// information.
+// reconstruction of a general by-law complaint intake — do not enter real
+// personal information.
 
 type FormState = {
   // Location of concern
@@ -27,7 +27,7 @@ type FormState = {
   // Details
   requestType: string
   description: string
-  vehicleThereNow: string
+  happeningNow: string
   uploadedFileNames: string[]
 
   // Contact
@@ -54,7 +54,7 @@ const INITIAL: FormState = {
   concernPostalCode: '',
   requestType: '',
   description: '',
-  vehicleThereNow: '',
+  happeningNow: '',
   uploadedFileNames: [],
   firstName: '',
   lastName: '',
@@ -94,8 +94,8 @@ export default function ResidentNewRequestPage() {
   function validateStep(index: number): string | null {
     // Step 0 — Issue
     if (index === 0) {
-      if (!form.requestType) return 'Please choose a problem type.'
-      if (!form.vehicleThereNow) return 'Please tell us whether the vehicle is there now.'
+      if (!form.requestType) return 'Please choose an issue type.'
+      if (!form.happeningNow) return 'Please tell us whether this is happening now.'
     }
     // Step 1 — Location
     if (index === 1) {
@@ -160,7 +160,7 @@ export default function ResidentNewRequestPage() {
       concernPostalCode: form.concernPostalCode || undefined,
       requestType: form.requestType,
       description: form.description || undefined,
-      vehicleThereNow: form.vehicleThereNow || undefined,
+      happeningNow: form.happeningNow || undefined,
       uploadedFileNames: form.uploadedFileNames,
       firstName: form.firstName,
       lastName: form.lastName,
@@ -200,7 +200,7 @@ export default function ResidentNewRequestPage() {
           </div>
           <h1 className="mt-4 text-2xl font-semibold text-navy-900">Request submitted</h1>
           <p className="mt-2 text-sm text-ink-muted">
-            Your parking infraction request has been submitted. Save your reference number to track it.
+            Your service request has been submitted. Save your reference number to track it.
           </p>
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
             <div className="text-xs uppercase tracking-wide text-ink-subtle">Reference number</div>
@@ -237,7 +237,7 @@ export default function ResidentNewRequestPage() {
       <div className="container-page py-12">
         <div className="mx-auto max-w-xl">
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            File a parking complaint
+            File a complaint
           </h1>
           <p className="mt-2 text-sm sm:text-base text-ink-muted">
             Tell us what happened, where it is, and how staff can update you. It takes about two minutes.
@@ -277,7 +277,7 @@ export default function ResidentNewRequestPage() {
             internal admin dashboard. */}
         <header>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-            File a parking complaint
+            File a complaint
           </h1>
           <p className="mt-2 text-sm sm:text-base text-ink-muted">
             Tell us what happened, where it is, and how staff can update you.
@@ -504,10 +504,10 @@ function MapPreview({ location }: { location: string }) {
 function IssueStep({ form, update }: StepProps) {
   return (
     <StepCard title="What's the issue?" subtitle="Tell us what you're reporting.">
-      <Field label="Problem Type" required>
+      <Field label="Issue Type" required>
         <select value={form.requestType} onChange={(e) => update('requestType', e.target.value)} className={inputClass}>
-          <option value="">Select a parking issue…</option>
-          {PARKING_PROBLEM_TYPES.map((t) => (
+          <option value="">Select an issue type…</option>
+          {ENFORCEMENT_COMPLAINT_TYPES.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>
@@ -515,15 +515,16 @@ function IssueStep({ form, update }: StepProps) {
         </select>
       </Field>
 
-      <Field label="Is the vehicle there now?" required>
+      <Field label="Is this happening now?" required>
         <select
-          value={form.vehicleThereNow}
-          onChange={(e) => update('vehicleThereNow', e.target.value)}
+          value={form.happeningNow}
+          onChange={(e) => update('happeningNow', e.target.value)}
           className={inputClass}
         >
           <option value="">Select…</option>
           <option value="Yes">Yes</option>
           <option value="No">No</option>
+          <option value="Not sure">Not sure</option>
         </select>
       </Field>
 
@@ -532,7 +533,7 @@ function IssueStep({ form, update }: StepProps) {
           value={form.description}
           onChange={(e) => update('description', e.target.value)}
           className={`${inputClass} min-h-[120px] resize-y`}
-          placeholder="Describe the issue so staff can act on it."
+          placeholder="Describe what is happening so staff can review and respond."
         />
       </Field>
 
@@ -733,8 +734,8 @@ function ReviewStep({ form, onEdit }: { form: FormState; onEdit: (step: number) 
 
       <div className="mt-6 space-y-4">
         <ReviewGroup title="Issue" onEdit={() => onEdit(0)}>
-          <ReviewItem label="Problem Type" value={form.requestType} />
-          <ReviewItem label="Is the vehicle there now?" value={form.vehicleThereNow || '—'} />
+          <ReviewItem label="Issue Type" value={form.requestType} />
+          <ReviewItem label="Is this happening now?" value={form.happeningNow || '—'} />
           <ReviewItem label="Additional Information" value={form.description || '—'} />
           <ReviewItem
             label="Uploaded Files"

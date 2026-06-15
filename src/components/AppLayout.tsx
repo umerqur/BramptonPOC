@@ -5,23 +5,24 @@ import Footer from './Footer'
 import { useAuth } from '../lib/auth'
 import { WorkflowProvider } from '../lib/workflowStore'
 
-// Authenticated app shell for the redesigned product: the end-to-end AI-assisted
-// closure-response demo flow. The top nav follows the workflow order — Demo Flow,
-// Intake, Triage, Workbench, Closure, Insights, Audit. The prior queue /
-// dashboard / statistical-attention consoles are kept as supporting operational
-// views under Supervisor Insights and via direct URL (/app/dashboard,
-// /app/workflow, /app/wards, /app/cases, /app/legacy-insights). The whole app is
-// wrapped in WorkflowProvider so the synthetic case state is shared across pages.
+// Authenticated app shell for the staff workflow. Staff land on the Staff Inbox
+// of real resident submissions, then work a case through the Case Workbench and
+// Closure Review. Supervisor Insights and the Audit Trail give oversight, and
+// the POC Walkthrough (last) keeps the guided synthetic end-to-end narrative.
+// Intake is resident-facing and is intentionally not a staff tab. The prior
+// queue / dashboard / statistical-attention consoles remain reachable via direct
+// URL (/app/dashboard, /app/workflow, /app/wards, /app/cases, /app/legacy-insights,
+// /app/resident-intake). The whole app is wrapped in WorkflowProvider so the
+// case state is shared across pages.
 
-// Primary navigation, in workflow order.
+// Primary staff navigation.
 const NAV: { to: string; label: string; end?: boolean }[] = [
-  { to: '/app', label: 'Demo Flow', end: true },
-  { to: '/app/intake', label: 'Intake' },
-  { to: '/app/triage', label: 'Triage' },
-  { to: '/app/workbench', label: 'Workbench' },
-  { to: '/app/closure', label: 'Closure' },
-  { to: '/app/insights', label: 'Insights' },
-  { to: '/app/audit', label: 'Audit' },
+  { to: '/app', label: 'Staff Inbox', end: true },
+  { to: '/app/workbench', label: 'Case Workbench' },
+  { to: '/app/closure', label: 'Closure Review' },
+  { to: '/app/insights', label: 'Supervisor Insights' },
+  { to: '/app/audit', label: 'Audit Trail' },
+  { to: '/app/walkthrough', label: 'POC Walkthrough' },
 ]
 
 export default function AppLayout() {

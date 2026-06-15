@@ -20,7 +20,7 @@ export default function ResidentHomePage() {
       <div className="max-w-2xl">
         <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-navy-900">Resident services</h1>
         <p className="mt-3 text-ink-muted">
-          File a parking complaint and we&apos;ll email you a reference number and status updates as enforcement staff
+          File a complaint and we&apos;ll email you a reference number and status updates as enforcement staff
           work your request.
         </p>
       </div>
@@ -30,7 +30,7 @@ export default function ResidentHomePage() {
         <div className="card card-hover flex flex-col p-7">
           <h2 className="text-lg font-semibold text-navy-900">File a new complaint</h2>
           <p className="mt-2 flex-1 text-sm text-ink-muted">
-            Report a parking issue in about two minutes. You&apos;ll get a reference number and email updates.
+            Report a by-law concern in about two minutes. You&apos;ll get a reference number and email updates.
           </p>
           <div className="mt-6">
             <Link to="/resident/new-request" className="btn-primary">
