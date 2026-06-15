@@ -213,12 +213,14 @@ tailwind.config.js  Design tokens (navy + accent palette)
 | `/methodology`        | POC Methodology                       |
 | `/privacy`            | Privacy & Security                    |
 | `/login`              | Login (Supabase magic-link)           |
-| `/app/dashboard`      | Dashboard (authenticated)             |
+| `/app/insights`       | Insights (live complaint workload dashboard + supervisor workflow impact + Toronto ward workload heat map) |
+| `/app/dashboard`      | → redirects to `/app/insights`        |
+| `/app/supervisor`     | → redirects to `/app/insights`        |
 | `/app/cases`          | Case Queue (authenticated)            |
 | `/app/cases/:id`      | Case Detail (authenticated)           |
 | `/app/workflow`       | Operations Workflow Console           |
 | `/app/wards`          | Toronto Ward Workload Context         |
-| `/app/insights`       | Workload Insights (v1 model)          |
+| `/app/legacy-insights` | Workload / Statistical Queue Insights |
 | `/app/statistical-insights` | Statistical Queue Insights (Review Attention Score) |
 | `/app/v2-ml`          | → redirects to `/app/statistical-insights` |
 | `/app/closure-review` | Closure Review + AI review packet     |

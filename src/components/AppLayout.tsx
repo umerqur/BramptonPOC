@@ -7,20 +7,21 @@ import { WorkflowProvider } from '../lib/workflowStore'
 
 // Authenticated app shell for the staff workflow. Staff land on the Staff Inbox
 // of real resident submissions, then work a case through the Case Workbench and
-// Closure Review. Supervisor Insights and the Audit Trail give oversight, and
-// the POC Walkthrough (last) keeps the guided synthetic end-to-end narrative.
-// Intake is resident-facing and is intentionally not a staff tab. The prior
-// queue / dashboard / statistical-attention consoles remain reachable via direct
-// URL (/app/dashboard, /app/workflow, /app/wards, /app/cases, /app/legacy-insights,
-// /app/resident-intake). The whole app is wrapped in WorkflowProvider so the
-// case state is shared across pages.
+// Closure Review. Insights (the merged live dashboard + supervisor workflow-impact
+// view) and the Audit Trail give oversight, and the POC Walkthrough (last) keeps
+// the guided synthetic end-to-end narrative. Intake is resident-facing and is
+// intentionally not a staff tab. The prior standalone consoles remain reachable
+// via direct URL (/app/workflow, /app/wards, /app/cases, /app/legacy-insights,
+// /app/resident-intake); /app/dashboard and /app/supervisor now redirect to
+// /app/insights. The whole app is wrapped in WorkflowProvider so the case state
+// is shared across pages.
 
 // Primary staff navigation.
 const NAV: { to: string; label: string; end?: boolean }[] = [
   { to: '/app', label: 'Staff Inbox', end: true },
   { to: '/app/workbench', label: 'Case Workbench' },
   { to: '/app/closure', label: 'Closure Review' },
-  { to: '/app/insights', label: 'Supervisor Insights' },
+  { to: '/app/insights', label: 'Insights' },
   { to: '/app/audit', label: 'Audit Trail' },
   { to: '/app/walkthrough', label: 'POC Walkthrough' },
 ]

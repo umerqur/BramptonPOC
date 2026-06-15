@@ -7,7 +7,6 @@ import PrivacyPage from './pages/PrivacyPage'
 import LoginPage from './pages/LoginPage'
 import HowItWorksPage from './pages/HowItWorksPage'
 import NotFoundPage from './pages/NotFoundPage'
-import AppDashboardPage from './pages/app/AppDashboardPage'
 import AppCaseQueuePage from './pages/app/AppCaseQueuePage'
 import AppCaseDetailPage from './pages/app/AppCaseDetailPage'
 import AppWorkflowPage from './pages/app/AppWorkflowPage'
@@ -22,7 +21,7 @@ import AppIntakeAgentPage from './pages/app/AppIntakeAgentPage'
 import AppTriageAutomationPage from './pages/app/AppTriageAutomationPage'
 import AppCaseWorkbenchPage from './pages/app/AppCaseWorkbenchPage'
 import AppClosureDraftsPage from './pages/app/AppClosureDraftsPage'
-import AppSupervisorInsightsPage from './pages/app/AppSupervisorInsightsPage'
+import AppInsightsPage from './pages/app/AppInsightsPage'
 import AppAuditTrailPage from './pages/app/AppAuditTrailPage'
 import ResidentLayout from './components/resident/ResidentLayout'
 import ResidentHomePage from './pages/resident/ResidentHomePage'
@@ -61,13 +60,15 @@ export default function App() {
           AI-assisted closure-response demo flow, backed by a self-contained
           synthetic workflow store (no Supabase dependency to prove the flow).
           The prior queue / dashboard / insights consoles are kept as supporting
-          operational views under Supervisor Insights. */}
+          operational views under the merged Insights tab. */}
       <Route path="/app" element={<ProtectedRoute />}>
         {/* Staff land on the inbox of real resident submissions. */}
         <Route index element={<AppStaffInboxPage />} />
         <Route path="workbench" element={<AppCaseWorkbenchPage />} />
         <Route path="closure" element={<AppClosureDraftsPage />} />
-        <Route path="insights" element={<AppSupervisorInsightsPage />} />
+        {/* Merged Insights tab — live complaint workload dashboard + supervisor
+            workflow-impact metrics, with the Toronto ward workload heat map. */}
+        <Route path="insights" element={<AppInsightsPage />} />
         <Route path="audit" element={<AppAuditTrailPage />} />
 
         {/* POC Walkthrough — the guided synthetic end-to-end narrative. */}
@@ -76,9 +77,8 @@ export default function App() {
         <Route path="triage" element={<AppTriageAutomationPage />} />
 
         {/* Supporting operational views (prior product), reachable from
-            Supervisor Insights and via direct URL. */}
+            Insights and via direct URL. */}
         <Route path="legacy-insights" element={<AppWorkloadInsightsPage />} />
-        <Route path="dashboard" element={<AppDashboardPage />} />
         <Route path="workflow" element={<AppWorkflowPage />} />
         <Route path="wards" element={<AppTorontoWardContextPage />} />
         <Route path="closure-review" element={<AppClosureReviewPage />} />
@@ -86,8 +86,12 @@ export default function App() {
         <Route path="cases" element={<AppCaseQueuePage />} />
         <Route path="cases/:id" element={<AppCaseDetailPage />} />
 
-        {/* Backward-compatible redirects for former routes. */}
+        {/* Backward-compatible redirects for former routes. The standalone
+            dashboard and Supervisor Insights pages are now merged into the
+            single Insights tab. */}
         <Route path="home" element={<Navigate to="/app" replace />} />
+        <Route path="dashboard" element={<Navigate to="/app/insights" replace />} />
+        <Route path="supervisor" element={<Navigate to="/app/insights" replace />} />
         <Route path="statistical-insights" element={<Navigate to="/app/legacy-insights" replace />} />
         <Route path="v2-ml" element={<Navigate to="/app/legacy-insights" replace />} />
       </Route>
