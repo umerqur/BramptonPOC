@@ -25,6 +25,8 @@ import {
   computeSupervisorMetrics,
   runWorkflow,
 } from '../services/demoWorkflowService'
+import { residentRowToCase } from '../services/residentCaseBridge'
+import type { ResidentRequestRow } from '../services/residentRequests'
 
 const STORAGE_KEY = 'brampton-demo-workflow-v1'
 const STAFF_NAME = 'M. Okafor (By-law Officer)'
@@ -40,6 +42,7 @@ type WorkflowContextValue = {
   metrics: SupervisorMetrics
   staffName: string
   submitComplaint: (input: ResidentComplaintInput) => string
+  ingestResidentCase: (row: ResidentRequestRow) => string
   setActiveCase: (id: string | null) => void
   approveRouting: (id: string) => void
   requestMoreInfo: (id: string, note?: string) => void
@@ -88,6 +91,21 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     const next = runWorkflow(input)
     setState((s) => ({ cases: [next, ...s.cases], activeCaseId: next.id }))
     return next.id
+  }, [])
+
+  // Bridge a resident Supabase submission into the workbench. Reuses the case if
+  // it has already been opened (so staff actions are preserved), otherwise
+  // converts the row into a workbench case with generated AI triage. Synthetic
+  // seed cases are never touched.
+  const ingestResidentCase = useCallback((row: ResidentRequestRow): string => {
+    setState((s) => {
+      if (s.cases.some((c) => c.id === row.case_id)) {
+        return { ...s, activeCaseId: row.case_id }
+      }
+      const next = residentRowToCase(row)
+      return { cases: [next, ...s.cases], activeCaseId: row.case_id }
+    })
+    return row.case_id
   }, [])
 
   const setActiveCase = useCallback((id: string | null) => {
@@ -201,6 +219,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     metrics,
     staffName: STAFF_NAME,
     submitComplaint,
+    ingestResidentCase,
     setActiveCase,
     approveRouting,
     requestMoreInfo,

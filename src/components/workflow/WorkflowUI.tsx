@@ -187,11 +187,15 @@ export function NoCaseState() {
     <div className="card p-10 text-center">
       <h2 className="text-base font-semibold text-navy-900">No active case yet</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-ink-muted">
-        Submit a complaint from the Intake Agent to create a synthetic case and watch the AI workflow run end-to-end.
+        Open a resident submission from the Staff Inbox to load it here, or run the POC Walkthrough to see the workflow
+        end-to-end on synthetic data.
       </p>
-      <div className="mt-5">
-        <Link to="/app/intake" className="btn-primary">
-          Open Intake Agent →
+      <div className="mt-5 flex flex-wrap justify-center gap-3">
+        <Link to="/app" className="btn-primary">
+          Go to Staff Inbox →
+        </Link>
+        <Link to="/app/walkthrough" className="btn-secondary">
+          POC Walkthrough
         </Link>
       </div>
     </div>

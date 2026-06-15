@@ -121,7 +121,7 @@ export default function AppResidentIntakePage() {
           <div className="section-eyebrow">Staff Workspace</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Resident Intake</h1>
           <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-            Review resident submitted parking complaints and send status updates through explicit staff actions.
+            Review resident submitted complaints and send status updates through explicit staff actions.
           </p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={state.loading}>
@@ -149,7 +149,7 @@ export default function AppResidentIntakePage() {
           <div className="mt-5 card p-8 text-center">
             <h3 className="text-base font-semibold text-navy-900">No resident requests yet</h3>
             <p className="mx-auto mt-2 max-w-md text-sm text-ink-muted">
-              Submit a demo parking infraction request from the public resident form, then return here to review it as
+              Submit a demo service request from the public resident form, then return here to review it as
               staff.
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-3">

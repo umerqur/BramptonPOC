@@ -16,6 +16,7 @@ import AppWorkloadInsightsPage from './pages/app/AppWorkloadInsightsPage'
 import AppClosureReviewPage from './pages/app/AppClosureReviewPage'
 import AppResidentIntakePage from './pages/app/AppResidentIntakePage'
 // New AI-assisted closure-response demo flow (the redesigned main product).
+import AppStaffInboxPage from './pages/app/AppStaffInboxPage'
 import AppDemoFlowPage from './pages/app/AppDemoFlowPage'
 import AppIntakeAgentPage from './pages/app/AppIntakeAgentPage'
 import AppTriageAutomationPage from './pages/app/AppTriageAutomationPage'
@@ -62,14 +63,17 @@ export default function App() {
           The prior queue / dashboard / insights consoles are kept as supporting
           operational views under Supervisor Insights. */}
       <Route path="/app" element={<ProtectedRoute />}>
-        {/* Primary redesigned flow */}
-        <Route index element={<AppDemoFlowPage />} />
-        <Route path="intake" element={<AppIntakeAgentPage />} />
-        <Route path="triage" element={<AppTriageAutomationPage />} />
+        {/* Staff land on the inbox of real resident submissions. */}
+        <Route index element={<AppStaffInboxPage />} />
         <Route path="workbench" element={<AppCaseWorkbenchPage />} />
         <Route path="closure" element={<AppClosureDraftsPage />} />
         <Route path="insights" element={<AppSupervisorInsightsPage />} />
         <Route path="audit" element={<AppAuditTrailPage />} />
+
+        {/* POC Walkthrough — the guided synthetic end-to-end narrative. */}
+        <Route path="walkthrough" element={<AppDemoFlowPage />} />
+        <Route path="intake" element={<AppIntakeAgentPage />} />
+        <Route path="triage" element={<AppTriageAutomationPage />} />
 
         {/* Supporting operational views (prior product), reachable from
             Supervisor Insights and via direct URL. */}

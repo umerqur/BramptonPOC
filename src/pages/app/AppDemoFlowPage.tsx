@@ -7,8 +7,9 @@ import {
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 
-// Demo Flow — the start page after login. It shows the full end-to-end product
-// story as a swimlane that mirrors the use-case concept diagram (Resident → AI
+// POC Walkthrough — the guided synthetic end-to-end story (no longer the staff
+// landing page; staff now land on the Staff Inbox). It shows the full product
+// flow as a swimlane that mirrors the use-case concept diagram (Resident → AI
 // workflow system → By-law staff), implemented as app UI rather than a static
 // image. A reviewer should understand in ~2 minutes how the app reduces staff
 // workload: the AI does intake, classification, context, summary, draft, and

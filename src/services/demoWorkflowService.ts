@@ -91,7 +91,13 @@ const CATEGORY_KEYWORDS: { category: DemoCategory; words: string[] }[] = [
   { category: 'Property Standards', words: ['fence', 'broken', 'peeling', 'derelict', 'graffiti', 'porch', 'roof', 'standards', 'unsafe', 'disrepair'] },
 ]
 
-function classify(description: string): { category: DemoCategory; confidence: number } {
+function classify(
+  description: string,
+  forced?: DemoCategory,
+): { category: DemoCategory; confidence: number } {
+  // When the resident already picked an explicit issue type (staff inbox bridge),
+  // trust it rather than re-deriving the category from free text.
+  if (forced) return { category: forced, confidence: 0.9 }
   const text = description.toLowerCase()
   let best: { category: DemoCategory; hits: number } = { category: 'Property Standards', hits: 0 }
   for (const { category, words } of CATEGORY_KEYWORDS) {
@@ -231,8 +237,9 @@ function duplicateRisk(context: EnforcementContext): AiTriageResult['duplicateRi
 function buildTriage(
   input: ResidentComplaintInput,
   context: EnforcementContext,
+  forced?: DemoCategory,
 ): AiTriageResult {
-  const { category, confidence: categoryConfidence } = classify(input.description)
+  const { category, confidence: categoryConfidence } = classify(input.description, forced)
   const missingInformation = missingInformationCheck(input)
   const dupRisk = duplicateRisk(context)
   const sensitiveCategory = SENSITIVE_CATEGORIES.includes(category)
@@ -411,11 +418,14 @@ export function buildClosureDraft(
  * is high) prepares a closure draft. Returns a fully-populated DemoCase with the
  * initial AI audit trail. Staff actions are layered on afterward by the store.
  */
-export function runWorkflow(input: ResidentComplaintInput): DemoCase {
-  const id = newCaseId()
+export function runWorkflow(
+  input: ResidentComplaintInput,
+  opts?: { forcedCategory?: DemoCategory; caseId?: string },
+): DemoCase {
+  const id = opts?.caseId ?? newCaseId()
   const t0 = input.submittedAt
-  const context = buildContext(input, classify(input.description).category)
-  const triage = buildTriage(input, context)
+  const context = buildContext(input, classify(input.description, opts?.forcedCategory).category)
+  const triage = buildTriage(input, context, opts?.forcedCategory)
   const summary = buildSummary(id, input, triage, context)
   const draftReady = triage.confidenceLevel === 'High'
   const now = new Date().toISOString()

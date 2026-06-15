@@ -88,43 +88,18 @@ export const STAFF_ACTIONS: Array<{
 ]
 
 /**
- * Parking infraction "Problem Type" options, mirroring the City of Brampton 311
- * "Report a Parking Infraction" Service Request Form.
+ * General municipal enforcement complaint types. This is a simple intake list
+ * covering the common by-law concerns residents report — not a parking-only
+ * ticket form. Staff-side triage maps each type to a recommended department.
  */
-export const PARKING_PROBLEM_TYPES = [
-  'Idling',
-  'Immobile Vehicle on City Street',
-  'Multiple Offences',
-  'Other Offences',
-  'Oversized Motor Vehicle on City Street',
-  'Oversized Motor Vehicle on Private Property',
-  'Parked 15CM from Curb',
-  'Parked between 2:00am-6:00am',
-  'Parked Blocking Fire Hydrant',
-  'Parked in a Bike Lane',
-  'Parked in a Prohibited Parking Area',
-  'Parked in a Prohibited Stop Area',
-  'Parked in Accessible Space Access Aisle',
-  'Parked in an Accessible Space',
-  'Parked in Fire Route',
-  'Parked in Laneway',
-  'Parked Interfering with Snow Clearing',
-  'Parked more than 3 Hours',
-  'Parked more than Posted Time Limit',
-  'Parked on the Boulevard - Grass',
-  'Parked on the Sidewalk',
-  'Parked Overhanging Curb',
-  'Parked the Wrong Way',
-  'Parked Vehicle Obstructing Traffic',
-  'Parked within 9M of Intersection',
-  'Parking on Grass, Walkway or Other Materials',
-  'Time as Posted - No Parking',
-  'Time as Posted - No Stopping',
-  'Trailer Parked on City Street',
-  'Unauthorized Vehicle in Private Driveway',
-  'Unauthorized Vehicle Parked on Municipal Property',
-  'Unlicensed Vehicle',
-  'Vehicle parked in taxi stand',
+export const ENFORCEMENT_COMPLAINT_TYPES = [
+  'Parking issue',
+  'Property standards',
+  'Noise complaint',
+  'Illegal dumping',
+  'Yard maintenance',
+  'Zoning concern',
+  'Other bylaw concern',
 ] as const
 
 /** Address type options for the Location step. */
@@ -187,7 +162,7 @@ export type ResidentRequestInput = {
   // Details
   requestType: string
   description?: string
-  vehicleThereNow?: string
+  happeningNow?: string
   uploadedFileNames?: string[]
 
   // Contact
@@ -291,7 +266,7 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
   // migration while still preserving the resident's input for staff review.
   const baseDescription = input.description?.trim() ?? ''
   const demoDetailLines = [
-    input.vehicleThereNow ? `Vehicle there now: ${input.vehicleThereNow}` : null,
+    input.happeningNow ? `Is this happening now: ${input.happeningNow}` : null,
     input.concernUnitNumber ? `Location unit or apartment number: ${input.concernUnitNumber.trim()}` : null,
     input.concernPostalCode ? `Location postal code: ${input.concernPostalCode.trim()}` : null,
     input.uploadedFileNames?.length
