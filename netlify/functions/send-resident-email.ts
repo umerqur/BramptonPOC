@@ -251,7 +251,7 @@ function buildConfirmationContent(input: EmailRequest): EmailContent {
 
   const inner = `
     <p style="margin:0 0 14px;">Hi ${safeName},</p>
-    <p style="margin:0;font-size:16px;font-weight:600;">Your parking infraction request has been received.</p>
+    <p style="margin:0;font-size:16px;font-weight:600;">Your enforcement complaint request has been received.</p>
     ${detailTable([
       ['Reference number', caseId],
       ['Request type', requestType],
@@ -273,7 +273,7 @@ function buildConfirmationContent(input: EmailRequest): EmailContent {
   const text = [
     `Hi ${name},`,
     '',
-    'Your parking infraction request has been received.',
+    'Your enforcement complaint request has been received.',
     '',
     `Reference number: ${input.caseId}`,
     `Request type: ${input.requestType || '—'}`,

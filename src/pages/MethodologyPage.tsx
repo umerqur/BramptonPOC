@@ -7,7 +7,7 @@ const sections = [
   },
   {
     title: 'Resident intake simulation',
-    body: 'The resident form creates demo parking complaint records so the workflow can be shown end-to-end, from intake to staff review to resident status update.',
+    body: 'The resident form creates demo general enforcement complaint records (parking, property standards, noise, dumping, and other by-law concerns) so the workflow can be shown end-to-end, from intake to staff review to resident status update.',
   },
   {
     title: 'Statistical Queue Insights',

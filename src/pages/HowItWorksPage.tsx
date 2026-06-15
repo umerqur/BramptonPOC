@@ -5,7 +5,7 @@ const steps = [
   {
     n: '01',
     title: 'Resident complaint enters intake',
-    body: 'A resident submits a parking infraction request through the demo service request form and receives a reference number.',
+    body: 'A resident submits a general by-law or enforcement complaint through the demo service request form and receives a reference number.',
   },
   {
     n: '02',

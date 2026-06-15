@@ -21,11 +21,11 @@ The core of the app is the authenticated Closure Review Workbench (`/app/closure
 
 ## Resident intake demo workflow
 
-This POC includes a resident facing parking infraction intake simulation so the Proactive Enforcement Response workflow can be demonstrated from complaint creation through staff approved closure.
+This POC includes a resident facing general enforcement complaint intake simulation (parking, property standards, noise, illegal dumping, yard maintenance, zoning, and other by-law concerns — not parking only) so the Proactive Enforcement Response workflow can be demonstrated from complaint creation through staff approved closure.
 
 Demo script:
 
-1. Resident opens `/resident` and creates a parking infraction request.
+1. Resident opens `/resident` and creates a general enforcement complaint request.
 2. The app creates an `RSR...` reference and sends a confirmation email to the resident through Mailjet.
 3. Staff open `/app/resident-intake` and review the submitted request.
 4. Staff explicitly advance the request through Received, Assigned, Under review, and Closed.
@@ -44,13 +44,13 @@ This is not the 311 Self Serve Customer Service Agent use case. It is a Proactiv
 ## Demo entry points
 
 Resident:
-Use `/resident/new-request` to file a demo parking complaint.
+Use `/resident/new-request` to file a demo enforcement complaint.
 Use `/resident` to check request status.
 
 Staff:
 Use `/login` to sign in.
-After sign in, staff land on `/app`.
-Start with Resident Intake, then use Closure Review.
+After sign in, staff land on the **Staff Inbox** (`/app`).
+Work a submission from the Staff Inbox into the Case Workbench and Closure Review, or open the **POC Walkthrough** (`/app/walkthrough`) for the guided end-to-end narrative.
 
 ---
 
@@ -102,7 +102,8 @@ The Supabase schema lives in `supabase/migrations/` (001–010, applied in order
 
 - A public marketing site (landing, how-it-works, methodology, privacy) explaining the POC and the **assistive** role of AI — no public operational data demo.
 - An authenticated app (`/app`, Supabase magic-link login) centred on:
-  - **Closure Review Workbench** (the staff landing page) — the six-step workflow above: attention-ranked complaint review queue, case file workspace with context and trend signals, deterministic rule flags, **AI Review Packet** (staff summary, next step, resident update, closure language), an "Ask this case" assistant, and human review controls. Every draft requires staff approval.
+  - **Staff Inbox** (the staff landing page) — the queue of real resident submissions staff work into the Case Workbench and Closure Review.
+  - **Closure Review Workbench** — the six-step workflow above: attention-ranked complaint review queue, case file workspace with context and trend signals, deterministic rule flags, **AI Review Packet** (staff summary, next step, resident update, closure language), an "Ask this case" assistant, and human review controls. Every draft requires staff approval.
   - **Case queue and case detail** — filterable queue with server-side filtering against `municipal_complaints`, plus per-case detail with explainable triage signals.
   - **Operations Workflow Console** — workflow-stage counts and recent staff workflow events, demonstrating triage and case progression.
   - **Workload insights (v1)** — scored locations from the v1 workload-density model.

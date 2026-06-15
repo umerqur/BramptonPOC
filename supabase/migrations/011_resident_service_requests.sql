@@ -33,7 +33,7 @@ create table if not exists public.resident_service_requests (
   province text,
 
   -- Step 2 — Details
-  request_type text not null,        -- "Problem Type" (parking infraction type)
+  request_type text not null,        -- "Problem Type" (general enforcement complaint type)
   description text,                  -- "Additional Information" (optional)
 
   -- Step 3 — Contact

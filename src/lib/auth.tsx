@@ -11,6 +11,8 @@ export const ALLOWED_EMAILS = [
   'zeddotes@gmail.com',
   'hasham.qureshi@gmail.com',
   'liboluo@hotmail.com',
+  'ousmaan_ahmed@icloud.com',
+  'balraj_m7@hotmail.com',
 ] as const
 
 export const RESTRICTED_MESSAGE = 'Access is restricted to authorized project users.'

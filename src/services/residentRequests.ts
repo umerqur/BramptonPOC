@@ -147,8 +147,8 @@ export type ResidentRequestStatus = {
 }
 
 /**
- * Fields a resident enters in the multi-step submission form, mirroring the
- * Brampton 311 "Report a Parking Infraction" Service Request Form.
+ * Fields a resident enters in the multi-step submission form, modelled on a
+ * general Brampton 311 by-law / enforcement complaint Service Request Form.
  */
 export type ResidentRequestInput = {
   // Location of concern

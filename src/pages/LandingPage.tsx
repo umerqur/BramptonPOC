@@ -60,7 +60,7 @@ export default function LandingPage() {
           <div className="card card-hover flex flex-col p-7">
             <h2 className="text-xl font-semibold text-navy-900">Resident</h2>
             <p className="mt-2 flex-1 text-ink-muted">
-              File a parking complaint and receive status updates by email.
+              File a municipal by-law or enforcement complaint and receive status updates by email.
             </p>
             <div className="mt-6">
               <Link to="/resident/new-request" className="btn-primary">
