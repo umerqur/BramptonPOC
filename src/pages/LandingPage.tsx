@@ -12,7 +12,7 @@ export default function LandingPage() {
       {/* Hero — existing repo asset behind a navy gradient overlay */}
       <section className="relative isolate overflow-hidden bg-navy-950 text-white">
         <img
-          src="/images/brampton-poc-hero.png"
+          src="/brampton-poc-hero.png"
           alt=""
           aria-hidden="true"
           className="absolute inset-0 -z-10 h-full w-full object-cover"
