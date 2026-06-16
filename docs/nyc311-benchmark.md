@@ -26,10 +26,11 @@ workflow can be demonstrated realistically on public data.
 - **Public and open.** NYC 311 is open data with no personally identifying
   complainant information, so it is safe to use for modelling, schema design, and
   demo analytics.
-- **Large and current.** ~20.5M records match our closure-workflow filter
+- **Large and current.** ~20.5M records match the closure-workflow filter
   (`closed_date IS NOT NULL AND resolution_description IS NOT NULL`); it updates
-  daily. We start with a **controlled, reproducible sample** (100k–300k rows),
-  not the full set.
+  daily and spans 2020-01-01 → present. We use the **latest 1-year window**
+  (currently **~3.69M** rows), paginated with `$limit`/`$offset` — **not** the
+  full set.
 - **Schema-aligned.** Its fields map cleanly onto the Brampton compatible
   workflow concepts (below), so nothing about the workflow is NYC-specific.
 
@@ -89,8 +90,11 @@ workload support.
 ## Pipeline (reproducible)
 
 ```bash
-# 1. Fetch a controlled sample (anonymous; set NYC_OPEN_DATA_APP_TOKEN for big pulls)
-python scripts/fetch_nyc311_sample.py --max-rows 200000
+# 1. Fetch the latest 1-year window (closed + resolution present), limit/offset paging.
+#    Anonymous works (throttled); set NYC_OPEN_DATA_APP_TOKEN to raise the limit.
+python scripts/fetch_nyc311_sample.py                 # whole 1-year window (~3.69M)
+python scripts/fetch_nyc311_sample.py --max-rows 500000   # bounded validation run
+python scripts/fetch_nyc311_sample.py --since-days 365    # explicit window size
 
 # 2. Normalize to the Brampton compatible schema
 python scripts/clean_nyc311_service_requests.py
@@ -99,9 +103,9 @@ python scripts/clean_nyc311_service_requests.py
 python scripts/build_nyc311_closure_templates.py
 
 # 4. Load to Supabase (credentialed: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)
-python scripts/upload_nyc311_to_supabase.py --max-rows 200000
+python scripts/upload_nyc311_to_supabase.py
 ```
 
-For the **full ~20.5M-row** extract, run step 1 with `--max-rows all` and an app
-token in a persistent environment, and prefer a direct Postgres `COPY` over the
-REST upload for the load.
+The fetch is **1 year**, not the full ~20.5M-row dataset. For a multi-million-row
+load prefer a direct Postgres `COPY` over the REST upload, run in a persistent
+environment with an app token.

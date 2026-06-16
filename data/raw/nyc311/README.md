@@ -5,7 +5,7 @@ This folder is for local raw exports of the **NYC 311 Open Data** public benchma
 - Source: NYC Open Data — 311 Service Requests from 2010 to Present
 - Socrata dataset id: `erm2-nwe9`
 - Query endpoint: `https://data.cityofnewyork.us/api/v3/views/erm2-nwe9/query.json`
-- Pulled by `scripts/fetch_nyc311_sample.py` into `nyc311_sample.csv` (a controlled 100k–300k row sample, not the full 21.5M rows).
+- Pulled by `scripts/fetch_nyc311_sample.py` into `nyc311_sample.csv` — the **latest 1-year window** (closed records with a resolution description; currently ~3.69M rows), paginated with `$limit`/`$offset`. Not the full ~21.5M rows.
 
 ## Local files
 
@@ -15,9 +15,9 @@ Raw and normalized CSV files are intentionally ignored by Git because they can b
 
 NYC 311 provides real municipal service-request patterns with a **rich schema** — created/closed timestamps, agency, complaint type and descriptor, status, due date, resolution description and resolution-action timestamps, channel, borough, council district, and geocoordinates. That richer schema mimics what a Brampton internal enforcement system would likely contain far better than a thinner 311 export, which makes it a strong public benchmark for demonstrating the closure-review workflow. It is **not Brampton operational data**, and the workflow is designed to connect to equivalent Brampton internal service request, patrol, inspection, ticket, and closure data during the POC.
 
-## Reproducible sample
+## Reproducible 1-year window
 
-Keep the sample reproducible: the fetch script filters to recent records where `closed_date` and `resolution_description` are not null and a useful `status` is present, and writes a fixed-size sample. Re-running with the same parameters reproduces the same controlled benchmark slice.
+The fetch script filters to the **latest 1 year** of records where `closed_date` and `resolution_description` are not null, ordered `created_date DESC, unique_key DESC`, paginated with `$limit`/`$offset`. `--since-days` (default 365) or `--since YYYY-MM-DD` set the window; `--max-rows` caps it for a bounded run. Anonymous access works; `NYC_OPEN_DATA_APP_TOKEN` is sent via `X-App-Token` when present.
 
 ## Privacy note
 

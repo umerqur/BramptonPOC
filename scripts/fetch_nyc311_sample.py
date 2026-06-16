@@ -1,36 +1,35 @@
-"""Fetch a reproducible NYC 311 Open Data sample via the Socrata API.
+"""Fetch the latest 1 year of NYC 311 Open Data via the Socrata API.
 
 Dataset: NYC 311 Service Requests (Socrata id `erm2-nwe9`)
 Endpoint: https://data.cityofnewyork.us/resource/erm2-nwe9.json
 
-This uses KEYSET pagination on `unique_key` (not deep `$offset`, which Socrata
-degrades badly on past a few hundred thousand rows), so it scales from a small
-sample to the full ~20.5M filtered rows and is restartable.
+This pulls a bounded **1-year** window (not the full ~21.5M-row dataset),
+preferring closed records with a resolution description so the closure-review
+workflow has real outcomes to work with.
 
-Anonymous access works but is rate-throttled. Set NYC_OPEN_DATA_APP_TOKEN to
-raise the limit for large pulls.
+Pagination is `$limit` / `$offset` over a stable `$order` (created_date DESC,
+unique_key DESC). Anonymous access works but is rate-throttled; set
+NYC_OPEN_DATA_APP_TOKEN and it is sent via the `X-App-Token` header to raise the
+limit when we add one later.
 
 Examples:
-    # 200k controlled sample (default)
+    # latest 1 year, closed + resolution_description present (default)
     python scripts/fetch_nyc311_sample.py
 
-    # a bigger slice
-    python scripts/fetch_nyc311_sample.py --max-rows 1000000
-
-    # the entire filtered dataset (long-running; use an app token)
-    python scripts/fetch_nyc311_sample.py --max-rows all
+    # a different window / a safety cap on rows
+    python scripts/fetch_nyc311_sample.py --since-days 365 --max-rows 500000
 
 Output:
     data/raw/nyc311/nyc311_sample.csv  (or --out)
 
-Reproducible: same filter + same --max-rows + ascending key order reproduces the
-same controlled slice. Only the Python standard library is required.
+Only the Python standard library is required.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import datetime as dt
 import json
 import os
 import sys
@@ -41,7 +40,7 @@ from pathlib import Path
 
 BASE_URL = "https://data.cityofnewyork.us/resource/erm2-nwe9.json"
 
-# Raw Socrata columns we request (matches the dataset's field names).
+# Only the columns the POC needs.
 COLUMNS = [
     "unique_key",
     "created_date",
@@ -65,27 +64,26 @@ COLUMNS = [
     "location",
 ]
 
-# Prefer records that exercise the closure workflow: a real close date and a
-# resolution description we can mine for rule-based closure scenarios.
-DEFAULT_WHERE = "closed_date IS NOT NULL AND resolution_description IS NOT NULL"
-
 DEFAULT_OUT = Path("data/raw/nyc311/nyc311_sample.csv")
 
 
-def build_url(where: str, page_size: int, last_key: str | None) -> str:
-    # Keyset pagination: order by unique_key ascending and ask only for rows with
-    # a key strictly greater than the last one we saw. unique_key is treated as
-    # text by Socrata, so we quote it; text order is self-consistent between the
-    # $order and the $where, which is all keyset pagination needs.
-    clauses = [where]
-    if last_key is not None:
-        safe = last_key.replace("'", "''")
-        clauses.append(f"unique_key > '{safe}'")
+def build_where(cutoff_iso: str, require_closed: bool, require_resolution: bool) -> str:
+    clauses = [f"created_date >= '{cutoff_iso}'"]
+    if require_closed:
+        clauses.append("closed_date IS NOT NULL")
+    if require_resolution:
+        clauses.append("resolution_description IS NOT NULL")
+    return " AND ".join(f"({c})" for c in clauses)
+
+
+def build_url(where: str, limit: int, offset: int) -> str:
     params = {
         "$select": ",".join(COLUMNS),
-        "$where": " AND ".join(f"({c})" for c in clauses),
-        "$order": "unique_key",
-        "$limit": page_size,
+        "$where": where,
+        # Stable total order so $offset paging does not skip/duplicate on ties.
+        "$order": "created_date DESC, unique_key DESC",
+        "$limit": limit,
+        "$offset": offset,
     }
     return f"{BASE_URL}?{urllib.parse.urlencode(params)}"
 
@@ -93,14 +91,24 @@ def build_url(where: str, page_size: int, last_key: str | None) -> str:
 def fetch_page(url: str, token: str | None, retries: int = 4) -> list[dict]:
     headers = {"Accept": "application/json"}
     if token:
-        headers["X-App-Token"] = token
+        headers["X-App-Token"] = token  # optional; used when a token is configured
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=120) as resp:
                 return json.loads(resp.read().decode("utf-8"))
-        except Exception as err:  # noqa: BLE001 - retry on any transport error
+        except urllib.error.HTTPError as err:
+            # 429 = throttled. Back off; suggest a token. Retry a few times.
+            if err.code == 429:
+                wait = 5 * (attempt + 1)
+                print(f"  throttled (429); backing off {wait}s "
+                      f"(set NYC_OPEN_DATA_APP_TOKEN to raise the limit)", file=sys.stderr)
+                time.sleep(wait)
+                last_err = err
+                continue
+            raise
+        except Exception as err:  # noqa: BLE001 - retry transient transport errors
             last_err = err
             wait = 2 ** attempt
             print(f"  request failed ({err}); retrying in {wait}s", file=sys.stderr)
@@ -108,57 +116,58 @@ def fetch_page(url: str, token: str | None, retries: int = 4) -> list[dict]:
     raise RuntimeError(f"Giving up after {retries} retries: {last_err}")
 
 
-def fetch(out: Path, where: str, max_rows: int | None, page_size: int, token: str | None) -> int:
+def fetch(out: Path, where: str, page_size: int, max_rows: int | None, token: str | None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     written = 0
-    last_key: str | None = None
+    offset = 0
 
     with out.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction="ignore")
         writer.writeheader()
 
         while max_rows is None or written < max_rows:
-            this_page = page_size
-            if max_rows is not None:
-                this_page = min(page_size, max_rows - written)
-            url = build_url(where, this_page, last_key)
-            page = fetch_page(url, token)
+            this_page = page_size if max_rows is None else min(page_size, max_rows - written)
+            page = fetch_page(build_url(where, this_page, offset), token)
             if not page:
                 break
             for row in page:
-                # location is a nested dict; flatten to a JSON string so the CSV
-                # stays one cell. Everything else is already scalar.
                 if isinstance(row.get("location"), (dict, list)):
                     row["location"] = json.dumps(row["location"])
                 writer.writerow(row)
             written += len(page)
-            last_key = page[-1].get("unique_key")
-            print(f"Fetched {written:,} rows (last unique_key={last_key})")
+            offset += len(page)
+            print(f"Fetched {written:,} rows (offset={offset:,})")
             if len(page) < this_page:
-                break  # reached the end of the dataset
+                break  # reached the end of the 1-year window
             time.sleep(0.2)
 
     return written
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch a reproducible NYC 311 sample from Socrata.")
+    parser = argparse.ArgumentParser(description="Fetch the latest 1 year of NYC 311 (limit/offset paging).")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--where", default=DEFAULT_WHERE, help="SoQL $where filter")
-    parser.add_argument(
-        "--max-rows",
-        default="200000",
-        help="Row cap, or 'all' for the entire filtered dataset (long-running).",
-    )
+    parser.add_argument("--since-days", type=int, default=365, help="Rolling window size in days (default 365).")
+    parser.add_argument("--since", default=None, help="Explicit cutoff date 'YYYY-MM-DD' (overrides --since-days).")
     parser.add_argument("--page-size", type=int, default=50000)
+    parser.add_argument("--max-rows", type=int, default=None, help="Optional safety cap on rows.")
+    parser.add_argument("--no-require-closed", action="store_true", help="Do not require closed_date.")
+    parser.add_argument("--no-require-resolution", action="store_true", help="Do not require resolution_description.")
     args = parser.parse_args()
 
-    max_rows = None if str(args.max_rows).lower() == "all" else int(args.max_rows)
-    token = os.getenv("NYC_OPEN_DATA_APP_TOKEN")
-    if not token:
-        print("No NYC_OPEN_DATA_APP_TOKEN set — using anonymous (throttled) access.", file=sys.stderr)
+    if args.since:
+        cutoff_date = args.since
+    else:
+        cutoff_date = (dt.date.today() - dt.timedelta(days=args.since_days)).isoformat()
+    cutoff_iso = f"{cutoff_date}T00:00:00"
 
-    total = fetch(args.out, args.where, max_rows, args.page_size, token)
+    where = build_where(cutoff_iso, not args.no_require_closed, not args.no_require_resolution)
+    token = os.getenv("NYC_OPEN_DATA_APP_TOKEN")
+    print(f"Window: created_date >= {cutoff_iso}")
+    print(f"Filter: {where}")
+    print("Auth: app token (X-App-Token)" if token else "Auth: anonymous (throttled; set NYC_OPEN_DATA_APP_TOKEN to raise limits)")
+
+    total = fetch(args.out, where, args.page_size, args.max_rows, token)
     print(f"Done. Wrote {total:,} rows to {args.out}")
 
 
