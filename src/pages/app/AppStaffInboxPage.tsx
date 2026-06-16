@@ -231,11 +231,15 @@ function InboxCard({
   onAssign: () => void
   onOpen: () => void
 }) {
-  // Deterministic generated triage from the row (placeholder for a real AI
-  // result). Memoised so we don't re-run the workflow on every render.
+  // Deterministic intake decision-support result for this submission. The intake
+  // pipeline is deterministic (rule based), not an agentic dispatcher: it only
+  // SUGGESTS a category, priority, routing recommendation, missing information,
+  // and closure readiness. A human coordinator/supervisor still approves the
+  // assignment below. Memoised so we don't re-run it on every render.
   const triageCase = useMemo(() => residentRowToCase(row), [row])
   const { triage, summary } = triageCase
   const priority = triage.recommendedPriority
+  const missingInformation = triage.missingInformation
   const residentComplaint = row.description?.trim()
 
   return (
@@ -317,9 +321,26 @@ function InboxCard({
         </dl>
 
         <div className="mt-3">
+          <div className="text-xs uppercase tracking-wide text-ink-subtle">Missing information</div>
+          {missingInformation.length > 0 ? (
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink">
+              {missingInformation.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-0.5 text-sm text-ink">No missing intake information identified.</p>
+          )}
+        </div>
+
+        <div className="mt-3">
           <div className="text-xs uppercase tracking-wide text-ink-subtle">Recommended next action</div>
           <p className="mt-0.5 text-sm text-navy-900">{summary.recommendedNextStep}</p>
         </div>
+
+        <p className="mt-3 text-[11px] text-accent-700">
+          Suggestions only — a human coordinator or supervisor reviews and approves the assignment.
+        </p>
       </div>
 
       <div className="mt-4 flex items-center justify-end">
