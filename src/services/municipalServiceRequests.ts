@@ -577,22 +577,6 @@ export async function getNYCWorkloadByBorough(): Promise<NYCBoroughWorkload[]> {
 }
 
 /**
- * Representative NYC 311 benchmark complaint volume per borough, used when the
- * live Supabase view is unavailable so the workload heat map still renders. These
- * are illustrative benchmark figures (Brooklyn and Queens carry the most 311
- * volume), not Brampton operational data.
- */
-export function mockNYCWorkloadByBorough(): NYCBoroughWorkload[] {
-  return [
-    { borough: 'Brooklyn', complaint_volume: 31240 },
-    { borough: 'Queens', complaint_volume: 25890 },
-    { borough: 'Bronx', complaint_volume: 21470 },
-    { borough: 'Manhattan', complaint_volume: 18650 },
-    { borough: 'Staten Island', complaint_volume: 7980 },
-  ]
-}
-
-/**
  * Returns the real NYC City Council district polygons used as the finer,
  * ward-like base layer of the NYC 311 workload heat map. Geometry is bundled
  * (NYC Open Data — City Council Districts) rather than read from Supabase, so the
@@ -632,22 +616,6 @@ export async function getNYCWorkloadByCouncilDistrict(): Promise<NYCCouncilDistr
       complaint_volume: Number(r.complaint_volume) || 0,
     }))
     .filter((r) => r.area.length > 0 && r.area !== 'NaN' && r.area !== '0')
-}
-
-/**
- * Representative NYC 311 benchmark complaint volume per City Council district,
- * used when the live Supabase view is unavailable so the heat map still renders.
- * Illustrative benchmark figures across all 51 districts (not Brampton data).
- */
-export function mockNYCWorkloadByCouncilDistrict(): NYCCouncilDistrictWorkload[] {
-  // Deterministic spread so every district shades; outer-borough districts carry
-  // more 311 volume, mirroring the real benchmark distribution.
-  return NYC_COUNCIL_DISTRICT_BOUNDARIES.map((d) => {
-    const n = d.council_district
-    const base = 2400 + ((n * 1373) % 7600)
-    const wave = Math.round(1600 * (1 + Math.sin(n / 2.3)))
-    return { area: String(n), complaint_volume: base + wave }
-  })
 }
 
 // ---------------------------------------------------------------------------
