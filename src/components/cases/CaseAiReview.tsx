@@ -68,10 +68,8 @@ export default function CaseAiReview({
       </div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Optional. Runs only when you click Generate AI review, and only for this one case. It prepares a staff briefing —
-        it does not assign, close, enforce, or send anything. It does not replace the rule based POC triage, and
-        authorized municipal staff review and decide every case. Uses benchmark demonstration data, not Brampton
-        operational complaint data.
+        Optional. Runs only when you click Generate, and only for this case. It prepares a staff briefing — it does not
+        assign, close, or send anything. Staff review and decide every case.
       </p>
 
       <button

@@ -129,11 +129,6 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
         </div>
       </div>
 
-      <div className="mt-3 text-[11px] text-ink-subtle">
-        NYC 311 public benchmark data used to demonstrate the workflow. Not Brampton operational
-        complaint data. Workflow and closure tracking with staff reviewed decision support.
-      </div>
-
       <div className="mt-4">
         <AdvisoryNotice />
       </div>
@@ -268,8 +263,8 @@ export function ComplaintDetailView({ row, casesPath }: { row: MunicipalComplain
           {/* Resident response draft */}
           <Card title="Resident response draft" aiGenerated>
             <p className="text-xs text-ink-subtle">
-              Generated locally from the complaint type, status, assigned department, and AI triage. Staff must review
-              and edit before sending to a resident.
+              Generated from the complaint type, status, and assigned department. Staff must review and edit before
+              sending to a resident.
             </p>
             <pre className="mt-3 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-ink leading-relaxed font-sans">
               {residentDraft}

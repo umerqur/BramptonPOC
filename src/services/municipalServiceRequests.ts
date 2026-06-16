@@ -39,12 +39,12 @@ export const STATISTICAL_FEATURE_CORRELATIONS_TABLE = 'statistical_feature_corre
 export const STATISTICAL_ATTENTION_QUEUE_VIEW = 'v_statistical_attention_queue'
 
 /**
- * Standard advisory disclaimer for AI-assisted triage. The current POC triage is
- * rule based using existing columns in `municipal_complaints` — it is decision
- * support only, never a final enforcement decision.
+ * Compact advisory shown where generated routing/priority/summaries appear. The
+ * values are decision support generated from intake details — authorized staff
+ * review and decide every case.
  */
 export const TRIAGE_ADVISORY =
-  'AI-assisted triage is rule based POC decision support only. It is not a final enforcement decision. Authorized municipal staff review and decide every case.'
+  'Routing, priority, and summaries are generated from intake details. Authorized staff review and decide every case.'
 
 /** Product positioning note used across the authenticated app. */
 export const DATA_POSITIONING =

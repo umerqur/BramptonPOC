@@ -16,12 +16,11 @@ import {
 } from '../../services/residentRequests'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 
-// Staff Inbox — the page authenticated staff land on first. It lists the newest
-// resident submissions from public.resident_service_requests and, for each one,
-// shows a generated AI-style triage (department, priority, confidence,
-// recommended next action) so staff can scan what needs attention. "Open case"
-// bridges the resident row into the Case Workbench. This is the real
-// resident → staff handoff; the POC Walkthrough keeps the synthetic narrative.
+// Work Queue — the page authenticated staff land on first. It lists active
+// resident service requests from public.resident_service_requests and, for each
+// one, shows a decision support summary (routing recommendation, priority,
+// classification, file readiness) generated from the intake details so staff can
+// scan what needs action. "Open case" brings the request into the Case Workbench.
 
 type LoadState = {
   rows: ResidentRequestRow[]
@@ -133,17 +132,13 @@ export default function AppStaffInboxPage() {
           <div className="section-eyebrow">Staff workbench</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Work Queue</h1>
           <p className="mt-2 text-ink-muted">
-            The service-request queue, with a generated AI triage to help you decide what to open first. Open a case to
-            review the full workbench — every closure still needs staff approval.
+            Active resident service requests requiring staff review, officer assignment, field outcome, or closure
+            approval.
           </p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={state.loading}>
           {state.loading ? 'Refreshing…' : 'Refresh'}
         </button>
-      </div>
-
-      <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
-        Demo data only. AI triage values are generated decision support — not automated enforcement.
       </div>
 
       {!state.error && !state.loading && state.rows.length > 0 && (
@@ -165,7 +160,7 @@ export default function AppStaffInboxPage() {
           <EmptyState />
         ) : visibleRows.length === 0 ? (
           <div className="card p-8 text-center text-sm text-ink-subtle">
-            {tab === 'open' ? 'No open cases in the queue right now.' : 'No closed cases yet.'}
+            {tab === 'open' ? 'No open cases need staff action right now.' : 'No closed cases yet.'}
           </div>
         ) : (
           <ul className="space-y-4">
@@ -314,11 +309,12 @@ function InboxCard({
       {/* Resident-uploaded photos / documents (private; viewed via signed URL). */}
       <ResidentAttachments caseId={row.case_id} attachments={attachments} variant="card" />
 
-      {/* Generated AI triage — support only, below the resident's complaint. */}
+      {/* Decision support summary — generated from intake details, below the
+          resident's complaint. Staff review required. */}
       <div className="mt-4 rounded-lg border border-accent-200 bg-accent-50/50 p-4">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">Decision support summary</span>
-          <span className="text-[11px] text-accent-700">Generated · staff review required</span>
+          <span className="text-[11px] text-accent-700">Generated from intake details · Staff review required</span>
         </div>
         <p className="mt-2 text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
 
