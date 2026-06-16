@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
+import { can, DEMO_OFFICER } from '../../lib/roles'
 import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
 import { formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import {
   STATUS_LABELS,
+  assignResidentRequestToOfficer,
   getResidentRequests,
   getResidentRequestAttachmentsForCases,
   type ResidentRequestAttachment,
@@ -52,12 +54,14 @@ const PRIORITY_STYLES: Record<string, string> = {
 }
 
 export default function AppStaffInboxPage() {
-  const { ingestResidentCase } = useWorkflow()
+  const { ingestResidentCase, role } = useWorkflow()
   const navigate = useNavigate()
   const [state, setState] = useState<LoadState>({ rows: [], loading: true, error: null })
   const [tab, setTab] = useState<QueueTab>('open')
   // Attachments for the loaded cases, batched into one query and grouped by case.
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
+  const [assigningId, setAssigningId] = useState<string | null>(null)
+  const canAssign = can(role, 'assignOfficer')
 
   const openRows = useMemo(() => state.rows.filter((r) => OPEN_STATUSES.includes(r.status)), [state.rows])
   const closedRows = useMemo(() => state.rows.filter((r) => CLOSED_STATUSES.includes(r.status)), [state.rows])
@@ -96,6 +100,24 @@ export default function AppStaffInboxPage() {
     ingestResidentCase(row)
     navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
   }
+
+  // Supervisor/coordinator action: explicit human assignment to the By-law
+  // Officer (never automated). Persisted to Supabase so the officer sees it.
+  async function assignToOfficer(row: ResidentRequestRow) {
+    setAssigningId(row.case_id)
+    try {
+      await assignResidentRequestToOfficer(row.case_id, { name: DEMO_OFFICER.name, email: DEMO_OFFICER.email })
+      load()
+    } catch (err) {
+      console.error('Failed to assign case to officer:', err)
+      setState((s) => ({ ...s, error: sectionError(err) }))
+    } finally {
+      setAssigningId(null)
+    }
+  }
+
+  // By-law Officers do not see the citywide Work Queue — send them to their console.
+  if (role === 'officer') return <Navigate to="/app/field" replace />
 
   return (
     <div className="container-page py-10">
@@ -145,6 +167,9 @@ export default function AppStaffInboxPage() {
                 <InboxCard
                   row={row}
                   attachments={attachmentsByCase[row.case_id] ?? []}
+                  canAssign={canAssign}
+                  assigning={assigningId === row.case_id}
+                  onAssign={() => assignToOfficer(row)}
                   onOpen={() => openCase(row)}
                 />
               </li>
@@ -194,10 +219,16 @@ function TabButton({
 function InboxCard({
   row,
   attachments,
+  canAssign,
+  assigning,
+  onAssign,
   onOpen,
 }: {
   row: ResidentRequestRow
   attachments: ResidentRequestAttachment[]
+  canAssign: boolean
+  assigning: boolean
+  onAssign: () => void
   onOpen: () => void
 }) {
   // Deterministic generated triage from the row (placeholder for a real AI
@@ -221,6 +252,28 @@ function InboxCard({
           </div>
         </div>
         <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDateTime(row.created_at)}</span>
+      </div>
+
+      {/* Assignment — supervisor/coordinator assigns the case to a By-law Officer
+          (explicit human assignment, never automated). */}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <div className="text-sm">
+          <span className="text-ink-subtle">Assigned officer: </span>
+          {row.assigned_officer_name ? (
+            <span className="font-medium text-navy-900">{row.assigned_officer_name}</span>
+          ) : (
+            <span className="font-medium text-amber-700">Human assignment required</span>
+          )}
+        </div>
+        {canAssign && row.status !== 'closed' && (
+          <button onClick={onAssign} disabled={assigning} className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-60">
+            {assigning
+              ? 'Assigning…'
+              : row.assigned_officer_email
+                ? 'Reassign officer'
+                : `Assign to ${DEMO_OFFICER.name}`}
+          </button>
+        )}
       </div>
 
       {/* Resident's own words — shown before, and above, the generated triage. */}
@@ -247,7 +300,7 @@ function InboxCard({
         <p className="mt-2 text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
 
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Detail label="Recommended department" value={triage.recommendedDepartment} />
+          <Detail label="Routing recommendation" value={triage.recommendedDepartment} />
           <Detail label="Classification" value={triage.category} />
           <div>
             <dt className="text-xs uppercase tracking-wide text-ink-subtle">Priority</dt>

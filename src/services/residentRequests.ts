@@ -160,6 +160,27 @@ export type ResidentRequestRow = {
   is_demo: boolean
   created_at: string
   updated_at: string
+  // Role-based officer flow (migration 017). Set by a supervisor on assignment
+  // and by the officer when recording a field outcome.
+  assigned_officer_email: string | null
+  assigned_officer_name: string | null
+  assigned_at: string | null
+  field_visit_completed: boolean
+  field_observed_condition: string | null
+  field_violation_observed: string | null
+  field_action_taken: string | null
+  field_officer_notes: string | null
+  field_follow_up_required: boolean
+  field_outcome_recorded_at: string | null
+}
+
+/** What an officer records as the field outcome for an assigned request. */
+export type FieldOutcomeInput = {
+  observedCondition: string
+  violationObserved: 'yes' | 'no' | 'unclear'
+  actionTaken: string
+  officerNotes?: string
+  followUpRequired: boolean
 }
 
 /** Non-sensitive status view returned by get_resident_request_status (public). */
@@ -462,19 +483,81 @@ export async function getResidentRequestStatus(caseId: string): Promise<Resident
   return rows[0] ?? null
 }
 
-const RESIDENT_REQUEST_COLUMNS =
+// Base columns that exist before migration 017. The assignment / field-outcome
+// columns are appended in the extended set below.
+const RESIDENT_REQUEST_BASE_COLUMNS =
   'id, case_id, address_type, location, city, province, request_type, description, first_name, last_name, resident_name, unit_number, postal_code, country, resident_phone, resident_email, resolution_followup, method_of_contact, status, is_demo, created_at, updated_at'
+
+const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_BASE_COLUMNS}, assigned_officer_email, assigned_officer_name, assigned_at, field_visit_completed, field_observed_condition, field_violation_observed, field_action_taken, field_officer_notes, field_follow_up_required, field_outcome_recorded_at`
+
+/** Postgres "undefined_column" — migration 017 not applied yet. */
+function isUndefinedColumnError(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === '42703'
+}
+
+/** Fill the migration-017 fields with safe defaults when they aren't present yet. */
+function withAssignmentDefaults(row: Record<string, unknown>): ResidentRequestRow {
+  return {
+    ...(row as ResidentRequestRow),
+    assigned_officer_email: (row.assigned_officer_email as string | null) ?? null,
+    assigned_officer_name: (row.assigned_officer_name as string | null) ?? null,
+    assigned_at: (row.assigned_at as string | null) ?? null,
+    field_visit_completed: (row.field_visit_completed as boolean | undefined) ?? false,
+    field_observed_condition: (row.field_observed_condition as string | null) ?? null,
+    field_violation_observed: (row.field_violation_observed as string | null) ?? null,
+    field_action_taken: (row.field_action_taken as string | null) ?? null,
+    field_officer_notes: (row.field_officer_notes as string | null) ?? null,
+    field_follow_up_required: (row.field_follow_up_required as boolean | undefined) ?? false,
+    field_outcome_recorded_at: (row.field_outcome_recorded_at as string | null) ?? null,
+  }
+}
+
+/** Staff (authenticated) — read a single resident request by case id. */
+export async function getResidentRequestByCaseId(caseId: string): Promise<ResidentRequestRow | null> {
+  const client = requireClient()
+  const ext = await client
+    .from(RESIDENT_REQUESTS_TABLE)
+    .select(RESIDENT_REQUEST_COLUMNS)
+    .eq('case_id', caseId)
+    .maybeSingle()
+  let data = ext.data as Record<string, unknown> | null
+  let error = ext.error
+  if (error && isUndefinedColumnError(error)) {
+    const base = await client
+      .from(RESIDENT_REQUESTS_TABLE)
+      .select(RESIDENT_REQUEST_BASE_COLUMNS)
+      .eq('case_id', caseId)
+      .maybeSingle()
+    data = base.data as Record<string, unknown> | null
+    error = base.error
+  }
+  if (error) throw error
+  return data ? withAssignmentDefaults(data) : null
+}
 
 /** Staff (authenticated) — read resident demo requests, newest first. */
 export async function getResidentRequests(limit = 100): Promise<ResidentRequestRow[]> {
   const client = requireClient()
-  const { data, error } = await client
+  const ext = await client
     .from(RESIDENT_REQUESTS_TABLE)
     .select(RESIDENT_REQUEST_COLUMNS)
     .order('created_at', { ascending: false })
     .limit(limit)
+  let data = ext.data as Record<string, unknown>[] | null
+  let error = ext.error
+  // Fall back to the pre-017 columns so the queue still works before the
+  // assignment migration is applied.
+  if (error && isUndefinedColumnError(error)) {
+    const base = await client
+      .from(RESIDENT_REQUESTS_TABLE)
+      .select(RESIDENT_REQUEST_BASE_COLUMNS)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    data = base.data as Record<string, unknown>[] | null
+    error = base.error
+  }
   if (error) throw error
-  return (data ?? []) as ResidentRequestRow[]
+  return (data ?? []).map(withAssignmentDefaults)
 }
 
 export type StaffStatusUpdateResult = {
@@ -504,10 +587,10 @@ export async function applyStaffStatusUpdate(
     .from(RESIDENT_REQUESTS_TABLE)
     .update({ status: action.toStatus })
     .eq('case_id', request.case_id)
-    .select(RESIDENT_REQUEST_COLUMNS)
+    .select(RESIDENT_REQUEST_BASE_COLUMNS)
     .single()
   if (error) throw error
-  const updated = data as ResidentRequestRow
+  const updated = withAssignmentDefaults(data as Record<string, unknown>)
 
   // Record the staff action on the shared workflow audit trail.
   await addWorkflowEvent({
@@ -551,7 +634,7 @@ export async function markResidentRequestClosedFromClosureReview(
   // a. read the existing row
   const { data: existing, error: readError } = await client
     .from(RESIDENT_REQUESTS_TABLE)
-    .select(RESIDENT_REQUEST_COLUMNS)
+    .select(RESIDENT_REQUEST_BASE_COLUMNS)
     .eq('case_id', caseId)
     .single()
   if (readError) throw readError
@@ -564,7 +647,7 @@ export async function markResidentRequestClosedFromClosureReview(
     .from(RESIDENT_REQUESTS_TABLE)
     .update({ status: 'closed' })
     .eq('case_id', caseId)
-    .select(RESIDENT_REQUEST_COLUMNS)
+    .select(RESIDENT_REQUEST_BASE_COLUMNS)
     .single()
   if (updateError) throw updateError
 
@@ -580,7 +663,7 @@ export async function markResidentRequestClosedFromClosureReview(
   })
 
   // e. return the updated row
-  return updated as ResidentRequestRow
+  return withAssignmentDefaults(updated as Record<string, unknown>)
 }
 
 const ATTACHMENT_COLUMNS = 'id, case_id, file_name, file_path, content_type, file_size_bytes, uploaded_at'
@@ -632,4 +715,91 @@ export async function createAttachmentSignedUrl(filePath: string, expiresInSecon
 /** True when an attachment's content type is an image (for inline preview hints). */
 export function isImageAttachment(att: ResidentRequestAttachment): boolean {
   return (att.content_type ?? '').toLowerCase().startsWith('image/')
+}
+
+/**
+ * Supervisor / coordinator action: assign a resident request to a By-law Officer.
+ * This is an explicit HUMAN assignment — never automated. Sets the assigned
+ * officer, moves the request to 'assigned', and records a workflow event. The
+ * officer then sees it in their Officer Field Console.
+ */
+export async function assignResidentRequestToOfficer(
+  caseId: string,
+  officer: { name: string; email: string },
+): Promise<ResidentRequestRow> {
+  const client = requireClient()
+  const now = new Date().toISOString()
+
+  const { data, error } = await client
+    .from(RESIDENT_REQUESTS_TABLE)
+    .update({
+      assigned_officer_email: officer.email.trim().toLowerCase(),
+      assigned_officer_name: officer.name,
+      assigned_at: now,
+      status: 'assigned',
+    })
+    .eq('case_id', caseId)
+    .select(RESIDENT_REQUEST_COLUMNS)
+    .single()
+  if (error) throw error
+  const updated = withAssignmentDefaults(data as Record<string, unknown>)
+
+  await addWorkflowEvent({
+    case_id: caseId,
+    event_type: 'resident_request_assigned',
+    event_label: `Assigned to officer: ${officer.name}`,
+    to_status: STATUS_LABELS.assigned,
+    actor_type: 'staff',
+    notes: `Human assignment to By-law Officer ${officer.name} (${officer.email}).`,
+  })
+
+  return updated
+}
+
+/**
+ * Officer action: record the field outcome for an assigned request. Stores the
+ * officer's observed condition, whether a violation was observed (yes/no/unclear),
+ * the action taken, notes, and follow-up flag; marks the field visit completed and
+ * moves the request to 'in_review' (closure review readiness). Writes a workflow
+ * event. This is decision support input for closure review — not an automated
+ * enforcement decision.
+ */
+export async function recordResidentFieldOutcome(
+  caseId: string,
+  outcome: FieldOutcomeInput,
+): Promise<ResidentRequestRow> {
+  const client = requireClient()
+  const now = new Date().toISOString()
+
+  const { data, error } = await client
+    .from(RESIDENT_REQUESTS_TABLE)
+    .update({
+      field_visit_completed: true,
+      field_observed_condition: outcome.observedCondition.trim() || null,
+      field_violation_observed: outcome.violationObserved,
+      field_action_taken: outcome.actionTaken.trim() || null,
+      field_officer_notes: outcome.officerNotes?.trim() ? outcome.officerNotes.trim() : null,
+      field_follow_up_required: outcome.followUpRequired,
+      field_outcome_recorded_at: now,
+      status: 'in_review',
+    })
+    .eq('case_id', caseId)
+    .select(RESIDENT_REQUEST_COLUMNS)
+    .single()
+  if (error) throw error
+  const updated = withAssignmentDefaults(data as Record<string, unknown>)
+
+  await addWorkflowEvent({
+    case_id: caseId,
+    event_type: 'resident_request_field_outcome',
+    event_label: 'Field outcome recorded by officer',
+    from_status: STATUS_LABELS.assigned,
+    to_status: STATUS_LABELS.in_review,
+    actor_type: 'officer',
+    notes: `Violation observed: ${outcome.violationObserved}. Action taken: ${
+      outcome.actionTaken.trim() || '—'
+    }. Follow-up required: ${outcome.followUpRequired ? 'yes' : 'no'}.`,
+  })
+
+  return updated
 }

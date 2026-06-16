@@ -8,11 +8,14 @@ import { supabase, isSupabaseConfigured } from './supabase'
  */
 export const ALLOWED_EMAILS = [
   'umer.qureshi@gmail.com',
+  'umer@neuralforge.ca',
   'zeddotes@gmail.com',
   'hasham.qureshi@gmail.com',
   'liboluo@hotmail.com',
   'ousmaan_ahmed@icloud.com',
   'balraj_m7@hotmail.com',
+  // Demo By-law Officer account (role derived from email in src/lib/roles.ts).
+  'oakley.carpentry_worker@yahoo.com',
 ] as const
 
 export const RESTRICTED_MESSAGE = 'Access is restricted to authorized project users.'

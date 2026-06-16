@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { can, rolesAllowed } from '../../lib/roles'
@@ -57,11 +57,15 @@ function residentFieldMessage(outcome: FieldVisitOutcome, followUp: boolean): st
 const PRIORITIES: Priority[] = ['P1', 'P2', 'P3', 'P4']
 
 export default function AppCaseWorkbenchPage() {
-  const { cases, activeCase, setActiveCase, approveRouting, requestMoreInfo, overridePriority, sendToStaffReview } =
+  const { cases, activeCase, setActiveCase, approveRouting, requestMoreInfo, overridePriority, sendToStaffReview, role } =
     useWorkflow()
   const c = useDemoCase()
   const navigate = useNavigate()
   const [flash, setFlash] = useState<string | null>(null)
+
+  // The Case Workbench is a supervisor/coordinator surface. Officers work from
+  // their Officer Field Console instead.
+  if (role === 'officer') return <Navigate to="/app/field" replace />
 
   if (!c) {
     return (
