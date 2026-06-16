@@ -26,7 +26,7 @@ export default function LoginPage() {
     if (!value) return
 
     // Enforce the allowlist client-side before sending anything. There is no
-    // public signup; only authorized project users receive a magic link.
+    // public signup; only authorized project users receive a sign-in link.
     if (!isAllowedEmail(value)) {
       setStatus({ kind: 'restricted' })
       return
@@ -46,7 +46,7 @@ export default function LoginPage() {
       },
     })
     if (error) {
-      setStatus({ kind: 'error', message: 'Could not send the magic link. Please try again.' })
+      setStatus({ kind: 'error', message: 'Could not send the sign-in link. Please try again.' })
       return
     }
     setStatus({ kind: 'sent' })
@@ -70,7 +70,7 @@ export default function LoginPage() {
             Sign in to the Closure Review Workbench — AI assisted research, analysis, and draft closure responses for staff approval, on live data.
           </p>
           <ul className="mt-8 space-y-3 text-sm text-navy-100">
-            {['Passwordless magic-link sign in', 'Access limited to authorized project users', 'Live data stays behind login'].map((t) => (
+            {['Passwordless email sign in', 'Access limited to authorized project users', 'Live data stays behind login'].map((t) => (
               <li key={t} className="flex items-start gap-2">
                 <svg className="mt-0.5 text-accent-400 shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
                 <span>{t}</span>
@@ -92,14 +92,14 @@ export default function LoginPage() {
           </div>
           <h1 className="text-2xl font-semibold text-navy-900">Sign in</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            Authorized project users only. We&apos;ll email you a secure magic link — no password required.
+            Authorized project users only. We&apos;ll email you a secure sign-in link — no password required.
           </p>
 
           {status.kind === 'sent' ? (
             <div className="mt-8 rounded-md bg-accent-50 border border-accent-200 px-4 py-3 text-sm text-accent-800">
               <div className="font-medium">Check your email</div>
               <p className="mt-1">
-                We sent a magic link to <span className="font-medium">{email.trim().toLowerCase()}</span>. Open it on this
+                We sent a sign-in link to <span className="font-medium">{email.trim().toLowerCase()}</span>. Open it on this
                 device to sign in. You&apos;ll land on the staff workspace home.
               </p>
             </div>
@@ -133,7 +133,7 @@ export default function LoginPage() {
               )}
 
               <button type="submit" className="btn-primary w-full" disabled={status.kind === 'sending'}>
-                {status.kind === 'sending' ? 'Sending magic link…' : 'Send magic link'}
+                {status.kind === 'sending' ? 'Sending sign-in link…' : 'Send sign-in link'}
               </button>
 
               <p className="text-xs text-ink-subtle">
