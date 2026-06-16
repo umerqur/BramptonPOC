@@ -20,9 +20,11 @@
 //
 // SCOPE & GOVERNANCE
 // ------------------
-// Two payload types only, both to the resident:
+// Three payload types only, all to the resident:
 //   * 'confirmation'  — once, when the resident submits.
 //   * 'status_update' — on an explicit staff stage change.
+//   * 'closure'       — on an explicit staff approval of the closure response;
+//                       carries the staff-approved subject + message body.
 // This function only sends the single email described by the request body. It
 // does not read or write any database and is never invoked automatically.
 
@@ -46,6 +48,9 @@ const REPLY_TO_NAME = 'Neural Forge'
 // Keep free-text fields bounded so the email payload stays predictable.
 const MAX_NAME_LEN = 120
 const MAX_FIELD_LEN = 200
+// Closure messages are multi-paragraph, staff-approved bodies, so they get a
+// larger bound than the short metadata fields above.
+const MAX_MESSAGE_LEN = 4000
 
 // Human-readable label for each canonical status. Kept in sync with the
 // frontend resident-request status model.
@@ -65,7 +70,7 @@ const STATUS_NEXT: Record<string, string> = {
   closed: 'Your request has been closed. Thank you for helping keep the city in good shape.',
 }
 
-type EmailType = 'confirmation' | 'status_update'
+type EmailType = 'confirmation' | 'status_update' | 'closure'
 
 type EmailRequest = {
   type: EmailType
@@ -75,6 +80,9 @@ type EmailRequest = {
   requestType: string | null
   location: string | null
   status: string | null
+  // Staff-approved closure subject + message body. Used only by 'closure' emails.
+  subject: string | null
+  message: string | null
 }
 
 // Neutral, provider-agnostic email content produced by the builders below.
@@ -122,6 +130,12 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
+// Render a plain-text block (e.g. the staff-approved closure body) into the HTML
+// part: escape it, then preserve the resident's line breaks as <br />.
+function textToHtml(value: string): string {
+  return escapeHtml(value).replace(/\r?\n/g, '<br />')
+}
+
 function statusLabel(status: string | null): string {
   if (!status) return 'Updated'
   return STATUS_LABELS[status] ?? status
@@ -132,7 +146,7 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
   const obj = raw as Record<string, unknown>
 
   const type = str(obj.type).trim()
-  if (type !== 'confirmation' && type !== 'status_update') return null
+  if (type !== 'confirmation' && type !== 'status_update' && type !== 'closure') return null
 
   return {
     type,
@@ -142,6 +156,8 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
     requestType: cleanOrNull(obj.requestType, MAX_FIELD_LEN),
     location: cleanOrNull(obj.location, MAX_FIELD_LEN),
     status: cleanOrNull(obj.status, 40),
+    subject: cleanOrNull(obj.subject, MAX_FIELD_LEN),
+    message: cleanOrNull(obj.message, MAX_MESSAGE_LEN),
   }
 }
 
@@ -342,8 +358,60 @@ function buildStatusUpdateContent(input: EmailRequest): EmailContent {
   return { subject, html, text }
 }
 
+// Helper content builder for the staff-approved closure email. Unlike the
+// status update (which uses a fixed per-status template), this sends the actual
+// closure response staff reviewed and approved, with the staff-approved subject.
+function buildClosureContent(input: EmailRequest): EmailContent {
+  const name = input.residentName || 'there'
+  const safeName = escapeHtml(name)
+  const caseId = escapeHtml(input.caseId)
+  const requestType = input.requestType ? escapeHtml(input.requestType) : '—'
+  const location = input.location ? escapeHtml(input.location) : '—'
+  const message = input.message ?? ''
+  const statusUrl = statusUrlForCase(input.caseId)
+
+  // Use the staff-approved subject when present; otherwise a safe default.
+  const subject = input.subject?.trim() || `Proactive Enforcement Demo: Closure update for ${input.caseId}`
+
+  const inner = `
+    <p style="margin:0 0 14px;">Hi ${safeName},</p>
+    <p style="margin:0 0 14px;font-size:16px;font-weight:600;">Your request has been reviewed and closed.</p>
+    <div style="margin:0;color:#0f172a;font-size:14px;line-height:1.6;">${textToHtml(message)}</div>
+    ${detailTable([
+      ['Reference number', caseId],
+      ['Status', 'Closed'],
+      ['Request type', requestType],
+      ['Location', location],
+    ])}
+    <p style="margin:0;">You can review the status of this request anytime using the link below.</p>
+    ${statusButton(statusUrl)}`
+
+  const html = htmlShell(inner)
+
+  const text = [
+    `Hi ${name},`,
+    '',
+    'Your request has been reviewed and closed.',
+    '',
+    message,
+    '',
+    `Reference number: ${input.caseId}`,
+    'Status: Closed',
+    `Request type: ${input.requestType || '—'}`,
+    `Location: ${input.location || '—'}`,
+    '',
+    `Track request status: ${statusUrl}`,
+    '',
+    DEMO_FOOTER_TEXT,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
 function buildContent(input: EmailRequest): EmailContent {
-  return input.type === 'confirmation' ? buildConfirmationContent(input) : buildStatusUpdateContent(input)
+  if (input.type === 'confirmation') return buildConfirmationContent(input)
+  if (input.type === 'closure') return buildClosureContent(input)
+  return buildStatusUpdateContent(input)
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -376,6 +444,9 @@ export default async function handler(req: Request): Promise<Response> {
   }
   if (input.type === 'status_update' && !input.status) {
     return json({ error: 'A status is required for a status update email.' }, 400)
+  }
+  if (input.type === 'closure' && !input.message) {
+    return json({ error: 'A closure message is required for a closure email.' }, 400)
   }
 
   const content = buildContent(input)

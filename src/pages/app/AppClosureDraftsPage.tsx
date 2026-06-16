@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { formatDateTime } from '../../services/demoWorkflowService'
+import { sendResidentEmail } from '../../services/residentRequests'
 import {
   AutomationBadge,
   CaseSwitcher,
@@ -14,13 +15,61 @@ import type { DemoCase } from '../../data/demoWorkflowTypes'
 
 // Closure Drafts — the staff review page. The AI has already written the
 // closure response; staff only review the summary, edit the message if needed,
-// confirm the policy/tone checklists, and approve. On approval the resident
-// update is shown, the case is closed, and an audit event is recorded. Nothing
-// is actually sent — this is a demo.
+// confirm the policy/tone checklists, and approve. On approval the case is
+// closed, an audit event is recorded, and — when the case carries a deliverable
+// resident email — the staff-approved closure response is actually emailed to the
+// resident through the server-side Netlify email function.
+
+// Recipients on the synthetic seed/sample cases use reserved @example.* demo
+// addresses; we never try to email those. A real resident email (entered in the
+// intake form, or carried over from a real resident submission) is sent for real.
+const RESERVED_EMAIL_DOMAINS = ['example.com', 'example.org', 'example.net']
+
+function isSendableEmail(email: string): boolean {
+  const value = email.trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return false
+  const domain = value.split('@')[1] ?? ''
+  return !RESERVED_EMAIL_DOMAINS.includes(domain)
+}
+
+type SendResult = { attempted: boolean; emailSent: boolean; to: string }
 
 export default function AppClosureDraftsPage() {
   const { cases, activeCase, setActiveCase, editDraftBody, approveClosure, sendToStaffReview } = useWorkflow()
   const c = useDemoCase()
+  const [sending, setSending] = useState(false)
+  const [sendResult, setSendResult] = useState<SendResult | null>(null)
+
+  // Approve the closure: persist any staff edit, email the resident the approved
+  // response (when deliverable), then close the case with the real send outcome.
+  async function handleApprove(caseObj: DemoCase, body: string) {
+    if (!caseObj.draft || sending) return
+    if (body !== caseObj.draft.body) editDraftBody(caseObj.id, body)
+
+    const to = caseObj.input.residentEmail.trim()
+    const attempted = isSendableEmail(to)
+    let emailSent = false
+
+    setSending(true)
+    try {
+      if (attempted) {
+        emailSent = await sendResidentEmail({
+          type: 'closure',
+          to,
+          residentName: caseObj.input.residentName,
+          caseId: caseObj.id,
+          requestType: caseObj.triage.category,
+          location: caseObj.input.location,
+          subject: caseObj.draft.subject,
+          message: body,
+        })
+      }
+    } finally {
+      approveClosure(caseObj.id, { attempted, emailSent })
+      setSendResult({ attempted, emailSent, to })
+      setSending(false)
+    }
+  }
 
   if (!c) {
     return (
@@ -43,9 +92,9 @@ export default function AppClosureDraftsPage() {
       </div>
 
       {c.stage === 'closed' ? (
-        <ResidentUpdateView c={c} />
+        <ResidentUpdateView c={c} sendResult={sendResult} />
       ) : c.draft ? (
-        <ReviewView c={c} onEdit={(body) => editDraftBody(c.id, body)} onApprove={() => approveClosure(c.id)} />
+        <ReviewView c={c} sending={sending} onApprove={(body) => handleApprove(c, body)} />
       ) : (
         <NeedsDraftView c={c} onPrepare={() => sendToStaffReview(c.id)} />
       )}
@@ -55,7 +104,7 @@ export default function AppClosureDraftsPage() {
   )
 }
 
-function ReviewView({ c, onEdit, onApprove }: { c: DemoCase; onEdit: (body: string) => void; onApprove: () => void }) {
+function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; onApprove: (body: string) => void }) {
   const draft = c.draft!
   const [body, setBody] = useState(draft.body)
   const [internal, setInternal] = useState('')
@@ -65,10 +114,7 @@ function ReviewView({ c, onEdit, onApprove }: { c: DemoCase; onEdit: (body: stri
     setBody(c.draft?.body ?? '')
   }, [c.id, c.draft?.body])
 
-  function handleApprove() {
-    if (body !== draft.body) onEdit(body)
-    onApprove()
-  }
+  const willEmail = isSendableEmail(c.input.residentEmail)
 
   return (
     <>
@@ -138,10 +184,15 @@ function ReviewView({ c, onEdit, onApprove }: { c: DemoCase; onEdit: (body: stri
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-navy-900">Approve final response</h3>
-                <p className="text-xs text-ink-muted">Human-in-the-loop approval. Nothing is sent — this is a demo.</p>
+                <p className="text-xs text-ink-muted">
+                  Human-in-the-loop approval.{' '}
+                  {willEmail
+                    ? `On approval, this response is emailed to ${c.input.residentEmail}.`
+                    : 'No deliverable resident email is on file, so the case is closed without sending an email.'}
+                </p>
               </div>
-              <button onClick={handleApprove} className="btn-accent">
-                Approve final response →
+              <button onClick={() => onApprove(body)} disabled={sending} className="btn-accent disabled:opacity-60">
+                {sending ? 'Approving & sending…' : 'Approve final response →'}
               </button>
             </div>
           </div>
@@ -172,13 +223,19 @@ function NeedsDraftView({ c, onPrepare }: { c: DemoCase; onPrepare: () => void }
   )
 }
 
-function ResidentUpdateView({ c }: { c: DemoCase }) {
+function ResidentUpdateView({ c, sendResult }: { c: DemoCase; sendResult: SendResult | null }) {
   return (
     <>
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <span className="badge bg-accent-100 text-accent-900 ring-1 ring-inset ring-accent-300">Closed</span>
-        <span className="text-xs text-ink-subtle">Approved by a human. Resident update recorded (demo — not sent).</span>
+        <span className="text-xs text-ink-subtle">
+          {sendResult?.attempted && sendResult.emailSent
+            ? 'Approved by a human. Closure response emailed to the resident.'
+            : 'Approved by a human. Case closed and recorded in the audit trail.'}
+        </span>
       </div>
+
+      <ResidentEmailNotice sendResult={sendResult} />
 
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
         <Panel title="Approval record">
@@ -205,12 +262,51 @@ function ResidentUpdateView({ c }: { c: DemoCase }) {
               <pre className="mt-3 whitespace-pre-wrap font-sans text-sm leading-relaxed text-ink">{c.closureMessage}</pre>
             </div>
             <p className="mt-3 text-xs text-ink-subtle">
-              Demo only — no email is actually delivered to any resident.
+              {sendResult?.attempted && sendResult.emailSent
+                ? `This closure response was emailed to ${sendResult.to}. If it is not in the inbox, check the junk or spam folder.`
+                : sendResult?.attempted
+                  ? 'The closure email could not be sent in this environment — the email service is not configured here.'
+                  : 'No deliverable resident email was on file (demo placeholder address), so nothing was emailed.'}
             </p>
           </Panel>
         </div>
       </div>
     </>
+  )
+}
+
+// Prominent banner summarizing whether the resident closure email actually went
+// out. Driven by the real send result from the Netlify email function.
+function ResidentEmailNotice({ sendResult }: { sendResult: SendResult | null }) {
+  if (!sendResult) {
+    // Reached e.g. after a page refresh on an already-closed case: the live send
+    // result is gone, but the audit trail holds the recorded outcome.
+    return (
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-ink-muted">
+        Case closed. See the audit trail for the resident-email delivery result.
+      </div>
+    )
+  }
+  if (sendResult.attempted && sendResult.emailSent) {
+    return (
+      <div className="mt-3 rounded-lg border border-accent-200 bg-accent-50 px-4 py-2.5 text-xs text-accent-800">
+        <span className="font-semibold">Closure email sent</span> to {sendResult.to}. The resident has been notified.
+      </div>
+    )
+  }
+  if (sendResult.attempted) {
+    return (
+      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
+        <span className="font-semibold">Closure email not sent.</span> The case is closed, but the email service is not
+        configured in this environment, so the resident was not emailed.
+      </div>
+    )
+  }
+  return (
+    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
+      <span className="font-semibold">No email sent.</span> This case has no deliverable resident email (demo
+      placeholder address), so the closure response was not emailed.
+    </div>
   )
 }
 

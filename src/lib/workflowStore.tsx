@@ -7,8 +7,11 @@
 // "where workload is reduced" metrics stay coherent as you click through the
 // demo. State is persisted to localStorage so a page refresh keeps the demo.
 //
-// Nothing here touches Supabase or sends a real message — it is a self-contained
-// demo of AI-assisted closure-response automation with a human approval gate.
+// State here is self-contained (synthetic cases + localStorage). The one action
+// that reaches outside is closure approval: when a case carries a deliverable
+// resident email, the closure page sends the staff-approved closure response to
+// the resident through the server-side Netlify email function, and passes the
+// delivery result into approveClosure so the audit trail records what happened.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -49,9 +52,18 @@ type WorkflowContextValue = {
   overridePriority: (id: string, priority: Priority) => void
   sendToStaffReview: (id: string) => void
   editDraftBody: (id: string, body: string) => void
-  approveClosure: (id: string) => void
+  approveClosure: (id: string, delivery?: ClosureDelivery) => void
   resetDemo: () => void
 }
+
+/**
+ * Outcome of trying to email the resident the approved closure response.
+ *   attempted=false → no deliverable resident email was on file (nothing sent).
+ *   attempted=true, emailSent=true  → the closure email was accepted by the service.
+ *   attempted=true, emailSent=false → send was attempted but failed (e.g. email
+ *                                     not configured in this environment).
+ */
+export type ClosureDelivery = { attempted: boolean; emailSent: boolean }
 
 const WorkflowContext = createContext<WorkflowContextValue | null>(null)
 
@@ -178,10 +190,33 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   )
 
   const approveClosure = useCallback(
-    (id: string) => {
+    (id: string, delivery?: ClosureDelivery) => {
       const now = new Date().toISOString()
       updateCase(id, (c) => {
         if (!c.draft) return c
+        // Record the real outcome of the resident email send (driven by the
+        // closure page) so the audit trail never claims an email was delivered
+        // when it was not.
+        const residentAudit = !delivery?.attempted
+          ? auditEvent(
+              'system',
+              'Resident update recorded',
+              'Closure approved. No deliverable resident email was on file, so no email was sent.',
+              now,
+            )
+          : delivery.emailSent
+            ? auditEvent(
+                'system',
+                'Resident emailed',
+                'The approved closure response was emailed to the resident.',
+                now,
+              )
+            : auditEvent(
+                'system',
+                'Resident email not sent',
+                'Closure approved, but the closure email could not be sent (email service unavailable in this environment).',
+                now,
+              )
         return {
           ...c,
           stage: 'closed',
@@ -192,7 +227,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
           audit: [
             ...c.audit,
             auditEvent('staff', 'Closure approved', `Final closure response approved by ${STAFF_NAME}.`, now),
-            auditEvent('system', 'Resident updated', 'Closure update delivered to the resident (demo — not actually sent).', now),
+            residentAudit,
             auditEvent('system', 'Case closed', 'Case status changed to Closed and logged in the audit trail.', now),
           ],
         }

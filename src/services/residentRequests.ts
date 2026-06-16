@@ -222,13 +222,16 @@ export function generateCaseId(): string {
  * the environment, e.g. local dev without Mailjet keys).
  */
 export async function sendResidentEmail(payload: {
-  type: 'confirmation' | 'status_update'
+  type: 'confirmation' | 'status_update' | 'closure'
   to: string
   residentName: string
   caseId: string
   requestType?: string | null
   location?: string | null
   status?: ResidentStatus | null
+  /** Staff-approved closure subject + message body — only used by 'closure' emails. */
+  subject?: string | null
+  message?: string | null
 }): Promise<boolean> {
   try {
     const res = await fetch(RESIDENT_EMAIL_ENDPOINT, {
