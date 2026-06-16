@@ -12,7 +12,7 @@ export default function Footer() {
           </div>
           <p className="mt-3 text-sm text-ink-muted max-w-sm">
             A Closure Review Workbench proof of concept for Enforcement and By-law complaint responses. AI automates
-            research, analysis, and draft preparation for staff approved closure responses. Built using Toronto 311
+            research, analysis, and draft preparation for staff approved closure responses. Built using NYC 311
             public benchmark data and synthetic records.
           </p>
         </div>

@@ -13,7 +13,7 @@ import { addWorkflowEvent } from './municipalServiceRequests'
 //     from an explicit staff button click.
 //
 // This is clearly a DEMO: it stores demo submissions in
-// public.resident_service_requests, kept separate from the Toronto 311
+// public.resident_service_requests, kept separate from the NYC 311
 // benchmark data in municipal_complaints.
 
 export const RESIDENT_REQUESTS_TABLE = 'resident_service_requests'

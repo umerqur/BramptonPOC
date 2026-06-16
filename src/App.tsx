@@ -67,7 +67,7 @@ export default function App() {
         <Route path="workbench" element={<AppCaseWorkbenchPage />} />
         <Route path="closure" element={<AppClosureDraftsPage />} />
         {/* Merged Insights tab — live complaint workload dashboard + supervisor
-            workflow-impact metrics, with the Toronto ward workload heat map. */}
+            workflow-impact metrics, with the NYC service request workload heat map. */}
         <Route path="insights" element={<AppInsightsPage />} />
         <Route path="audit" element={<AppAuditTrailPage />} />
 

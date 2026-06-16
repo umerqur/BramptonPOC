@@ -2,8 +2,8 @@ import SectionHeading from '../components/SectionHeading'
 
 const principles = [
   {
-    title: 'Toronto 311 public benchmark data and synthetic internal fields only in POC',
-    body: 'The proof of concept is modelled on Toronto 311 public benchmark data, normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for non public internal workflow fields. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data. No private City data is required for this phase.',
+    title: 'NYC 311 public benchmark data and synthetic internal fields only in POC',
+    body: 'The proof of concept is modelled on NYC 311 public benchmark data, normalized into a Brampton compatible complaint workflow schema, with synthetic records used only for non public internal workflow fields. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data. No private City data is required for this phase.',
   },
   {
     title: 'Decision support, not autonomous enforcement',

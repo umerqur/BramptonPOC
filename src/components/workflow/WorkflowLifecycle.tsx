@@ -78,7 +78,7 @@ function buildPhases(m: WorkflowLifecycleMetrics): MacroPhase[] {
         {
           n: 1,
           title: 'New complaint received',
-          body: 'A resident complaint arrives from a 311-style channel — web, phone, mobile, or walk-in. In this POC, Toronto 311 public benchmark records stand in for live municipal intake.',
+          body: 'A resident complaint arrives from a 311-style channel — web, phone, mobile, or walk-in. In this POC, NYC 311 public benchmark records stand in for live municipal intake.',
           tag: 'automated',
           metric: { value: num(m.intakeTotal), label: 'cases in system' },
         },

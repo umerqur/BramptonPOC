@@ -3,7 +3,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 // Linked operational POC records for the Closure Review Workbench (migration
 // 009/010): patrol logs, ticket records, complaint trends, closure templates.
 //
-// POSITIONING: complaint_trends is generated from the Toronto 311 public
+// POSITIONING: complaint_trends is generated from the NYC 311 public
 // benchmark complaints. patrol_logs, ticket_records, and closure_templates are
 // SYNTHETIC POC operational context linked to real benchmark complaint
 // case_ids — clearly labelled, never Brampton operational data. Everything
@@ -21,7 +21,7 @@ export const SYNTHETIC_CONTEXT_LABEL =
 
 /** Label for the benchmark-derived trend aggregates. */
 export const TREND_CONTEXT_LABEL =
-  'Generated from Toronto 311 public benchmark complaint data — not Brampton operational data.'
+  'Generated from NYC 311 public benchmark complaint data — not Brampton operational data.'
 
 export type PatrolLog = {
   id: string

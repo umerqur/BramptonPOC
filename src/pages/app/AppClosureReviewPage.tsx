@@ -37,7 +37,7 @@ const GOVERNANCE_NOTE =
 
 // Data positioning for the linked operational records (migrations 009/010).
 const POSITIONING_NOTE =
-  'Toronto 311 public benchmark data provides the complaint and trend signals. Related patrol logs, ticket records, and closure templates are synthetic POC operational context linked to real benchmark case ids — clearly labelled, and not Brampton operational data.'
+  'NYC 311 public benchmark data provides the complaint and trend signals. Related patrol logs, ticket records, and closure templates are synthetic POC operational context linked to real benchmark case ids — clearly labelled, and not Brampton operational data.'
 
 // The six-step workbench workflow, shown as a strip under the page header so
 // the screen reads as one closure workflow rather than a set of panels.
@@ -703,7 +703,7 @@ function ReviewPacket({
           <Field label="Complaint type" value={row.complaint_type} />
           <Field label="Assigned department" value={row.assigned_department} />
           <Field label="Status" value={row.status} />
-          <Field label="Ward or area" value={row.ward_or_area} />
+          <Field label="Borough or area" value={row.ward_or_area} />
           <div className="sm:col-span-2">
             <Field label="Address or location" value={row.address_or_location} />
           </div>

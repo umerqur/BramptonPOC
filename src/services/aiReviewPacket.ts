@@ -16,7 +16,7 @@ const ASK_CASE_AGENT_ENDPOINT = '/.netlify/functions/ask-case-agent'
  * staff member's authenticated Supabase session) and sends along so the AI
  * packet is grounded in them. Patrol logs, ticket records, and the closure
  * template are SYNTHETIC POC operational context linked to real benchmark
- * case ids; the complaint trend is generated from the Toronto 311 public
+ * case ids; the complaint trend is generated from the NYC 311 public
  * benchmark data. Optional: older callers or cases with no linked records
  * simply omit pieces.
  */

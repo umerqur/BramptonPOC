@@ -9,14 +9,14 @@ import TorontoWardContextPanel from '../../components/app/TorontoWardContextPane
 
 // Insights — a single, focused staff Insights experience built entirely around
 // the statistical attention queue (Review Attention Score): a transparent,
-// classical statistical queue rank over the Toronto 311 public benchmark (case
+// classical statistical queue rank over the NYC 311 public benchmark (case
 // aging, repeat-location signals, area trends, type backlog, missing-context
 // checks). It is NOT an ML model, NOT a probability, and NOT an automated
 // decision — staff review every case. The older workload-density analytics
 // section has been removed from the active staff workflow.
 
 const QUEUE_DISCLAIMER =
-  'Toronto 311 benchmark data. Transparent statistical scoring, decision support only. Not Brampton operational data. Not automated enforcement.'
+  'NYC 311 benchmark data. Transparent statistical scoring, decision support only. Not Brampton operational data. Not automated enforcement.'
 
 const EXAMPLE_DRIVERS = [
   'Older than similar cases',
@@ -68,7 +68,7 @@ export default function AppWorkloadInsightsPage() {
       <section className="mt-8">
         <h2 className="text-lg font-semibold tracking-tight text-navy-900">Statistical Queue Insights</h2>
         <p className="mt-1 max-w-3xl text-sm text-ink-muted">
-          Transparent statistical scoring over Toronto 311 benchmark data to help staff identify which complaint files
+          Transparent statistical scoring over NYC 311 benchmark data to help staff identify which complaint files
           may need review first.
         </p>
 
@@ -198,20 +198,20 @@ export default function AppWorkloadInsightsPage() {
         </section>
 
         <p className="mt-4 max-w-3xl text-[11px] leading-relaxed text-ink-subtle">
-          Toronto 311 benchmark data is used for decision support only — it is not Brampton operational data.
+          NYC 311 benchmark data is used for decision support only — it is not Brampton operational data.
         </p>
       </section>
 
       {/* Area Context — a compact map/area visual aid below the Review Attention
           queue. Supporting context only, never the main product signal. Reuses
-          the shared ward/area panel in its compact form. */}
+          the shared borough/area panel in its compact form. */}
       <section className="mt-12 border-t border-slate-200 pt-10">
         <h2 className="text-lg font-semibold tracking-tight text-navy-900">Area Context</h2>
         <p className="mt-1 max-w-3xl text-sm text-ink-muted">
           Benchmark area context for understanding where complaint activity appears in the source data.
         </p>
         <div role="note" className="mt-3 max-w-3xl text-[11px] leading-relaxed text-ink-subtle">
-          Toronto 311 benchmark geography only. Not Brampton operational hotspot data.
+          NYC 311 benchmark geography only. Not Brampton operational hotspot data.
         </div>
 
         <div className="mt-5">

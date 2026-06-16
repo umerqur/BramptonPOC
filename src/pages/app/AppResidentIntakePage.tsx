@@ -130,7 +130,7 @@ export default function AppResidentIntakePage() {
       </div>
 
       <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
-        Demo data only. Requests here are separate from the Toronto 311 benchmark analytics layer.
+        Demo data only. Requests here are separate from the NYC 311 benchmark analytics layer.
       </div>
 
       <StaffLifecycleStrip />

@@ -192,7 +192,7 @@ export default function AppWorkflowPage() {
       <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-amber-900">
-            Demo workflow using Toronto 311 public benchmark data. Not Brampton operational data. Staff
+            Demo workflow using NYC 311 public benchmark data. Not Brampton operational data. Staff
             decisions required.
           </p>
           <div className="flex flex-wrap items-center gap-1.5">

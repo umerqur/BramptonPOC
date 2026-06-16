@@ -18,15 +18,15 @@ import {
 
 // Operational insights — the merged Insights tab. It combines two views that used
 // to live on separate routes:
-//   1. The live complaint workload dashboard (formerly /app/dashboard) — Toronto
+//   1. The live complaint workload dashboard (formerly /app/dashboard) — NYC
 //      311 benchmark KPIs, workload by department, top complaint types, with a
 //      live-data Supabase indicator. The data-loading logic is reused verbatim
 //      from the former AppDashboardPage.
 //   2. The supervisor workflow-impact metrics (formerly the Supervisor Insights
 //      page) — "Where workload is reduced", AI throughput, estimated workload
 //      avoided, and the automation-vs-human-review split.
-// The real Toronto ward workload heat map (TorontoWardContextPanel) sits second
-// from the top, directly under the page header. Both /app/dashboard and
+// The real NYC service request workload heat map (TorontoWardContextPanel) sits
+// second from the top, directly under the page header. Both /app/dashboard and
 // /app/supervisor now redirect here.
 
 type Metric = { label: string; value: string; sub: string; tone?: 'default' | 'accent' }
@@ -92,19 +92,19 @@ export default function AppInsightsPage() {
 
   return (
     <>
-      {/* Page header + Toronto ward workload heat map (second from the top) */}
+      {/* Page header + NYC service request workload heat map (second from the top) */}
       <div className="container-page pt-10">
         <div className="max-w-3xl">
           <div className="section-eyebrow">INSIGHTS</div>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">Operational insights</h1>
           <p className="mt-2 text-ink-muted">
-            This page combines live complaint workload patterns from the Toronto 311 benchmark dataset with
+            This page combines live complaint workload patterns from the NYC 311 benchmark dataset with
             supervisor-level workflow impact metrics — one view of both where the work is and how much of it the AI
             workflow is taking off staff. Decision support only; staff review every case.
           </p>
         </div>
 
-        {/* Heat map — real Toronto ward workload intensity (compact embed) */}
+        {/* Heat map — real NYC service request workload intensity (compact embed) */}
         <TorontoWardContextPanel showValidationLayers={false} />
       </div>
 
@@ -180,13 +180,13 @@ export default function AppInsightsPage() {
         {/* Supporting operational views (the former standalone consoles) */}
         <h3 className="mt-10 text-sm font-semibold uppercase tracking-wide text-ink-subtle">Supporting operational views</h3>
         <p className="mt-1 text-sm text-ink-muted">
-          The prior queue, workflow counts, full ward context, and statistical attention score — kept as supporting
+          The prior queue, workflow counts, full area context, and statistical attention score — kept as supporting
           analytics rather than the main product.
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <SupportLink to="/app/legacy-insights" title="Statistical attention queue" desc="Review Attention Score ranking and area context." />
           <SupportLink to="/app/workflow" title="Workflow & lifecycle" desc="Workflow counts and case lifecycle stages." />
-          <SupportLink to="/app/wards" title="Full ward context" desc="Full Toronto ward workload map with data-layer validation." />
+          <SupportLink to="/app/wards" title="Full area context" desc="Full NYC service request workload map with data-layer validation." />
           <SupportLink to="/app/cases" title="Case queue" desc="Benchmark case list and detail views." />
           <SupportLink to="/app/resident-intake" title="Resident intake (Supabase)" desc="Live resident-request intake demo." />
         </div>

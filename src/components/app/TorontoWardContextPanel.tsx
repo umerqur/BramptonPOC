@@ -8,10 +8,10 @@ import {
   type WardBoundary,
 } from '../../services/municipalServiceRequests'
 
-// Shared Toronto ward / area context panel. Extracted from the full
+// Shared NYC service request workload context panel. Extracted from the full
 // /app/wards page so the SAME real map + area coding visualization can be
 // reused at the top of the Insights tab without duplicating logic. The data
-// loads (Toronto ward boundaries + Toronto 311 per-ward workload) and the
+// loads (NYC borough / area boundaries + NYC 311 per-area workload) and the
 // primary workload map are always rendered; the secondary technical layers
 // (the geometry validation accordion and the Brampton future-context accordion)
 // are gated behind `showValidationLayers` so the Insights embed stays compact.
@@ -19,24 +19,25 @@ import {
 // This is read-only: it issues the same SELECT-style Supabase reads the page
 // already used. No writes, no RLS changes, no migrations.
 
-// Required disclaimer for the Toronto ward workload map. This is public Toronto
-// 311 benchmark data used for decision support only — never Brampton operational
-// complaint data, and never a final enforcement decision.
+// Required disclaimer for the NYC service request workload map. This is public
+// NYC 311 benchmark data used for decision support only — never Brampton
+// operational complaint data, and never a final enforcement decision.
 const WORKLOAD_DISCLAIMER =
-  'Toronto 311 benchmark data, not Brampton operational data. Decision support only.'
+  'NYC 311 benchmark data, not Brampton operational data. Decision support only.'
 
 // Longer-form context kept as supporting fine print. Wording is workload
-// intensity (not risk) and makes clear this Toronto data is never plotted onto
-// Brampton wards.
+// intensity (not risk) and makes clear this NYC data is never plotted onto
+// Brampton wards. The geographic workload layer uses NYC borough / council-
+// district data.
 const WORKLOAD_CONTEXT =
-  'Real City of Toronto ward polygons (City Wards open data) are shaded by real Toronto 311 benchmark complaint volume aggregated per ward from the loaded municipal service request records. Wards are shaded by complaint volume to show workload intensity — higher complaint volume means higher workload intensity. This is benchmark decision support only, not a risk prediction, and this Toronto geography and volume is never plotted onto Brampton wards.'
+  'NYC borough boundaries (borough / council-district open data) are shaded by real NYC 311 benchmark complaint volume aggregated per area from the loaded municipal service request records. Areas are shaded by complaint volume to show workload intensity — higher complaint volume means higher workload intensity. This is benchmark decision support only, not a risk prediction, and this NYC geography and volume is never plotted onto Brampton wards.'
 
 /**
- * The reusable ward/area context body. Loads the real Toronto ward boundaries +
- * Toronto 311 workload and renders the workload-intensity map. When
- * `showValidationLayers` is true (the full /app/wards page) it also renders the
- * collapsed geometry-validation accordion and the Brampton future-context
- * accordion; the compact Insights embed leaves them out.
+ * The reusable NYC service request workload context body. Loads the real NYC
+ * borough / area boundaries + NYC 311 workload and renders the workload-intensity
+ * map. When `showValidationLayers` is true (the full /app/wards page) it also
+ * renders the collapsed geometry-validation accordion and the Brampton
+ * future-context accordion; the compact Insights embed leaves them out.
  */
 export default function TorontoWardContextPanel({
   showValidationLayers = true,
@@ -49,9 +50,9 @@ export default function TorontoWardContextPanel({
   // error instead of a generic "could not load" string.
   const [error, setError] = useState<string | null>(null)
   // Distinguish "query has not succeeded yet" from "query succeeded with 0 rows"
-  // so we never render "0 Toronto wards" unless the load genuinely returned 0.
+  // so we never render "0 NYC areas" unless the load genuinely returned 0.
   const [loaded, setLoaded] = useState(false)
-  // Real Toronto 311 per-ward workload counts (separate query, joined by ward number).
+  // Real NYC 311 per-area workload counts (separate query, joined by area number).
   const [workload, setWorkload] = useState<TorontoWardWorkload[]>([])
 
   useEffect(() => {
@@ -98,15 +99,15 @@ export default function TorontoWardContextPanel({
     <>
       {error && (
         <div className="mt-6 rounded-md border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-900">
-          <div className="font-semibold">Could not load Toronto ward boundaries from Supabase.</div>
+          <div className="font-semibold">Could not load NYC borough / area boundaries from Supabase.</div>
           <pre className="mt-1.5 whitespace-pre-wrap break-words font-mono text-xs text-rose-800">{error}</pre>
         </div>
       )}
 
-      {/* PRIMARY SECTION — real Toronto ward boundaries shaded by real Toronto 311 workload */}
+      {/* PRIMARY SECTION — real NYC borough / area boundaries shaded by real NYC 311 workload */}
       {!error && <TorontoWardWorkloadContext wards={wards} workload={workload} loading={loading} loaded={loaded} />}
 
-      {/* Collapsed technical validation — the raw geometry map + ward metadata table */}
+      {/* Collapsed technical validation — the raw geometry map + area metadata table */}
       {showValidationLayers && !error && (
         <DataLayerValidation wards={wards} loading={loading} loaded={loaded} querySucceeded={querySucceeded} />
       )}
@@ -118,7 +119,7 @@ export default function TorontoWardContextPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Primary section: Toronto ward workload context
+// Primary section: NYC service request workload context
 // ---------------------------------------------------------------------------
 
 /** Workload-intensity color from lower (green) → higher (red) for a normalized value t in [0,1]. */
@@ -136,11 +137,11 @@ function workloadTier(t: number): string {
 }
 
 /**
- * Unified workload-context map. The REAL Toronto ward polygons are the base
- * layer; the REAL Toronto 311 benchmark complaint volume shades them by workload
- * intensity. Ward labels render on every polygon, a low→high workload legend
- * sits beneath the map, and hovering/selecting a ward populates the
- * selected-ward detail panel.
+ * Unified workload-context map. The REAL NYC borough / area polygons are the base
+ * layer; the REAL NYC 311 benchmark complaint volume shades them by workload
+ * intensity. Area labels render on every polygon, a low→high workload legend
+ * sits beneath the map, and hovering/selecting an area populates the
+ * selected-area detail panel.
  */
 function TorontoWardWorkloadContext({
   wards,
@@ -155,7 +156,7 @@ function TorontoWardWorkloadContext({
 }) {
   const map = useMemo(() => buildTorontoWardMap(wards), [wards])
 
-  // Index the real workload counts by ward number (1–25) so each polygon can
+  // Index the real workload counts by area number so each polygon can
   // look up its own 311 volume by area_short_code.
   const byWard = useMemo(() => {
     const m = new Map<number, TorontoWardWorkload>()
@@ -178,8 +179,8 @@ function TorontoWardWorkloadContext({
     return w ? heatColor(norm(w.complaint_volume)) : '#e2e8f0'
   }
 
-  // Ward selected by click; ward currently hovered. The detail panel shows the
-  // hovered ward first, then the clicked ward, then defaults to the busiest ward.
+  // Area selected by click; area currently hovered. The detail panel shows the
+  // hovered area first, then the clicked area, then defaults to the busiest area.
   const [selectedWard, setSelectedWard] = useState<number | null>(null)
   const [hoveredWard, setHoveredWard] = useState<number | null>(null)
 
@@ -195,17 +196,17 @@ function TorontoWardWorkloadContext({
   const hasWorkload = workload.length > 0
 
   return (
-    <section aria-label="Toronto ward workload context" className="mt-6 card overflow-hidden">
+    <section aria-label="NYC service request workload context" className="mt-6 card overflow-hidden">
       <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-sm font-semibold text-navy-900">Ward workload intensity</div>
+          <div className="text-sm font-semibold text-navy-900">Service request workload intensity</div>
           <div className="text-xs text-ink-subtle">
-            Real Toronto City Wards boundaries · real Toronto 311 benchmark volume
+            Real NYC borough boundaries · real NYC 311 benchmark volume
           </div>
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-sky-800 sm:self-auto">
           <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
-          Toronto 311 benchmark
+          NYC 311 benchmark
         </span>
       </div>
 
@@ -221,7 +222,7 @@ function TorontoWardWorkloadContext({
       </div>
 
       <div className="grid gap-6 p-5 lg:grid-cols-5">
-        {/* Map: real Toronto boundaries shaded by real Toronto 311 volume */}
+        {/* Map: real NYC borough / area boundaries shaded by real NYC 311 volume */}
         <div className="lg:col-span-3">
           {map ? (
             <figure className="relative rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
@@ -237,7 +238,7 @@ function TorontoWardWorkloadContext({
               />
               <svg
                 role="img"
-                aria-label="Toronto ward boundaries shaded by real Toronto 311 complaint volume"
+                aria-label="NYC borough / area boundaries shaded by real NYC 311 complaint volume"
                 viewBox={`0 0 ${map.width} ${map.height}`}
                 className="relative mx-auto block h-auto w-full"
               >
@@ -259,16 +260,16 @@ function TorontoWardWorkloadContext({
                       onClick={() => setSelectedWard(shape.wardCode)}
                     >
                       <title>
-                        {shape.label} — Toronto 311 benchmark workload (not operational data, not a risk prediction)
+                        {shape.label} — NYC 311 benchmark workload (not operational data, not a risk prediction)
                         {w
                           ? `\nWorkload intensity: ${workloadTier(norm(w.complaint_volume))}` +
                             `\nComplaint volume: ${num(w.complaint_volume)}`
-                          : '\nNo Toronto 311 workload data'}
+                          : '\nNo NYC 311 workload data'}
                       </title>
                     </path>
                   )
                 })}
-                {/* Ward labels */}
+                {/* Area labels */}
                 {map.shapes.map((shape) => (
                   <text
                     key={`label-${shape.id}`}
@@ -308,22 +309,22 @@ function TorontoWardWorkloadContext({
                   </div>
                 )}
                 <div className="mt-2 text-[11px] text-ink-subtle">
-                  Hover or select a ward to see its Toronto 311 workload detail.
+                  Hover or select an area to see its NYC 311 workload detail.
                 </div>
               </figcaption>
             </figure>
           ) : (
             <div className="flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 px-6 py-10 text-center text-sm text-ink-subtle">
               {loading
-                ? 'Loading Toronto ward boundaries…'
+                ? 'Loading NYC borough / area boundaries…'
                 : loaded
-                  ? 'Ward geometry unavailable for the workload map.'
-                  : 'Toronto ward boundaries unavailable.'}
+                  ? 'Area geometry unavailable for the workload map.'
+                  : 'NYC borough / area boundaries unavailable.'}
             </div>
           )}
         </div>
 
-        {/* Selected ward detail panel */}
+        {/* Selected area detail panel */}
         <div className="lg:col-span-2">
           <SelectedWardPanel
             workload={activeWorkload}
@@ -339,7 +340,7 @@ function TorontoWardWorkloadContext({
   )
 }
 
-/** Detail panel for the hovered/selected ward, showing the real Toronto 311 workload. */
+/** Detail panel for the hovered/selected area, showing the real NYC 311 workload. */
 function SelectedWardPanel({
   workload,
   wardLabel,
@@ -360,7 +361,7 @@ function SelectedWardPanel({
   if (!hasWorkload) {
     return (
       <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
-        Toronto 311 ward workload data is not available.
+        NYC 311 service request workload data is not available.
       </div>
     )
   }
@@ -368,7 +369,7 @@ function SelectedWardPanel({
   if (!workload) {
     return (
       <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
-        Hover or select a ward on the map to see its Toronto 311 workload.
+        Hover or select an area on the map to see its NYC 311 workload.
       </div>
     )
   }
@@ -378,7 +379,7 @@ function SelectedWardPanel({
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-            {interactive ? 'Selected ward' : 'Busiest ward (Toronto 311)'}
+            {interactive ? 'Selected area' : 'Busiest area (NYC 311)'}
           </div>
           <div className="text-base font-semibold text-navy-900">{wardLabel || workload.ward_or_area}</div>
         </div>
@@ -389,10 +390,10 @@ function SelectedWardPanel({
       </div>
 
       <div className="mt-3 text-2xl font-semibold text-navy-900 tabular-nums">{num(workload.complaint_volume)}</div>
-      <div className="text-[10px] uppercase tracking-wider text-ink-subtle">Toronto 311 complaint volume</div>
+      <div className="text-[10px] uppercase tracking-wider text-ink-subtle">NYC 311 complaint volume</div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Real Toronto 311 benchmark complaint volume — decision support only, not a risk prediction and not Brampton
+        Real NYC 311 benchmark complaint volume — decision support only, not a risk prediction and not Brampton
         operational complaint data.
       </p>
     </div>
@@ -400,12 +401,12 @@ function SelectedWardPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Collapsed technical validation accordion (Toronto base layer)
+// Collapsed technical validation accordion (NYC base layer)
 // ---------------------------------------------------------------------------
 
 /**
- * Small, collapsed-by-default accordion proving the real Toronto City Wards
- * boundary layer loaded. Holds the raw geometry-only preview map and the ward
+ * Small, collapsed-by-default accordion proving the real NYC borough / area
+ * boundary layer loaded. Holds the raw geometry-only preview map and the area
  * metadata table so they no longer push the workload view below the fold.
  */
 function DataLayerValidation({
@@ -422,10 +423,10 @@ function DataLayerValidation({
   const map = useMemo(() => buildTorontoWardMap(wards), [wards])
   const count = wards.length
   const summary = loading
-    ? 'Loading Toronto wards from City Wards open data…'
+    ? 'Loading NYC areas from borough / council-district open data…'
     : querySucceeded
-      ? `${count} Toronto ward${count === 1 ? '' : 's'} loaded from City Wards open data.`
-      : 'Toronto ward layer unavailable.'
+      ? `${count} NYC area${count === 1 ? '' : 's'} loaded from borough / council-district open data.`
+      : 'NYC borough / area layer unavailable.'
 
   return (
     <details className="group mt-8 card overflow-hidden">
@@ -447,7 +448,7 @@ function DataLayerValidation({
 
       <div className="border-t border-slate-100 px-5 py-4">
         <p className="text-xs text-ink-muted">
-          Technical validation of the real City of Toronto ward geometry that backs the workload context map above. This
+          Technical validation of the real NYC borough / area geometry that backs the workload context map above. This
           is the raw boundary layer with no workload shading.
         </p>
 
@@ -456,7 +457,7 @@ function DataLayerValidation({
           <figure className="relative mt-4 rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
             <svg
               role="img"
-              aria-label="Toronto ward boundary preview (raw geometry)"
+              aria-label="NYC borough / area boundary preview (raw geometry)"
               viewBox={`0 0 ${map.width} ${map.height}`}
               className="mx-auto block h-auto w-full max-w-2xl"
             >
@@ -490,28 +491,28 @@ function DataLayerValidation({
               ))}
             </svg>
             <figcaption className="mt-3 text-center text-xs text-ink-subtle">
-              {map.shapes.length} polygon{map.shapes.length === 1 ? '' : 's'} rendered from City Wards GeoJSON geometry.
+              {map.shapes.length} polygon{map.shapes.length === 1 ? '' : 's'} rendered from NYC borough / area GeoJSON geometry.
             </figcaption>
           </figure>
         ) : (
           <div className="mt-4 flex min-h-[160px] items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-ink-subtle">
             {loading
-              ? 'Loading ward boundary geometry…'
+              ? 'Loading borough / area boundary geometry…'
               : loaded
                 ? 'No GeoJSON geometry available to preview.'
-                : 'Ward boundary geometry unavailable.'}
+                : 'Borough / area boundary geometry unavailable.'}
           </div>
         )}
 
-        {/* Ward metadata table */}
+        {/* Area metadata table */}
         {wards.length > 0 && (
           <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-ink-subtle">
                   <tr className="text-left">
-                    <Th>Ward</Th>
-                    <Th>Ward number</Th>
+                    <Th>Area</Th>
+                    <Th>Area number</Th>
                     <Th>Source city</Th>
                     <Th>Source dataset</Th>
                     <Th>Boundary geometry</Th>
@@ -545,9 +546,9 @@ function DataLayerValidation({
 
 /**
  * Real Brampton GeoHub ward boundaries, kept ONLY as a future local-context
- * layer. This renders Brampton geometry alone — no Toronto 311 complaint volume
+ * layer. This renders Brampton geometry alone — no NYC 311 complaint volume
  * is ever plotted onto Brampton wards. It loads lazily when the accordion is
- * opened so it never competes with the primary Toronto workload view.
+ * opened so it never competes with the primary NYC workload view.
  */
 function BramptonFutureContext() {
   const [open, setOpen] = useState(false)
@@ -591,7 +592,7 @@ function BramptonFutureContext() {
           <div>
             <div className="text-sm font-semibold text-navy-900">Brampton ward boundaries (future local context)</div>
             <div className="text-xs text-ink-subtle">
-              Geometry only · no Toronto 311 data is plotted onto Brampton wards
+              Geometry only · no NYC 311 data is plotted onto Brampton wards
             </div>
           </div>
         </div>
@@ -603,8 +604,8 @@ function BramptonFutureContext() {
       <div className="border-t border-slate-100 px-5 py-4">
         <p className="text-xs text-ink-muted">
           Real Brampton GeoHub electoral ward geometry, retained only as a future local-context layer for when Brampton
-          provides its own operational complaint data. It is not part of the Toronto 311 benchmark workload view above,
-          and Toronto complaint volume is never plotted onto these Brampton wards.
+          provides its own operational complaint data. It is not part of the NYC 311 benchmark workload view above,
+          and NYC complaint volume is never plotted onto these Brampton wards.
         </p>
 
         {error && (
@@ -698,7 +699,7 @@ type WardShape = {
   id: string
   label: string
   short: string
-  /** Ward number (1–25) used to join real Toronto 311 workload counts. */
+  /** Area number used to join real NYC 311 workload counts. */
   wardCode: number | null
   d: string
   cx: number
@@ -774,7 +775,7 @@ function extractRings(geometry: unknown): LngLat[][] {
 /**
  * Projects a set of geometry-bearing entries into a shared SVG coordinate space,
  * returning null when no usable geometry exists (so the caller can fall back to
- * the map placeholder). Shared by the Toronto and Brampton ward maps.
+ * the map placeholder). Shared by the NYC and Brampton area maps.
  */
 function buildMap(entries: MapEntry[]): WardMap | null {
   const usable = entries.filter((e) => e.rings.length > 0)
@@ -853,7 +854,7 @@ function buildMap(entries: MapEntry[]): WardMap | null {
   return { width: fmt(width), height: fmt(height), labelSize, shapes }
 }
 
-/** Projects the real Toronto City Wards polygons into the shared SVG space. */
+/** Projects the real NYC borough / area polygons into the shared SVG space. */
 function buildTorontoWardMap(wards: TorontoWardBoundary[]): WardMap | null {
   const entries: MapEntry[] = wards.map((w, idx) => ({
     id: String(w.id ?? w.area_short_code ?? idx),

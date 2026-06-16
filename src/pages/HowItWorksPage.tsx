@@ -106,7 +106,7 @@ export default function HowItWorksPage() {
 
 function PipelineDiagram() {
   const nodes = [
-    { x: 30, label: 'Toronto 311 benchmark' },
+    { x: 30, label: 'NYC 311 benchmark' },
     { x: 175, label: 'Synthetic records' },
     { x: 320, label: 'Geospatial data' },
   ]

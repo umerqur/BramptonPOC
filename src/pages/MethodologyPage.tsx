@@ -3,7 +3,7 @@ import SectionHeading from '../components/SectionHeading'
 const sections = [
   {
     title: 'Data foundation',
-    body: 'Toronto 311 public benchmark data is normalized into a Brampton-compatible enforcement workflow schema. It is not Brampton operational data.',
+    body: 'NYC 311 public benchmark data is normalized into a Brampton-compatible enforcement workflow schema. It is not Brampton operational data.',
   },
   {
     title: 'Resident intake simulation',

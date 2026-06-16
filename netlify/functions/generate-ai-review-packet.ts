@@ -8,7 +8,7 @@
 // ticket records (synthetic POC operational context linked to real benchmark
 // case ids, fetched read-only by the authenticated case workspace and sent
 // with the request), retrieve the complaint trend context (generated from the
-// Toronto 311 public benchmark), select the matching closure template, then
+// NYC 311 public benchmark), select the matching closure template, then
 // call Claude to draft the staff summary, next step, resident update, and
 // closure language grounded in those records — and return the draft for staff
 // approval only. One read-only backend tool (findSimilarCases) additionally
@@ -66,7 +66,7 @@ const AGENT_PLAN: string[] = [
   'Read the selected complaint.',
   'Retrieve the related patrol logs (synthetic POC records linked by case id).',
   'Retrieve the related ticket records (synthetic POC records linked by case id).',
-  'Retrieve the complaint trend context (generated from the Toronto 311 public benchmark).',
+  'Retrieve the complaint trend context (generated from the NYC 311 public benchmark).',
   'Select the matching closure template for the complaint type and scenario.',
   'Draft the staff summary, recommended next step, resident update, and closure language.',
   'Return the draft for staff approval only.',
@@ -101,7 +101,7 @@ const SYSTEM_PROMPT = [
   '- Do not include sign off placeholders like [Staff Name], [Department], or [Contact Information].',
   '- Do not call the ML score a priority score. Call it a Needs Attention signal or queue attention signal.',
   '- Do not use the phrase "model anomaly".',
-  '- Do not overemphasize Toronto, Toronto Centre, Ward 13, or FSA unless needed as source context.',
+  '- Do not overemphasize NYC, a specific borough, council district, or ZIP unless needed as source context.',
   '- When referring to location, say "the recorded service area" or "the source record area" where possible.',
   '- missingInformationNotes: at most 2 bullets.',
   '- supervisorFlags: at most 2 bullets.',
@@ -118,7 +118,7 @@ const SYSTEM_PROMPT = [
   '- The request may include related patrol logs, ticket records, a complaint trend, a closure scenario, a matched closure template, and a closure readiness checklist for the selected case.',
   '- Ground the staff summary, next step, resident update, and closure language in these records. Refer to what they actually say; do not invent patrols, tickets, or outcomes that are not listed.',
   '- Patrol logs, ticket records, and the closure template are SYNTHETIC POC operational context linked to real benchmark complaint case ids. Treat them as the case file for drafting, but never present them as real Brampton operational activity.',
-  '- The complaint trend is generated from Toronto 311 public benchmark data. Use it as area context only; it implies no outcome for this case.',
+  '- The complaint trend is generated from NYC 311 public benchmark data. Use it as area context only; it implies no outcome for this case.',
   '- Never include ticket numbers, fine amounts, or penalty details in the resident update or closure language.',
   '- When a matched closure template is supplied, base the closure language on it: keep its structure and tone, and adapt it with the specific facts from the patrol logs and ticket records. Respect its policy note.',
   '- If the closure readiness checklist shows items that are not ready, reflect that in the recommended next step rather than drafting closure language prematurely.',
@@ -653,7 +653,7 @@ function buildUserPrompt(input: PacketRequest, similarCases: SimilarCase[]): str
     'RELATED TICKET RECORDS (synthetic POC operational context linked to this benchmark case id)',
     ticketLines,
     '',
-    'COMPLAINT TREND CONTEXT (generated from Toronto 311 public benchmark data — area context only)',
+    'COMPLAINT TREND CONTEXT (generated from NYC 311 public benchmark data — area context only)',
     trendLines,
     '',
     `CLOSURE SCENARIO (deterministic): ${ctx?.closureScenario || '(not derived)'}`,

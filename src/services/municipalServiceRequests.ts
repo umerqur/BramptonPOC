@@ -2,9 +2,13 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
 
 // Primary data source for the authenticated Brampton complaint workflow app.
-// Toronto 311 public benchmark data is loaded into `municipal_complaints` to
-// demonstrate the closure review workflow; Brampton ward boundaries provide
-// real local context. This is not Brampton operational complaint data.
+// NYC 311 Open Data public benchmark data is loaded into `municipal_complaints`
+// to demonstrate the closure review workflow. NYC 311 has a richer service
+// request schema that better mimics what Brampton internal enforcement systems
+// would contain. This is not Brampton operational complaint data — it is a public
+// benchmark, and the workflow is designed to connect to equivalent Brampton
+// internal service request, patrol, inspection, ticket, and closure data during
+// the POC.
 export const COMPLAINTS_TABLE = 'municipal_complaints'
 export const WARDS_TABLE = 'brampton_ward_boundaries'
 export const TORONTO_WARDS_TABLE = 'toronto_ward_boundaries'
@@ -36,7 +40,7 @@ export const TRIAGE_ADVISORY =
 
 /** Product positioning note used across the authenticated app. */
 export const DATA_POSITIONING =
-  'Toronto 311 public benchmark data is used to demonstrate the closure review workflow. Brampton ward boundaries provide real local context where available. This is not Brampton operational complaint data.'
+  'NYC 311 public benchmark data is used to demonstrate the closure review workflow. This is a Brampton compatible Proactive Enforcement Response POC, designed to connect to equivalent Brampton internal data during the POC. It is not Brampton operational complaint data.'
 
 /**
  * Shape of a row in the Supabase `municipal_complaints` table.
@@ -171,11 +175,11 @@ export type TorontoWardBoundary = {
 }
 
 /**
- * A row in public.v_toronto_ward_workload — REAL Toronto 311 benchmark complaint
+ * A row in public.v_toronto_ward_workload — REAL NYC 311 benchmark complaint
  * volume aggregated per Toronto ward from public.municipal_complaints. Joined to
  * TorontoWardBoundary by ward_number ↔ area_short_code. The live view exposes the
  * ward number, label (area_desc, aliased to ward_or_area) and complaint_volume
- * only; it does not provide per-status case counts. This is Toronto 311 benchmark
+ * only; it does not provide per-status case counts. This is NYC 311 benchmark
  * data — decision support only, not Brampton operational complaint data, and never
  * a final enforcement decision.
  */
@@ -489,7 +493,7 @@ export async function getTorontoWardBoundaries(): Promise<TorontoWardBoundary[]>
 }
 
 /**
- * Reads the real Toronto 311 benchmark per-ward complaint workload from
+ * Reads the real NYC 311 benchmark per-area complaint workload from
  * public.v_toronto_ward_workload (aggregated over municipal_complaints), highest
  * volume first. The live view exposes ward_number, area_name, area_desc,
  * area_short_code and complaint_volume (joined by ward_number); it does not carry
@@ -586,7 +590,7 @@ export async function getStaffActionSummary(): Promise<{ total: number; actors: 
 /**
  * A row in public.workload_insights_v1 — one scored location per model run.
  *
- * These are OUTPUTS of the v1 workload-density model over Toronto 311 public
+ * These are OUTPUTS of the v1 workload-density model over NYC 311 public
  * benchmark data. They are NOT Brampton operational complaint data, and never a
  * final enforcement decision. Provenance (source_city/source_dataset/
  * model_version/feature_window/scoring_period) and the advisory text travel with
@@ -637,9 +641,9 @@ export async function getWorkloadInsightsV1(): Promise<WorkloadInsightRow[]> {
 
 /**
  * A row in public.workflow_ml_predictions — one V2 model-scored complaint over
- * the Toronto 311 benchmark. `needs_attention_score` / `attention_tier` are the
+ * the NYC 311 benchmark. `needs_attention_score` / `attention_tier` are the
  * "Needs Attention" handling-path ranking (relative, decision support only).
- * `predicted_department` / `routing_confidence` are RESEARCH ONLY (Toronto routing
+ * `predicted_department` / `routing_confidence` are RESEARCH ONLY (NYC routing
  * mostly learned complaint_type -> department). Not Brampton operational data and
  * not automated enforcement.
  */
@@ -714,7 +718,7 @@ export async function getClosureReviewCases(limit = 60): Promise<WorkflowMlPredi
  * Lower) built from classical statistics — case aging z-scores, repeat-location
  * counts, area-volume trends, complaint-type backlog percentiles, and
  * missing-context checks. It is NOT a probability, NOT a machine-learning model,
- * and NOT an automated decision. Toronto 311 benchmark data, decision support
+ * and NOT an automated decision. NYC 311 benchmark data, decision support
  * only.
  */
 export type StatisticalCaseScore = {

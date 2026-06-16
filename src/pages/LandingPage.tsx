@@ -84,7 +84,7 @@ export default function LandingPage() {
         </div>
 
         <p className="mt-8 text-center text-xs text-ink-subtle">
-          Demo only. Toronto 311 public benchmark data supports analytics. Resident submissions are demo data.
+          Demo only. NYC 311 public benchmark data supports analytics. Resident submissions are demo data.
         </p>
       </section>
     </div>

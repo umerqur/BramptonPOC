@@ -4,13 +4,13 @@ A **Closure Review Workbench** for Enforcement and By-law complaint responses �
 
 This repository contains the proof of concept (POC) website: a Vite + React + TypeScript application styled with Tailwind CSS and routed with React Router. It is designed to be demo-ready for a City of Brampton conversation and deploys cleanly on Netlify.
 
-> **Positioning.** This is a **Brampton compatible Proactive Enforcement Intelligence POC using Toronto 311 public benchmark data**. It is **not Brampton operational data**. Real public Toronto 311 service request data is normalized into a Brampton compatible municipal enforcement schema and used to demonstrate the core buyer workflow: supporting the **closure of Enforcement and By-law complaint responses** by gathering enforcement context, complaint trends, and patrol or ticket style records, and drafting personalized resident friendly closure messages. **AI automates research, analysis, and draft preparation for staff approved closure responses** — it does not make enforcement decisions, close cases on its own, or contact residents without staff approval. No private City data is required for the POC, and the schema is ready for Brampton enforcement data later.
+> **Positioning.** This is a **Brampton compatible Proactive Enforcement Intelligence POC modelled using NYC 311 Open Data as a public benchmark source**. It is **not Brampton operational data**. Real public NYC 311 service request data is normalized into a Brampton compatible municipal enforcement schema and used to demonstrate the core buyer workflow: supporting the **closure of Enforcement and By-law complaint responses** by gathering enforcement context, complaint trends, and patrol or ticket style records, and drafting personalized resident friendly closure messages. **AI automates research, analysis, and draft preparation for staff approved closure responses** — it does not make enforcement decisions, close cases on its own, or contact residents without staff approval. No private City data is required for the POC, and the schema is ready for Brampton enforcement data later.
 
 ## The Closure Review Workbench workflow
 
 The core of the app is the authenticated Closure Review Workbench (`/app/closure-review`), which communicates a single end-to-end workflow:
 
-1. **Complaint enters the review queue** — cases load from the live Toronto 311 benchmark workflow data.
+1. **Complaint enters the review queue** — cases load from the live NYC 311 benchmark workflow data.
 2. **Review Attention Score helps staff prioritize** — a transparent statistical queue rank surfaces the files staff should review first.
 3. **Case workspace gathers linked records** — complaint details plus related patrol logs, ticket records, and complaint trend context for the selected case. Patrol and ticket records are clearly labelled **synthetic POC operational context** linked to real benchmark case ids; trends are generated from the benchmark complaints.
 4. **Rules check closure readiness** — deterministic flags plus a closure readiness checklist and a matched resident friendly closure template (by complaint type + scenario).
@@ -62,7 +62,7 @@ The current service layer (`src/services/municipalServiceRequests.ts`) reads fro
 
 | Object | Role |
 | --- | --- |
-| `municipal_complaints` | **Primary complaints table.** Toronto 311 public benchmark records normalized into the Brampton compatible enforcement schema. Drives the dashboard, case queue, and case detail. |
+| `municipal_complaints` | **Primary complaints table.** NYC 311 public benchmark records normalized into the Brampton compatible enforcement schema. Drives the dashboard, case queue, and case detail. |
 | `workflow_events` | Staff workflow events (triage, stage changes) over the benchmark data; surfaced via the `v_recent_workflow_events` view. |
 | `ai_triage_results` | Rule-based POC triage outputs (advisory only). |
 | `case_ai_reviews` | Persisted AI-assisted staff review records. |
@@ -76,15 +76,15 @@ The current service layer (`src/services/municipalServiceRequests.ts`) reads fro
 | `workflow_ml_predictions` | **Legacy** workflow attention outputs ("Needs Attention" score, tier, rank). Retained for rollback; the Closure Review queue still reads it, while Statistical Queue Insights now reads the statistical tables above. |
 | `patrol_logs` | **Synthetic POC operational context.** Demo patrol log records linked to real benchmark complaint `case_id`s, shown in the Closure Review case workspace. Clearly labelled — not Brampton operational data. |
 | `ticket_records` | **Synthetic POC operational context.** Demo ticket / enforcement outcome records linked to real benchmark complaint `case_id`s. Clearly labelled — not Brampton operational data. |
-| `complaint_trends` | Complaint trend aggregates **generated from the Toronto 311 benchmark complaints**: per area + complaint type, current vs prior period volume, change percent, repeat locations, and a trend label. |
+| `complaint_trends` | Complaint trend aggregates **generated from the NYC 311 benchmark complaints**: per area + complaint type, current vs prior period volume, change percent, repeat locations, and a trend label. |
 | `closure_templates` | **Synthetic POC** resident friendly closure response templates matched by complaint type + scenario, with policy notes and required on-file context. Drafting aid only — staff approval required. |
-| `toronto_ward_boundaries` | The 25 real City of Toronto ward polygons (City of Toronto Open Data "City Wards"), used as the geographic base layer. |
-| `v_toronto_ward_workload` | Real Toronto 311 benchmark complaint volume aggregated per Toronto ward from `municipal_complaints`. |
+| `toronto_ward_boundaries` | **Legacy** Toronto ward polygons, retained for rollback. NYC geography is by borough / council district (NYC has no wards). |
+| `v_toronto_ward_workload` | **Legacy** per-ward workload view (Toronto), retained for rollback. NYC equivalent: `v_nyc_service_request_workload` (per borough/area). |
 | `v_workflow_stage_counts` | Live counts by workflow stage for the Operations Workflow Console. |
-| `brampton_ward_boundaries` / `brampton_ward_workload_scenarios` | Real Brampton ward boundaries with a clearly labelled **synthetic** workload overlay — Toronto benchmark records are never plotted onto Brampton wards. |
+| `brampton_ward_boundaries` / `brampton_ward_workload_scenarios` | Real Brampton ward boundaries with a clearly labelled **synthetic** workload overlay — NYC benchmark records are never plotted onto Brampton wards. |
 
 - **Sample fallback:** when the Supabase variables are missing — or a live query fails — the app falls back to the bundled sample dataset in `src/data/`, so the POC always renders without a backend.
-- **Always visible:** every data-driven screen shows a badge indicating whether it is displaying **Live data: Supabase** or **Sample data**, and carries the disclaimer that this is Toronto 311 public benchmark data, not Brampton operational data.
+- **Always visible:** every data-driven screen shows a badge indicating whether it is displaying **Live data: Supabase** or **Sample data**, and carries the disclaimer that this is NYC 311 public benchmark data, not Brampton operational data.
 - **Legacy:** `supabase/migrations/001_create_municipal_service_requests.sql` creates the original `municipal_service_requests` table from an earlier iteration. It is **legacy** — the app's service layer no longer reads it; `municipal_complaints` is the active complaints table.
 
 To connect a live data layer, copy `.env.example` to `.env.local` (which is gitignored and never committed) and fill in:
@@ -108,13 +108,13 @@ The Supabase schema lives in `supabase/migrations/` (001–010, applied in order
   - **Operations Workflow Console** — workflow-stage counts and recent staff workflow events, demonstrating triage and case progression.
   - **Workload insights (v1)** — scored locations from the v1 workload-density model.
   - **Statistical Queue Insights** — the **Review Attention Score** over the benchmark: a transparent, classical statistical queue rank (Higher/Medium/Lower) built from EDA, z-scores, percentiles, repeat counts, and correlation checks. Not an ML model, not a probability — decision support only. See **SR2026 Review Attention Score** below for how the scored queue is generated.
-  - **Toronto ward workload context** — real Toronto ward polygons with real Toronto 311 ward-level complaint volume.
+  - **NYC service request workload context** — service-request workload intensity by NYC borough / area over the NYC 311 benchmark.
   - **Dashboard** — KPI cards and category breakdowns over the live benchmark data.
 - AI Review Packets are produced by Netlify functions (`netlify/functions/`) that hold the Anthropic API key server-side; the browser never sees the key, drafts are advisory only, and nothing is sent to a resident.
 
 ### SR2026 Review Attention Score
 
-The SR2026 statistical score was generated from **190,511 Toronto 311 benchmark rows**. The **Review Attention Score** prioritizes cases likely to need more staff review effort, using transparent statistical features — case aging percentiles, repeat-location counts, area-trend z-scores, complaint-type backlog percentiles, and missing-context checks. Each ranked case publishes its top drivers so the rank is fully explainable.
+The SR2026 statistical score was generated from a controlled sample of **NYC 311 benchmark rows**. The **Review Attention Score** prioritizes cases likely to need more staff review effort, using transparent statistical features — case aging percentiles, repeat-location counts, area-trend z-scores, complaint-type backlog percentiles, and missing-context checks. Each ranked case publishes its top drivers so the rank is fully explainable.
 
 **This is not ML and not an enforcement decision.** The score is a relative tier (Higher / Medium / Lower), not a probability or prediction, and staff review every case.
 
@@ -129,7 +129,7 @@ The scored queue is delivered as a single CSV (`statistical_attention_queue_uplo
 - **Explainable scoring.** Scores are published with the drivers and provenance that produced them — no black box. Model outputs carry source city, dataset, model version, and scoring period on every row.
 - **Staff-ready summaries.** Outputs are framed as briefing material for officers to review, not as decisions.
 - **Auditability and governance.** Scores, AI-generated content, and staff workflow events are logged and reviewable.
-- **Benchmark data is clearly separated from Brampton context.** Toronto 311 benchmark records are never plotted onto Brampton wards; the Brampton ward workload overlay is explicitly labelled synthetic.
+- **Benchmark data is clearly separated from Brampton context.** NYC 311 benchmark records are never plotted onto Brampton wards; the Brampton ward workload overlay is explicitly labelled synthetic.
 
 ---
 
@@ -141,7 +141,7 @@ The scored queue is delivered as a single CSV (`statistical_attention_queue_uplo
 - **React Router** — page routing
 - **Supabase** — live data layer (`municipal_complaints` and related tables/views above), with a bundled sample dataset (`src/data/`) as fallback
 - **Netlify functions** — server-side AI review packet generation (Anthropic API key never exposed to the browser)
-- **Data and statistical pipeline** — local Python scripts (`scripts/`): Toronto 311 EDA, v1 workload-density model training, the Review Attention Score statistical scoring builder (`build_statistical_attention_scores.py`), and Supabase upload utilities. (The legacy V2 workflow ML scripts are retained for rollback.)
+- **Data and statistical pipeline** — local Python scripts (`scripts/`): the NYC 311 pipeline (`fetch_nyc311_sample.py`, `clean_nyc311_service_requests.py`, `build_nyc311_closure_templates.py`, `upload_nyc311_to_supabase.py`), v1 workload-density model training, the Review Attention Score statistical scoring builder, and Supabase upload utilities. (Legacy Toronto EDA and V2 workflow ML scripts are retained for rollback.) See `docs/nyc311-benchmark.md`.
 
 ---
 
@@ -192,7 +192,7 @@ netlify/
 public/
   _redirects        Netlify SPA redirect rule
   favicon.svg
-scripts/            Toronto 311 EDA, v1/V2 model training, scoring, and upload scripts
+scripts/            NYC 311 pipeline (fetch/clean/templates/upload), model training, scoring
 supabase/
   migrations/       Schema migrations 001–012 (001 is the legacy
                     municipal_service_requests table; 002+ cover RLS,
@@ -213,13 +213,13 @@ tailwind.config.js  Design tokens (navy + accent palette)
 | `/methodology`        | POC Methodology                       |
 | `/privacy`            | Privacy & Security                    |
 | `/login`              | Login (Supabase magic-link)           |
-| `/app/insights`       | Insights (live complaint workload dashboard + supervisor workflow impact + Toronto ward workload heat map) |
+| `/app/insights`       | Insights (live complaint workload dashboard + supervisor workflow impact + NYC service request workload heat map) |
 | `/app/dashboard`      | → redirects to `/app/insights`        |
 | `/app/supervisor`     | → redirects to `/app/insights`        |
 | `/app/cases`          | Case Queue (authenticated)            |
 | `/app/cases/:id`      | Case Detail (authenticated)           |
 | `/app/workflow`       | Operations Workflow Console           |
-| `/app/wards`          | Toronto Ward Workload Context         |
+| `/app/wards`          | NYC Service Request Workload Context   |
 | `/app/legacy-insights` | Workload / Statistical Queue Insights |
 | `/app/statistical-insights` | Statistical Queue Insights (Review Attention Score) |
 | `/app/v2-ml`          | → redirects to `/app/statistical-insights` |
@@ -256,7 +256,7 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Netlify site's envir
 
 Full version lives on the in-app `/methodology` page. Short form:
 
-1. **Ingest.** Real public Toronto 311 service request data and real open geospatial reference data (Toronto and Brampton ward boundaries), with synthetic placeholders only for non-public internal records and the clearly labelled Brampton workload overlay.
+1. **Ingest.** Real public NYC 311 service request data and real open geospatial reference data (NYC borough and Brampton ward boundaries), with synthetic placeholders only for non-public internal records and the clearly labelled Brampton workload overlay.
 2. **Normalize.** Standardize addresses, categories, and timestamps into the Brampton compatible enforcement schema (`municipal_complaints`) so complaints across channels can be compared.
 3. **Detect patterns.** Identify repeat complaints, geographic clusters, and ward-level workload concentration across rolling time windows.
 4. **Score.** Transparent rule-based triage plus the **Review Attention Score** (`statistical_case_scores`) — a classical statistical queue rank built from EDA, aging z-scores, percentiles, repeat-location counts, area-trend signals, and correlation checks (no black-box model). The v1 workload-density layer (`workload_insights_v1`) remains for location density. Every output carries provenance and an advisory disclaimer, and the score is decision support only.
@@ -273,5 +273,5 @@ Full version lives on the in-app `/methodology` page. Short form:
 ### Important positioning
 
 - This is not replacing officers — it is **decision support**.
-- It is a **Brampton compatible POC built on real public Toronto 311 service request benchmark data**, normalized into a Brampton compatible enforcement schema, with synthetic data only for non-public internal fields and the labelled Brampton workload overlay. **It is not Brampton operational data.**
-- The schema is ready for Brampton enforcement data; City-provided data can replace or supplement the Toronto 311 benchmark data later under privacy and cybersecurity controls.
+- It is a **Brampton compatible POC built on real public NYC 311 service request benchmark data**, normalized into a Brampton compatible enforcement schema, with synthetic data only for non-public internal fields and the labelled Brampton workload overlay. **It is not Brampton operational data.**
+- The schema is ready for Brampton enforcement data; City-provided data can replace or supplement the NYC 311 benchmark data later under privacy and cybersecurity controls.

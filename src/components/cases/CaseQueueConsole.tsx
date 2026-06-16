@@ -34,7 +34,7 @@ type CaseQueueConsoleProps = {
 // context handled separately — never implying these are Brampton operational
 // complaints.
 const POC_NOTES = [
-  'Toronto 311 public benchmark data',
+  'NYC 311 public benchmark data',
   'Brampton ward context is used separately',
   'Not Brampton operational complaint data',
 ]
@@ -48,7 +48,7 @@ const POC_NOTES = [
 export default function CaseQueueConsole({
   eyebrow,
   title = 'Benchmark case browser',
-  subtitle = 'Search and inspect normalized Toronto 311 benchmark records. The active staff workflow uses Intake, Insights, and Closure Review.',
+  subtitle = 'Search and inspect normalized NYC 311 benchmark records. The active staff workflow uses Intake, Insights, and Closure Review.',
   casesPath,
   rows,
   options,
