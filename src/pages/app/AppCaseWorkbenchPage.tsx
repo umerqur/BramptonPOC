@@ -100,7 +100,17 @@ export default function AppCaseWorkbenchPage() {
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
         {/* Left: enforcement context */}
         <div className="space-y-6 lg:col-span-2">
-          <Panel title="Case summary" subtitle="Plain-language summary assembled by the AI system">
+          <Panel title="Resident complaint" subtitle="The resident's own description of the issue, in their words">
+            {c.input.description.trim() ? (
+              <p className="whitespace-pre-line text-sm leading-relaxed text-ink">{c.input.description.trim()}</p>
+            ) : (
+              <p className="text-sm italic text-ink-subtle">
+                No resident description was provided for this older demo record.
+              </p>
+            )}
+          </Panel>
+
+          <Panel title="Case summary" subtitle="AI summary / recommended action — decision support for staff review">
             <p className="text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
             <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2">
               {summary.structuredFacts.map((f) => (

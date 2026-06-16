@@ -43,7 +43,7 @@ export default function AppLayout() {
               <Logo className="h-7 w-7" />
               <div className="leading-tight">
                 <div className="text-sm font-semibold text-navy-900">Proactive Enforcement Response</div>
-                <div className="text-[11px] text-ink-subtle">AI-assisted closure workflow · POC</div>
+                <div className="text-[11px] text-ink-subtle">Staff work queue and operational insights</div>
               </div>
             </Link>
 
