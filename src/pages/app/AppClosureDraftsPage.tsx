@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
-import { sendResidentEmail } from '../../services/residentRequests'
+import { isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import { can, rolesAllowed } from '../../lib/roles'
 import {
   AutomationBadge,
@@ -20,18 +20,6 @@ import type { DemoCase } from '../../data/demoWorkflowTypes'
 // closed, an audit event is recorded, and — when the case carries a deliverable
 // resident email — the staff-approved closure response is actually emailed to the
 // resident through the server-side Netlify email function.
-
-// Recipients on the synthetic seed/sample cases use reserved @example.* demo
-// addresses; we never try to email those. A real resident email (entered in the
-// intake form, or carried over from a real resident submission) is sent for real.
-const RESERVED_EMAIL_DOMAINS = ['example.com', 'example.org', 'example.net']
-
-function isSendableEmail(email: string): boolean {
-  const value = email.trim().toLowerCase()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return false
-  const domain = value.split('@')[1] ?? ''
-  return !RESERVED_EMAIL_DOMAINS.includes(domain)
-}
 
 type SendResult = { attempted: boolean; emailSent: boolean; to: string }
 

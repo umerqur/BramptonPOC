@@ -4,6 +4,7 @@ import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { can, rolesAllowed } from '../../lib/roles'
 import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
+import { isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import {
   AutomationBadge,
   CaseSwitcher,
@@ -28,6 +29,22 @@ const OUTCOME_NEEDS_REFERENCE: Record<FieldVisitOutcome, boolean> = {
   notice_issued: true,
   ticket_issued: true,
   resolved: false,
+}
+
+// Resident-safe field-visit message: tells the resident an officer attended,
+// without exposing internal observations, ticket numbers, or fines (those stay
+// in the staff file; specifics go in the final closure letter).
+const FIELD_MESSAGE_TAIL: Record<FieldVisitOutcome, string> = {
+  no_violation: ' At the time of the visit, no violation was observed.',
+  notice_issued: ' The officer addressed the matter and enforcement action has been taken.',
+  ticket_issued: ' The officer addressed the matter and enforcement action has been taken.',
+  resolved: ' The issue appears to have been resolved.',
+}
+
+function residentFieldMessage(outcome: FieldVisitOutcome, followUp: boolean): string {
+  const base = 'A by-law enforcement officer attended the location to investigate your request.'
+  const fu = followUp ? ' A follow-up inspection has been scheduled.' : ''
+  return `${base}${FIELD_MESSAGE_TAIL[outcome]}${fu} We will send you a final update once the file is reviewed and closed.`
 }
 
 // Case Workbench — assembles the AI's gathered enforcement context and the
@@ -314,8 +331,37 @@ function FieldInvestigationPanel({ c }: { c: DemoCase }) {
   const [reference, setReference] = useState('')
   const [followUp, setFollowUp] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const needsReference = OUTCOME_NEEDS_REFERENCE[outcome]
+
+  // Best-effort resident email for a milestone; returns the suffix to append to
+  // the staff flash so the reviewer sees whether the resident was notified.
+  async function emailResident(
+    payload: Parameters<typeof sendResidentEmail>[0],
+  ): Promise<string> {
+    if (!isSendableEmail(payload.to)) return ' (No deliverable resident email — demo address.)'
+    const sent = await sendResidentEmail(payload)
+    return sent
+      ? ` Resident emailed at ${payload.to}.`
+      : ' (Resident email could not be sent in this environment.)'
+  }
+
+  async function handleAssign() {
+    setBusy(true)
+    assignToOfficer(c.id, officer)
+    const suffix = await emailResident({
+      type: 'status_update',
+      status: 'assigned',
+      to: c.input.residentEmail.trim(),
+      residentName: c.input.residentName,
+      caseId: c.id,
+      requestType: c.triage.category,
+      location: c.input.location,
+    })
+    setFlash(`Assigned to ${officer}.${suffix}`)
+    setBusy(false)
+  }
 
   // Already investigated — show the recorded outcome (read-only).
   if (c.fieldAction) {
@@ -343,18 +389,29 @@ function FieldInvestigationPanel({ c }: { c: DemoCase }) {
     )
   }
 
-  function handleRecord() {
+  async function handleRecord() {
     if (!observations.trim()) {
       setFlash('Add a short observation before recording the outcome.')
       return
     }
+    setBusy(true)
     recordFieldAction(c.id, {
       outcome,
       observations: observations.trim(),
       referenceNumber: needsReference ? reference.trim() || null : null,
       followUpRequired: followUp,
     })
-    setFlash('Field outcome recorded. The closure draft has been updated to match.')
+    const suffix = await emailResident({
+      type: 'field_update',
+      to: c.input.residentEmail.trim(),
+      residentName: c.input.residentName,
+      caseId: c.id,
+      requestType: c.triage.category,
+      location: c.input.location,
+      message: residentFieldMessage(outcome, followUp),
+    })
+    setFlash(`Field outcome recorded. The closure draft has been updated to match.${suffix}`)
+    setBusy(false)
   }
 
   return (
@@ -379,13 +436,7 @@ function FieldInvestigationPanel({ c }: { c: DemoCase }) {
                 <option key={o} value={o}>{o}</option>
               ))}
             </select>
-            <button
-              onClick={() => {
-                assignToOfficer(c.id, officer)
-                setFlash(`Assigned to ${officer}.`)
-              }}
-              className="btn-secondary text-sm"
-            >
+            <button onClick={handleAssign} disabled={busy} className="btn-secondary text-sm disabled:opacity-60">
               {c.assignedOfficer ? 'Reassign' : 'Assign to officer'}
             </button>
           </div>
@@ -442,8 +493,8 @@ function FieldInvestigationPanel({ c }: { c: DemoCase }) {
               <input type="checkbox" checked={followUp} onChange={(e) => setFollowUp(e.target.checked)} className="h-4 w-4" />
               Follow-up / re-inspection required
             </label>
-            <button onClick={handleRecord} className="btn-primary text-sm">
-              Record field outcome
+            <button onClick={handleRecord} disabled={busy} className="btn-primary text-sm disabled:opacity-60">
+              {busy ? 'Recording…' : 'Record field outcome'}
             </button>
           </div>
         )}

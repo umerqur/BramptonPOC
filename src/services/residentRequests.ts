@@ -221,15 +221,28 @@ export function generateCaseId(): string {
  * from the function, false otherwise (including when email is not configured in
  * the environment, e.g. local dev without Mailjet keys).
  */
+// Synthetic seed/sample cases use reserved @example.* demo addresses; we never
+// try to email those. A real resident email (entered in the intake form, or
+// carried over from a real resident submission) is sent for real. Shared by the
+// workbench (officer milestones) and the closure page.
+const RESERVED_EMAIL_DOMAINS = ['example.com', 'example.org', 'example.net']
+
+export function isSendableEmail(email: string): boolean {
+  const value = email.trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return false
+  const domain = value.split('@')[1] ?? ''
+  return !RESERVED_EMAIL_DOMAINS.includes(domain)
+}
+
 export async function sendResidentEmail(payload: {
-  type: 'confirmation' | 'status_update' | 'closure'
+  type: 'confirmation' | 'status_update' | 'field_update' | 'closure'
   to: string
   residentName: string
   caseId: string
   requestType?: string | null
   location?: string | null
   status?: ResidentStatus | null
-  /** Staff-approved closure subject + message body — only used by 'closure' emails. */
+  /** Subject + message body — used by 'field_update' and 'closure' emails. */
   subject?: string | null
   message?: string | null
 }): Promise<boolean> {

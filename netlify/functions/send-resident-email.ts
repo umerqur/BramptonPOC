@@ -20,9 +20,11 @@
 //
 // SCOPE & GOVERNANCE
 // ------------------
-// Three payload types only, all to the resident:
+// Four payload types only, all to the resident:
 //   * 'confirmation'  — once, when the resident submits.
 //   * 'status_update' — on an explicit staff stage change.
+//   * 'field_update'  — on an explicit officer field-visit milestone; carries a
+//                       resident-safe message body.
 //   * 'closure'       — on an explicit staff approval of the closure response;
 //                       carries the staff-approved subject + message body.
 // This function only sends the single email described by the request body. It
@@ -70,7 +72,7 @@ const STATUS_NEXT: Record<string, string> = {
   closed: 'Your request has been closed. Thank you for helping keep the city in good shape.',
 }
 
-type EmailType = 'confirmation' | 'status_update' | 'closure'
+type EmailType = 'confirmation' | 'status_update' | 'field_update' | 'closure'
 
 type EmailRequest = {
   type: EmailType
@@ -146,7 +148,7 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
   const obj = raw as Record<string, unknown>
 
   const type = str(obj.type).trim()
-  if (type !== 'confirmation' && type !== 'status_update' && type !== 'closure') return null
+  if (type !== 'confirmation' && type !== 'status_update' && type !== 'field_update' && type !== 'closure') return null
 
   return {
     type,
@@ -408,9 +410,56 @@ function buildClosureContent(input: EmailRequest): EmailContent {
   return { subject, html, text }
 }
 
+// Helper content builder for an officer field-visit milestone update. Carries a
+// resident-safe message (no internal observations, ticket numbers, or fines) so
+// the resident learns an officer attended without exposing case-file detail.
+function buildFieldUpdateContent(input: EmailRequest): EmailContent {
+  const name = input.residentName || 'there'
+  const safeName = escapeHtml(name)
+  const caseId = escapeHtml(input.caseId)
+  const requestType = input.requestType ? escapeHtml(input.requestType) : '—'
+  const location = input.location ? escapeHtml(input.location) : '—'
+  const message = input.message ?? ''
+  const statusUrl = statusUrlForCase(input.caseId)
+
+  const subject = input.subject?.trim() || `Proactive Enforcement Demo: An officer has investigated your request ${input.caseId}`
+
+  const inner = `
+    <p style="margin:0 0 14px;">Hi ${safeName},</p>
+    <p style="margin:0 0 14px;font-size:16px;font-weight:600;">There's an update on your request.</p>
+    <div style="margin:0;color:#0f172a;font-size:14px;line-height:1.6;">${textToHtml(message)}</div>
+    ${detailTable([
+      ['Reference number', caseId],
+      ['Request type', requestType],
+      ['Location', location],
+    ])}
+    ${statusButton(statusUrl)}`
+
+  const html = htmlShell(inner)
+
+  const text = [
+    `Hi ${name},`,
+    '',
+    "There's an update on your request.",
+    '',
+    message,
+    '',
+    `Reference number: ${input.caseId}`,
+    `Request type: ${input.requestType || '—'}`,
+    `Location: ${input.location || '—'}`,
+    '',
+    `Track request status: ${statusUrl}`,
+    '',
+    DEMO_FOOTER_TEXT,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
 function buildContent(input: EmailRequest): EmailContent {
   if (input.type === 'confirmation') return buildConfirmationContent(input)
   if (input.type === 'closure') return buildClosureContent(input)
+  if (input.type === 'field_update') return buildFieldUpdateContent(input)
   return buildStatusUpdateContent(input)
 }
 
@@ -447,6 +496,9 @@ export default async function handler(req: Request): Promise<Response> {
   }
   if (input.type === 'closure' && !input.message) {
     return json({ error: 'A closure message is required for a closure email.' }, 400)
+  }
+  if (input.type === 'field_update' && !input.message) {
+    return json({ error: 'A message is required for a field update email.' }, 400)
   }
 
   const content = buildContent(input)
