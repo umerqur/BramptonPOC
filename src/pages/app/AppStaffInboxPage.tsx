@@ -24,6 +24,15 @@ type LoadState = {
   error: string | null
 }
 
+// The Work Queue is split into Open and Closed tabs. A case stays in Open while
+// it moves through the active lifecycle (submitted → received → assigned →
+// in_review) and leaves Open the moment it is closed, where it then appears in
+// Closed.
+const OPEN_STATUSES: ResidentStatus[] = ['submitted', 'received', 'assigned', 'in_review']
+const CLOSED_STATUSES: ResidentStatus[] = ['closed']
+
+type QueueTab = 'open' | 'closed'
+
 const STATUS_STYLES: Record<ResidentStatus, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
   received: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
@@ -43,6 +52,11 @@ export default function AppStaffInboxPage() {
   const { ingestResidentCase } = useWorkflow()
   const navigate = useNavigate()
   const [state, setState] = useState<LoadState>({ rows: [], loading: true, error: null })
+  const [tab, setTab] = useState<QueueTab>('open')
+
+  const openRows = useMemo(() => state.rows.filter((r) => OPEN_STATUSES.includes(r.status)), [state.rows])
+  const closedRows = useMemo(() => state.rows.filter((r) => CLOSED_STATUSES.includes(r.status)), [state.rows])
+  const visibleRows = tab === 'open' ? openRows : closedRows
 
   const load = useCallback(() => {
     setState((s) => ({ ...s, loading: true, error: null }))
@@ -83,7 +97,14 @@ export default function AppStaffInboxPage() {
         Demo data only. AI triage values are generated decision support — not automated enforcement.
       </div>
 
-      <div className="mt-8">
+      {!state.error && !state.loading && state.rows.length > 0 && (
+        <div className="mt-8 flex gap-1 border-b border-slate-200">
+          <TabButton label="Open" count={openRows.length} active={tab === 'open'} onClick={() => setTab('open')} />
+          <TabButton label="Closed" count={closedRows.length} active={tab === 'closed'} onClick={() => setTab('closed')} />
+        </div>
+      )}
+
+      <div className="mt-6">
         {state.error ? (
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800">
             <span className="font-semibold">Couldn’t load resident requests from Supabase.</span>{' '}
@@ -93,9 +114,13 @@ export default function AppStaffInboxPage() {
           <div className="card p-8 text-center text-sm text-ink-subtle">Loading the inbox…</div>
         ) : state.rows.length === 0 ? (
           <EmptyState />
+        ) : visibleRows.length === 0 ? (
+          <div className="card p-8 text-center text-sm text-ink-subtle">
+            {tab === 'open' ? 'No open cases in the queue right now.' : 'No closed cases yet.'}
+          </div>
         ) : (
           <ul className="space-y-4">
-            {state.rows.map((row) => (
+            {visibleRows.map((row) => (
               <li key={row.case_id}>
                 <InboxCard row={row} onOpen={() => openCase(row)} />
               </li>
@@ -109,12 +134,46 @@ export default function AppStaffInboxPage() {
   )
 }
 
+function TabButton({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string
+  count: number
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+        active
+          ? 'border-accent-600 text-navy-900'
+          : 'border-transparent text-ink-subtle hover:text-navy-900'
+      }`}
+    >
+      {label}
+      <span
+        className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${
+          active ? 'bg-accent-100 text-accent-800' : 'bg-slate-100 text-slate-600'
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  )
+}
+
 function InboxCard({ row, onOpen }: { row: ResidentRequestRow; onOpen: () => void }) {
   // Deterministic generated triage from the row (placeholder for a real AI
   // result). Memoised so we don't re-run the workflow on every render.
   const triageCase = useMemo(() => residentRowToCase(row), [row])
   const { triage, summary } = triageCase
   const priority = triage.recommendedPriority
+  const residentComplaint = row.description?.trim()
 
   return (
     <div className="card p-5">
@@ -132,10 +191,22 @@ function InboxCard({ row, onOpen }: { row: ResidentRequestRow; onOpen: () => voi
         <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDateTime(row.created_at)}</span>
       </div>
 
-      {/* Generated AI triage */}
+      {/* Resident's own words — shown before, and above, the generated triage. */}
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">Resident complaint</div>
+        {residentComplaint ? (
+          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink">{residentComplaint}</p>
+        ) : (
+          <p className="mt-2 text-sm italic text-ink-subtle">
+            No resident description was provided for this older demo record.
+          </p>
+        )}
+      </div>
+
+      {/* Generated AI triage — support only, below the resident's complaint. */}
       <div className="mt-4 rounded-lg border border-accent-200 bg-accent-50/50 p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">AI triage summary</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">Decision support summary</span>
           <span className="text-[11px] text-accent-700">Generated · staff review required</span>
         </div>
         <p className="mt-2 text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>

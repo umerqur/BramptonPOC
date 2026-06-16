@@ -96,6 +96,8 @@ export default function ResidentNewRequestPage() {
     if (index === 0) {
       if (!form.requestType) return 'Please choose an issue type.'
       if (!form.happeningNow) return 'Please tell us whether this is happening now.'
+      if (!form.description.trim()) return 'Please describe the issue so staff can review the request.'
+      if (form.description.trim().length < 10) return 'Please provide a little more detail about the issue.'
     }
     // Step 1 — Location
     if (index === 1) {
@@ -159,7 +161,7 @@ export default function ResidentNewRequestPage() {
       province: form.province,
       concernPostalCode: form.concernPostalCode || undefined,
       requestType: form.requestType,
-      description: form.description || undefined,
+      description: form.description.trim(),
       happeningNow: form.happeningNow || undefined,
       uploadedFileNames: form.uploadedFileNames,
       firstName: form.firstName,
@@ -528,7 +530,7 @@ function IssueStep({ form, update }: StepProps) {
         </select>
       </Field>
 
-      <Field label="Additional Information" hint="optional">
+      <Field label="Describe the issue" required>
         <textarea
           value={form.description}
           onChange={(e) => update('description', e.target.value)}
@@ -736,7 +738,7 @@ function ReviewStep({ form, onEdit }: { form: FormState; onEdit: (step: number) 
         <ReviewGroup title="Issue" onEdit={() => onEdit(0)}>
           <ReviewItem label="Issue Type" value={form.requestType} />
           <ReviewItem label="Is this happening now?" value={form.happeningNow || '—'} />
-          <ReviewItem label="Additional Information" value={form.description || '—'} />
+          <ReviewItem label="Describe the issue" value={form.description || '—'} />
           <ReviewItem
             label="Uploaded Files"
             value={form.uploadedFileNames.length > 0 ? form.uploadedFileNames.join(', ') : '—'}

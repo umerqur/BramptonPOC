@@ -161,7 +161,7 @@ export type ResidentRequestInput = {
 
   // Details
   requestType: string
-  description?: string
+  description: string
   happeningNow?: string
   uploadedFileNames?: string[]
 
@@ -280,7 +280,7 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
   // Demo-only fields the public form collects but the existing schema has no
   // dedicated columns for are appended into the description, so we avoid a DB
   // migration while still preserving the resident's input for staff review.
-  const baseDescription = input.description?.trim() ?? ''
+  const baseDescription = input.description.trim()
   const demoDetailLines = [
     input.happeningNow ? `Is this happening now: ${input.happeningNow}` : null,
     input.concernUnitNumber ? `Location unit or apartment number: ${input.concernUnitNumber.trim()}` : null,
