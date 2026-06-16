@@ -13,8 +13,9 @@ export default function AppInsightsPage() {
         <div className="section-eyebrow">INSIGHTS</div>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">Operational insights</h1>
         <p className="mt-2 text-ink-muted">
-          Where the service-request workload sits across NYC, using the NYC 311 benchmark dataset. This is decision
-          support only — staff review every case.
+          Where the service-request workload sits across NYC, using the NYC 311 benchmark dataset. The default council
+          district view is the ward-like operational equivalent; the borough view is the high-level executive overview.
+          This is decision support only — staff review every case.
         </p>
       </div>
 

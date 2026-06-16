@@ -3,78 +3,171 @@ import {
   getNYCBoroughBoundaries,
   getNYCWorkloadByBorough,
   mockNYCWorkloadByBorough,
-  type NYCBoroughBoundary,
-  type NYCBoroughWorkload,
+  getNYCCouncilDistrictBoundaries,
+  getNYCWorkloadByCouncilDistrict,
+  mockNYCWorkloadByCouncilDistrict,
 } from '../../services/municipalServiceRequests'
 
-// NYC 311 workload heat map. Real NYC borough polygons (NYC Open Data — Borough
-// Boundaries) are the geographic base layer, shaded by real NYC 311 benchmark
-// complaint volume aggregated per borough. This is decision support only — never
-// Brampton operational data, never a risk prediction, and never Toronto geometry.
-// The map is the whole panel: no AI workflow content lives here.
+// NYC 311 workload heat map. Two geographic modes share one choropleth:
+//   * Council district workload (default) — real NYC City Council district
+//     polygons, the finer, ward-like operational unit.
+//   * Borough overview — real NYC borough polygons, the broad executive overview.
+// Both are shaded by real NYC 311 benchmark complaint volume. This is decision
+// support only — never Brampton operational data, never a risk prediction, and
+// never Toronto geometry. NYC has no wards: boroughs are too broad to stand in for
+// a Brampton/Toronto ward, so council districts are the ward-like operational view.
 
-// Required disclaimer for the NYC 311 workload map.
+// Required disclaimer for the NYC 311 workload map (both modes).
 const WORKLOAD_DISCLAIMER =
   'NYC 311 benchmark data, not Brampton operational data. Decision support only.'
 
-// Supporting fine print. Wording is workload intensity (not risk), and it makes
-// clear this NYC data is never plotted onto Brampton geography.
-const WORKLOAD_CONTEXT =
-  'Real NYC borough boundaries are shaded by real NYC 311 benchmark complaint volume aggregated per borough. Boroughs with higher complaint volume show higher workload intensity. This is benchmark decision support only — not a risk prediction — and this NYC geography and volume is never plotted onto Brampton wards.'
+type MapMode = 'district' | 'borough'
+
+/** A geographic area to draw: a borough or a council district. */
+type AreaUnit = { id: string; key: string; label: string; short: string; geometry: unknown }
+/** NYC 311 workload for one area, joined to AreaUnit by `key`. */
+type AreaVolume = { key: string; label: string; volume: number }
+
+/** Case-insensitive borough key for joining workload counts to geometry. */
+const boroughKey = (name: string) => name.trim().toLowerCase()
+
+type ModeAdapter = {
+  /** Label shown on the mode toggle. */
+  toggleLabel: string
+  /** Singular noun for an area in this mode, e.g. "council district". */
+  unitLabel: string
+  headerSubtitle: string
+  /** Fine-print context, kept distinct per mode (operational vs executive). */
+  context: string
+  loadUnits: () => Promise<AreaUnit[]>
+  loadVolumes: () => Promise<AreaVolume[]>
+  sample: () => AreaVolume[]
+}
+
+const ADAPTERS: Record<MapMode, ModeAdapter> = {
+  district: {
+    toggleLabel: 'Council district workload',
+    unitLabel: 'council district',
+    headerSubtitle: 'Real NYC council district boundaries · NYC 311 benchmark volume by council district',
+    context:
+      'Real NYC City Council district boundaries — the ward-like operational unit — are shaded by real NYC 311 benchmark complaint volume per district. Districts with higher complaint volume show higher workload intensity. This is the operational view: finer than boroughs and the closest NYC equivalent to a Brampton/Toronto ward. Benchmark decision support only — not a risk prediction — and this NYC geography and volume is never plotted onto Brampton wards.',
+    async loadUnits() {
+      const districts = await getNYCCouncilDistrictBoundaries()
+      return districts.map((d) => ({
+        id: String(d.id),
+        key: String(d.council_district),
+        label: `District ${d.council_district}`,
+        short: d.short_label,
+        geometry: d.geojson_geometry,
+      }))
+    },
+    async loadVolumes() {
+      const rows = await getNYCWorkloadByCouncilDistrict()
+      return rows.map((r) => ({ key: r.area, label: `District ${r.area}`, volume: r.complaint_volume }))
+    },
+    sample() {
+      return mockNYCWorkloadByCouncilDistrict().map((r) => ({
+        key: r.area,
+        label: `District ${r.area}`,
+        volume: r.complaint_volume,
+      }))
+    },
+  },
+  borough: {
+    toggleLabel: 'Borough overview',
+    unitLabel: 'borough',
+    headerSubtitle: 'Real NYC borough boundaries · NYC 311 benchmark volume by borough',
+    context:
+      'Real NYC borough boundaries give the high-level executive overview, shaded by real NYC 311 benchmark complaint volume per borough. Boroughs are broad geographic areas — not a ward-like unit — so use the council district view for the operational equivalent of a Brampton/Toronto ward. This is benchmark decision support only — not a risk prediction — and this NYC geography and volume is never plotted onto Brampton wards.',
+    async loadUnits() {
+      const boroughs = await getNYCBoroughBoundaries()
+      return boroughs.map((b, idx) => ({
+        id: String(b.id ?? idx),
+        key: boroughKey(b.borough_name),
+        label: b.borough_name,
+        short: b.short_label || b.borough_name,
+        geometry: b.geojson_geometry,
+      }))
+    },
+    async loadVolumes() {
+      const rows = await getNYCWorkloadByBorough()
+      return rows.map((r) => ({ key: boroughKey(r.borough), label: r.borough, volume: r.complaint_volume }))
+    },
+    sample() {
+      return mockNYCWorkloadByBorough().map((r) => ({
+        key: boroughKey(r.borough),
+        label: r.borough,
+        volume: r.complaint_volume,
+      }))
+    },
+  },
+}
 
 /**
- * The NYC 311 workload heat map. Loads the bundled NYC borough geometry and the
- * per-borough NYC 311 workload counts, then renders an interactive choropleth
- * shaded by workload intensity with a borough detail panel.
+ * The NYC 311 workload heat map. Defaults to the ward-like council district view
+ * and offers a toggle to the broad borough executive overview. Loads the bundled
+ * geometry for the active mode plus the per-area NYC 311 workload counts, then
+ * renders an interactive choropleth shaded by workload intensity.
  */
 export default function NYCWorkloadMapPanel() {
-  const [boroughs, setBoroughs] = useState<NYCBoroughBoundary[]>([])
-  const [workload, setWorkload] = useState<NYCBoroughWorkload[]>([])
-  // Whether the per-borough volume came from the benchmark sample (Supabase view
+  const [mode, setMode] = useState<MapMode>('district')
+  const [units, setUnits] = useState<AreaUnit[]>([])
+  const [volumes, setVolumes] = useState<AreaVolume[]>([])
+  // Whether the per-area volume came from the benchmark sample (Supabase view
   // unavailable) rather than the live aggregation.
-  const [workloadFallback, setWorkloadFallback] = useState(false)
+  const [fallback, setFallback] = useState(false)
 
   useEffect(() => {
     let active = true
-    getNYCBoroughBoundaries()
-      .then((data) => active && setBoroughs(data))
+    const adapter = ADAPTERS[mode]
+    setUnits([])
+    setVolumes([])
+
+    adapter
+      .loadUnits()
+      .then((data) => active && setUnits(data))
       .catch((err: unknown) => {
         // The geometry is bundled, so this should not fail; log and continue.
-        console.error('Failed to load NYC borough boundaries:', err)
-        if (active) setBoroughs([])
+        console.error('Failed to load NYC area boundaries:', err)
+        if (active) setUnits([])
       })
-    return () => {
-      active = false
-    }
-  }, [])
 
-  useEffect(() => {
-    let active = true
-    getNYCWorkloadByBorough()
+    adapter
+      .loadVolumes()
       .then((data) => {
         if (!active) return
         if (data.length === 0) {
-          setWorkload(mockNYCWorkloadByBorough())
-          setWorkloadFallback(true)
+          setVolumes(adapter.sample())
+          setFallback(true)
         } else {
-          setWorkload(data)
-          setWorkloadFallback(false)
+          setVolumes(data)
+          setFallback(false)
         }
       })
       .catch((err: unknown) => {
         // Fall back to the benchmark sample so the heat map still renders.
-        console.error('Failed to load NYC borough workload, using benchmark sample:', err)
+        console.error('Failed to load NYC workload, using benchmark sample:', err)
         if (active) {
-          setWorkload(mockNYCWorkloadByBorough())
-          setWorkloadFallback(true)
+          setVolumes(adapter.sample())
+          setFallback(true)
         }
       })
+
     return () => {
       active = false
     }
-  }, [])
+  }, [mode])
 
-  return <NYCWorkloadHeatMap boroughs={boroughs} workload={workload} fallback={workloadFallback} />
+  return (
+    <NYCWorkloadHeatMap
+      key={mode}
+      mode={mode}
+      onModeChange={setMode}
+      units={units}
+      volumes={volumes}
+      fallback={fallback}
+    />
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -95,69 +188,90 @@ function workloadTier(t: number): string {
   return 'Higher workload'
 }
 
-/** Case-insensitive borough key for joining workload counts to geometry. */
-const boroughKey = (name: string) => name.trim().toLowerCase()
-
 function NYCWorkloadHeatMap({
-  boroughs,
-  workload,
+  mode,
+  onModeChange,
+  units,
+  volumes,
   fallback,
 }: {
-  boroughs: NYCBoroughBoundary[]
-  workload: NYCBoroughWorkload[]
+  mode: MapMode
+  onModeChange: (mode: MapMode) => void
+  units: AreaUnit[]
+  volumes: AreaVolume[]
   fallback: boolean
 }) {
-  const map = useMemo(() => buildBoroughMap(boroughs), [boroughs])
+  const adapter = ADAPTERS[mode]
+  const map = useMemo(() => buildAreaMap(units), [units])
 
-  // Index workload counts by borough name.
-  const byBorough = useMemo(() => {
-    const m = new Map<string, NYCBoroughWorkload>()
-    for (const w of workload) m.set(boroughKey(w.borough), w)
+  // Index workload counts by area key.
+  const byArea = useMemo(() => {
+    const m = new Map<string, AreaVolume>()
+    for (const w of volumes) m.set(w.key, w)
     return m
-  }, [workload])
+  }, [volumes])
 
   const { min, max } = useMemo(() => {
-    if (workload.length === 0) return { min: 0, max: 0 }
-    const vols = workload.map((w) => w.complaint_volume)
+    if (volumes.length === 0) return { min: 0, max: 0 }
+    const vols = volumes.map((w) => w.volume)
     return { min: Math.min(...vols), max: Math.max(...vols) }
-  }, [workload])
+  }, [volumes])
 
   const norm = (v: number) => (max > min ? (v - min) / (max - min) : 0.5)
   const num = (v: number) => v.toLocaleString()
-  const workloadForKey = (key: string | null): NYCBoroughWorkload | undefined =>
-    key == null ? undefined : byBorough.get(key)
+  const volumeForKey = (key: string | null): AreaVolume | undefined =>
+    key == null ? undefined : byArea.get(key)
   const colorForKey = (key: string | null): string => {
-    const w = workloadForKey(key)
-    return w ? heatColor(norm(w.complaint_volume)) : '#e2e8f0'
+    const w = volumeForKey(key)
+    return w ? heatColor(norm(w.volume)) : '#e2e8f0'
   }
 
-  // Borough selected by click; borough currently hovered. The detail panel shows
-  // the hovered borough first, then the clicked borough, then the busiest.
+  // Area selected by click; area currently hovered. The detail panel shows the
+  // hovered area first, then the clicked area, then the busiest.
   const [selected, setSelected] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
 
-  const sortedWorkload = useMemo(
-    () => [...workload].sort((a, b) => b.complaint_volume - a.complaint_volume),
-    [workload],
-  )
+  const sortedVolumes = useMemo(() => [...volumes].sort((a, b) => b.volume - a.volume), [volumes])
 
-  const busiestKey = sortedWorkload[0] ? boroughKey(sortedWorkload[0].borough) : null
+  const busiestKey = sortedVolumes[0]?.key ?? null
   const activeKey = hovered ?? selected ?? busiestKey
-  const activeWorkload = workloadForKey(activeKey)
+  const activeVolume = volumeForKey(activeKey)
   const activeShape = map?.shapes.find((s) => s.key === activeKey) ?? null
+  const activeLabel = activeShape?.label ?? activeVolume?.label ?? null
 
-  const hasWorkload = workload.length > 0
+  const hasWorkload = volumes.length > 0
 
   return (
     <section aria-label="NYC 311 workload heat map" className="mt-6 card overflow-hidden">
-      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-sm font-semibold text-navy-900">Service request workload intensity</div>
-          <div className="text-xs text-ink-subtle">Real NYC borough boundaries · NYC 311 benchmark volume by borough</div>
+          <div className="text-xs text-ink-subtle">{adapter.headerSubtitle}</div>
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-sky-800 sm:self-auto">
           <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
           NYC 311 benchmark
+        </span>
+      </div>
+
+      {/* Map mode toggle: ward-like council districts (default) vs broad boroughs. */}
+      <div className="flex flex-col gap-1.5 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          role="tablist"
+          aria-label="Map detail level"
+          className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+        >
+          <ModeTab
+            label="Council district workload"
+            active={mode === 'district'}
+            onClick={() => onModeChange('district')}
+          />
+          <ModeTab label="Borough overview" active={mode === 'borough'} onClick={() => onModeChange('borough')} />
+        </div>
+        <span className="text-[11px] text-ink-subtle">
+          {mode === 'district'
+            ? 'Operational view — the ward-like equivalent for NYC.'
+            : 'Executive overview — broad boroughs, not a ward-like unit.'}
         </span>
       </div>
 
@@ -168,7 +282,7 @@ function NYCWorkloadHeatMap({
       >
         <span aria-hidden className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500" />
         <span>
-          <span className="font-semibold">{WORKLOAD_DISCLAIMER}</span> {WORKLOAD_CONTEXT}
+          <span className="font-semibold">{WORKLOAD_DISCLAIMER}</span> {adapter.context}
         </span>
       </div>
 
@@ -180,7 +294,7 @@ function NYCWorkloadHeatMap({
       )}
 
       <div className="grid gap-6 p-5 lg:grid-cols-5">
-        {/* Map: real NYC borough polygons shaded by NYC 311 volume */}
+        {/* Map: real NYC polygons shaded by NYC 311 volume */}
         <div className="lg:col-span-3">
           {map ? (
             <figure className="relative rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
@@ -195,12 +309,12 @@ function NYCWorkloadHeatMap({
               />
               <svg
                 role="img"
-                aria-label="NYC borough boundaries shaded by NYC 311 complaint volume"
+                aria-label={`NYC ${adapter.unitLabel} boundaries shaded by NYC 311 complaint volume`}
                 viewBox={`0 0 ${map.width} ${map.height}`}
                 className="relative mx-auto block h-auto w-full"
               >
                 {map.shapes.map((shape) => {
-                  const w = workloadForKey(shape.key)
+                  const w = volumeForKey(shape.key)
                   const isActive = activeKey != null && shape.key === activeKey
                   return (
                     <path
@@ -209,7 +323,7 @@ function NYCWorkloadHeatMap({
                       fill={colorForKey(shape.key)}
                       fillOpacity={hasWorkload ? (isActive ? 0.92 : 0.72) : 0.4}
                       stroke={isActive ? '#0f172a' : '#1e3a5f'}
-                      strokeWidth={isActive ? 2.25 : 1}
+                      strokeWidth={isActive ? 2.25 : map.shapes.length > 20 ? 0.6 : 1}
                       strokeLinejoin="round"
                       className="cursor-pointer transition-[fill-opacity]"
                       onMouseEnter={() => setHovered(shape.key)}
@@ -219,14 +333,14 @@ function NYCWorkloadHeatMap({
                       <title>
                         {shape.label} — NYC 311 benchmark workload (not operational data, not a risk prediction)
                         {w
-                          ? `\nWorkload intensity: ${workloadTier(norm(w.complaint_volume))}` +
-                            `\nComplaint volume: ${num(w.complaint_volume)}`
+                          ? `\nWorkload intensity: ${workloadTier(norm(w.volume))}` +
+                            `\nComplaint volume: ${num(w.volume)}`
                           : '\nNo NYC 311 workload data'}
                       </title>
                     </path>
                   )
                 })}
-                {/* Borough labels */}
+                {/* Area labels */}
                 {map.shapes.map((shape) => (
                   <text
                     key={`label-${shape.id}`}
@@ -262,24 +376,25 @@ function NYCWorkloadHeatMap({
                   </div>
                 )}
                 <div className="mt-2 text-[11px] text-ink-subtle">
-                  Hover or select a borough to see its NYC 311 workload detail.
+                  Hover or select a {adapter.unitLabel} to see its NYC 311 workload detail.
                 </div>
               </figcaption>
             </figure>
           ) : (
             <div className="flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 px-6 py-10 text-center text-sm text-ink-subtle">
-              Loading NYC borough boundaries…
+              Loading NYC {adapter.unitLabel} boundaries…
             </div>
           )}
         </div>
 
-        {/* Selected borough detail panel */}
+        {/* Selected area detail panel */}
         <div className="lg:col-span-2">
-          <SelectedBoroughPanel
-            workload={activeWorkload}
-            boroughLabel={activeShape?.label ?? activeWorkload?.borough ?? null}
-            tier={activeWorkload ? workloadTier(norm(activeWorkload.complaint_volume)) : null}
-            color={activeWorkload ? heatColor(norm(activeWorkload.complaint_volume)) : '#e2e8f0'}
+          <SelectedAreaPanel
+            unitLabel={adapter.unitLabel}
+            volume={activeVolume}
+            areaLabel={activeLabel}
+            tier={activeVolume ? workloadTier(norm(activeVolume.volume)) : null}
+            color={activeVolume ? heatColor(norm(activeVolume.volume)) : '#e2e8f0'}
             interactive={selected != null || hovered != null}
             hasWorkload={hasWorkload}
           />
@@ -289,17 +404,35 @@ function NYCWorkloadHeatMap({
   )
 }
 
-/** Detail panel for the hovered/selected borough, showing its NYC 311 workload. */
-function SelectedBoroughPanel({
-  workload,
-  boroughLabel,
+function ModeTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+        active ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
+/** Detail panel for the hovered/selected area, showing its NYC 311 workload. */
+function SelectedAreaPanel({
+  unitLabel,
+  volume,
+  areaLabel,
   tier,
   color,
   interactive,
   hasWorkload,
 }: {
-  workload: NYCBoroughWorkload | undefined
-  boroughLabel: string | null
+  unitLabel: string
+  volume: AreaVolume | undefined
+  areaLabel: string | null
   tier: string | null
   color: string
   interactive: boolean
@@ -315,10 +448,10 @@ function SelectedBoroughPanel({
     )
   }
 
-  if (!workload) {
+  if (!volume) {
     return (
       <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
-        Hover or select a borough on the map to see its NYC 311 workload.
+        Hover or select a {unitLabel} on the map to see its NYC 311 workload.
       </div>
     )
   }
@@ -328,9 +461,9 @@ function SelectedBoroughPanel({
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-            {interactive ? 'Selected borough' : 'Busiest borough (NYC 311)'}
+            {interactive ? `Selected ${unitLabel}` : `Busiest ${unitLabel} (NYC 311)`}
           </div>
-          <div className="text-base font-semibold text-navy-900">{boroughLabel || workload.borough}</div>
+          <div className="text-base font-semibold text-navy-900">{areaLabel || volume.label}</div>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-ink-muted">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
@@ -338,7 +471,7 @@ function SelectedBoroughPanel({
         </span>
       </div>
 
-      <div className="mt-3 text-2xl font-semibold text-navy-900 tabular-nums">{num(workload.complaint_volume)}</div>
+      <div className="mt-3 text-2xl font-semibold text-navy-900 tabular-nums">{num(volume.volume)}</div>
       <div className="text-[10px] uppercase tracking-wider text-ink-subtle">NYC 311 complaint volume</div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
@@ -355,22 +488,22 @@ function SelectedBoroughPanel({
 
 type LngLat = [number, number]
 
-type BoroughShape = {
+type AreaShape = {
   id: string
   label: string
   short: string
-  /** Lower-cased borough name used to join NYC 311 workload counts. */
+  /** Area key used to join NYC 311 workload counts. */
   key: string
   d: string
   cx: number
   cy: number
 }
 
-type BoroughMap = {
+type AreaMap = {
   width: number
   height: number
   labelSize: number
-  shapes: BoroughShape[]
+  shapes: AreaShape[]
 }
 
 type MapEntry = {
@@ -427,7 +560,7 @@ function extractRings(geometry: unknown): LngLat[][] {
 }
 
 /** Projects geometry-bearing entries into a shared SVG coordinate space. */
-function buildMap(entries: MapEntry[]): BoroughMap | null {
+function buildMap(entries: MapEntry[]): AreaMap | null {
   const usable = entries.filter((e) => e.rings.length > 0)
   if (usable.length === 0) return null
 
@@ -465,7 +598,7 @@ function buildMap(entries: MapEntry[]): BoroughMap | null {
 
   const fmt = (n: number) => Math.round(n * 100) / 100
 
-  const shapes: BoroughShape[] = usable.map((entry) => {
+  const shapes: AreaShape[] = usable.map((entry) => {
     const d = entry.rings
       .map((ring) => {
         const segs = ring.map(([lng, lat], i) => {
@@ -491,18 +624,20 @@ function buildMap(entries: MapEntry[]): BoroughMap | null {
     return { id: entry.id, label: entry.label, short: entry.short, key: entry.key, d, cx: fmt(cx), cy: fmt(cy) }
   })
 
-  const labelSize = Math.max(9, Math.min(16, width / 48))
+  // Smaller labels when there are many areas (e.g. 51 council districts).
+  const baseLabel = Math.max(9, Math.min(16, width / 48))
+  const labelSize = shapes.length > 20 ? Math.max(6.5, baseLabel * 0.62) : baseLabel
   return { width: fmt(width), height: fmt(height), labelSize, shapes }
 }
 
-/** Projects the real NYC borough polygons into the shared SVG space. */
-function buildBoroughMap(boroughs: NYCBoroughBoundary[]): BoroughMap | null {
-  const entries: MapEntry[] = boroughs.map((b, idx) => ({
-    id: String(b.id ?? idx),
-    label: b.borough_name,
-    short: b.short_label || b.borough_name,
-    key: boroughKey(b.borough_name),
-    rings: extractRings(b.geojson_geometry),
+/** Projects the real NYC area polygons into the shared SVG space. */
+function buildAreaMap(units: AreaUnit[]): AreaMap | null {
+  const entries: MapEntry[] = units.map((u, idx) => ({
+    id: u.id || String(idx),
+    label: u.label,
+    short: u.short || u.label,
+    key: u.key,
+    rings: extractRings(u.geometry),
   }))
   return buildMap(entries)
 }

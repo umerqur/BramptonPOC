@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
 import { NYC_BOROUGH_BOUNDARIES } from '../data/nycBoroughBoundaries'
+import { NYC_COUNCIL_DISTRICT_BOUNDARIES } from '../data/nycCouncilDistrictBoundaries'
 
 // Primary data source for the authenticated Brampton complaint workflow app.
 // NYC 311 Open Data public benchmark data is loaded into `municipal_complaints`
@@ -15,6 +16,10 @@ export const WARDS_TABLE = 'brampton_ward_boundaries'
 // NYC 311 benchmark service-request volume per borough, aggregated from
 // municipal_complaints (see migration 014_nyc311_rich_fields.sql).
 export const NYC_WORKLOAD_VIEW = 'v_nyc_service_request_workload'
+// NYC 311 benchmark service-request volume per City Council district — the finer,
+// ward-like operational unit (boroughs are too broad). See migration
+// 015_nyc_council_district_workload.sql.
+export const NYC_COUNCIL_DISTRICT_WORKLOAD_VIEW = 'v_nyc_council_district_workload'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
@@ -185,6 +190,33 @@ export type NYCBoroughBoundary = {
  */
 export type NYCBoroughWorkload = {
   borough: string
+  complaint_volume: number
+}
+
+/**
+ * One real NYC City Council district boundary — the operational, ward-like
+ * geographic unit for the NYC 311 workload heat map (boroughs are too broad and
+ * stay as the executive overview). Geometry is bundled from NYC Open Data — City
+ * Council Districts (see src/data/nycCouncilDistrictBoundaries.ts). `council_district`
+ * (as text) is the join key to the per-district NYC 311 workload counts.
+ */
+export type NYCCouncilDistrictBoundary = {
+  id: number
+  council_district: number
+  short_label: string
+  source_city: string
+  source_dataset: string
+  geojson_geometry: unknown
+}
+
+/**
+ * NYC 311 benchmark complaint volume aggregated per City Council district, from
+ * public.v_nyc_council_district_workload over public.municipal_complaints. `area`
+ * is the council district number as text, matching council_district in the bundled
+ * geometry. NYC 311 benchmark decision support only — not Brampton operational data.
+ */
+export type NYCCouncilDistrictWorkload = {
+  area: string
   complaint_volume: number
 }
 
@@ -500,6 +532,64 @@ export function mockNYCWorkloadByBorough(): NYCBoroughWorkload[] {
     { borough: 'Manhattan', complaint_volume: 18650 },
     { borough: 'Staten Island', complaint_volume: 7980 },
   ]
+}
+
+/**
+ * Returns the real NYC City Council district polygons used as the finer,
+ * ward-like base layer of the NYC 311 workload heat map. Geometry is bundled
+ * (NYC Open Data — City Council Districts) rather than read from Supabase, so the
+ * map is always available. Async to keep a uniform load contract with the
+ * workload query.
+ */
+export async function getNYCCouncilDistrictBoundaries(): Promise<NYCCouncilDistrictBoundary[]> {
+  return NYC_COUNCIL_DISTRICT_BOUNDARIES.map((d, idx) => ({
+    id: idx + 1,
+    council_district: d.council_district,
+    short_label: d.short_label,
+    source_city: 'NYC',
+    source_dataset: 'NYC Open Data — City Council Districts (872g-cjhh)',
+    geojson_geometry: d.geojson_geometry,
+  }))
+}
+
+/**
+ * Reads real NYC 311 benchmark complaint volume per City Council district from
+ * public.v_nyc_council_district_workload (aggregated over municipal_complaints),
+ * highest volume first. `area` is normalized to a plain district number string so
+ * it joins to the bundled geometry. Any Supabase/RLS error is thrown so the caller
+ * can fall back to the benchmark sample.
+ */
+export async function getNYCWorkloadByCouncilDistrict(): Promise<NYCCouncilDistrictWorkload[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(NYC_COUNCIL_DISTRICT_WORKLOAD_VIEW)
+    .select('area, complaint_volume')
+    .order('complaint_volume', { ascending: false })
+
+  if (error) throw error
+  return ((data ?? []) as NYCWorkloadRow[])
+    .map((r) => ({
+      // Normalize to a plain number string ("05" / " 5 " → "5") to match geometry.
+      area: String(Number((r.area ?? '').trim())),
+      complaint_volume: Number(r.complaint_volume) || 0,
+    }))
+    .filter((r) => r.area.length > 0 && r.area !== 'NaN' && r.area !== '0')
+}
+
+/**
+ * Representative NYC 311 benchmark complaint volume per City Council district,
+ * used when the live Supabase view is unavailable so the heat map still renders.
+ * Illustrative benchmark figures across all 51 districts (not Brampton data).
+ */
+export function mockNYCWorkloadByCouncilDistrict(): NYCCouncilDistrictWorkload[] {
+  // Deterministic spread so every district shades; outer-borough districts carry
+  // more 311 volume, mirroring the real benchmark distribution.
+  return NYC_COUNCIL_DISTRICT_BOUNDARIES.map((d) => {
+    const n = d.council_district
+    const base = 2400 + ((n * 1373) % 7600)
+    const wave = Math.round(1600 * (1 + Math.sin(n / 2.3)))
+    return { area: String(n), complaint_volume: base + wave }
+  })
 }
 
 // ---------------------------------------------------------------------------
