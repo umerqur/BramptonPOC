@@ -6,6 +6,10 @@ import {
   METHOD_OF_CONTACT_OPTIONS,
   ENFORCEMENT_COMPLAINT_TYPES,
   RESIDENT_DEMO_NOTICE,
+  ACCEPTED_ATTACHMENT_HINT,
+  ACCEPTED_ATTACHMENT_INPUT,
+  MAX_ATTACHMENT_BYTES,
+  isAcceptedAttachmentType,
   submitResidentRequest,
   type ResidentRequestInput,
 } from '../../services/residentRequests'
@@ -28,7 +32,7 @@ type FormState = {
   requestType: string
   description: string
   happeningNow: string
-  uploadedFileNames: string[]
+  files: File[]
 
   // Contact
   firstName: string
@@ -55,7 +59,7 @@ const INITIAL: FormState = {
   requestType: '',
   description: '',
   happeningNow: '',
-  uploadedFileNames: [],
+  files: [],
   firstName: '',
   lastName: '',
   contactUnitNumber: '',
@@ -75,7 +79,7 @@ const STEPS = ['Issue', 'Location', 'Contact', 'Review'] as const
 type Status =
   | { kind: 'idle' }
   | { kind: 'submitting' }
-  | { kind: 'success'; caseId: string; emailSent: boolean }
+  | { kind: 'success'; caseId: string; emailSent: boolean; attachmentsUploaded: number; attachmentError: boolean }
   | { kind: 'error'; message: string }
 
 export default function ResidentNewRequestPage() {
@@ -84,11 +88,36 @@ export default function ResidentNewRequestPage() {
   const [form, setForm] = useState<FormState>(INITIAL)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [stepError, setStepError] = useState<string | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
     if (stepError) setStepError(null)
     if (status.kind === 'error') setStatus({ kind: 'idle' })
+  }
+
+  // Validate and store selected attachments (images / PDFs, ≤ 10 MB each), and
+  // report any that were rejected with a friendly message.
+  function handleSelectFiles(fileList: FileList | null) {
+    const incoming = Array.from(fileList ?? [])
+    const accepted: File[] = []
+    const rejected: string[] = []
+    for (const f of incoming) {
+      if (!isAcceptedAttachmentType(f)) rejected.push(`${f.name} — unsupported type`)
+      else if (f.size > MAX_ATTACHMENT_BYTES) rejected.push(`${f.name} — over 10 MB`)
+      else accepted.push(f)
+    }
+    setForm((prev) => ({ ...prev, files: accepted }))
+    setFileError(
+      rejected.length > 0
+        ? `These files were not added: ${rejected.join('; ')}. Accepted: ${ACCEPTED_ATTACHMENT_HINT}.`
+        : null,
+    )
+    if (status.kind === 'error') setStatus({ kind: 'idle' })
+  }
+
+  function removeFile(index: number) {
+    setForm((prev) => ({ ...prev, files: prev.files.filter((_, i) => i !== index) }))
   }
 
   function validateStep(index: number): string | null {
@@ -163,7 +192,7 @@ export default function ResidentNewRequestPage() {
       requestType: form.requestType,
       description: form.description.trim(),
       happeningNow: form.happeningNow || undefined,
-      uploadedFileNames: form.uploadedFileNames,
+      files: form.files,
       firstName: form.firstName,
       lastName: form.lastName,
       contactUnitNumber: form.contactUnitNumber || undefined,
@@ -179,7 +208,13 @@ export default function ResidentNewRequestPage() {
     }
     try {
       const result = await submitResidentRequest(input)
-      setStatus({ kind: 'success', caseId: result.caseId, emailSent: result.emailSent })
+      setStatus({
+        kind: 'success',
+        caseId: result.caseId,
+        emailSent: result.emailSent,
+        attachmentsUploaded: result.attachmentsUploaded,
+        attachmentError: result.attachmentError,
+      })
     } catch (err) {
       console.error('Resident request submission failed:', err)
       setStatus({
@@ -220,6 +255,23 @@ export default function ResidentNewRequestPage() {
               Your request was recorded. (The confirmation email could not be sent in this environment.)
             </p>
           )}
+          {status.attachmentError ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-900">
+              <div className="font-semibold">Some files were not uploaded</div>
+              <p className="mt-0.5">
+                Your request was saved
+                {status.attachmentsUploaded > 0
+                  ? ` with ${status.attachmentsUploaded} file${status.attachmentsUploaded === 1 ? '' : 's'}, but at least one attachment could not be uploaded.`
+                  : ', but your attachments could not be uploaded.'}{' '}
+                You can mention the photo when staff contact you.
+              </p>
+            </div>
+          ) : status.attachmentsUploaded > 0 ? (
+            <p className="mt-4 text-sm text-ink-muted">
+              {status.attachmentsUploaded} file{status.attachmentsUploaded === 1 ? '' : 's'} uploaded and attached to your
+              request for staff review.
+            </p>
+          ) : null}
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Link to={`/resident/status/${encodeURIComponent(status.caseId)}`} className="btn-primary">
               View request status
@@ -297,7 +349,15 @@ export default function ResidentNewRequestPage() {
         <Stepper step={step} />
 
         <form className="mt-8" onSubmit={handleSubmit}>
-          {step === 0 && <IssueStep form={form} update={update} />}
+          {step === 0 && (
+            <IssueStep
+              form={form}
+              update={update}
+              onSelectFiles={handleSelectFiles}
+              onRemoveFile={removeFile}
+              fileError={fileError}
+            />
+          )}
           {step === 1 && <LocationStep form={form} update={update} />}
           {step === 2 && <ContactStep form={form} update={update} />}
           {step === 3 && <ReviewStep form={form} onEdit={setStep} />}
@@ -503,7 +563,17 @@ function MapPreview({ location }: { location: string }) {
 }
 
 // ---- Step 1: Issue --------------------------------------------------------
-function IssueStep({ form, update }: StepProps) {
+function IssueStep({
+  form,
+  update,
+  onSelectFiles,
+  onRemoveFile,
+  fileError,
+}: StepProps & {
+  onSelectFiles: (files: FileList | null) => void
+  onRemoveFile: (index: number) => void
+  fileError: string | null
+}) {
   return (
     <StepCard title="What's the issue?" subtitle="Tell us what you're reporting.">
       <Field label="Issue Type" required>
@@ -541,38 +611,52 @@ function IssueStep({ form, update }: StepProps) {
 
       <div>
         <span className="text-sm font-medium text-navy-900">Photos or documents</span>
-        <p className="mt-0.5 text-xs text-ink-subtle">Optional. Demo only — file names are recorded for staff context; files are not uploaded or stored.</p>
-        {form.uploadedFileNames.length > 0 && (
+        <p className="mt-0.5 text-xs text-ink-subtle">Optional. Photos or documents can help staff review the request.</p>
+        <p className="mt-0.5 text-[11px] text-ink-subtle">{ACCEPTED_ATTACHMENT_HINT}</p>
+        {form.files.length > 0 && (
           <ul className="mt-3 space-y-1.5">
-            {form.uploadedFileNames.map((name) => (
+            {form.files.map((file, i) => (
               <li
-                key={name}
-                className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink"
+                key={`${file.name}-${i}`}
+                className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink"
               >
-                <svg className="h-4 w-4 flex-none text-ink-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <path d="M14 2v6h6" />
-                </svg>
-                <span className="truncate">{name}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <svg className="h-4 w-4 flex-none text-ink-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6" />
+                  </svg>
+                  <span className="truncate">{file.name}</span>
+                  <span className="flex-none text-[11px] text-ink-subtle">
+                    {(file.size / (1024 * 1024)).toFixed(1)} MB
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemoveFile(i)}
+                  className="flex-none text-xs font-medium text-ink-subtle hover:text-rose-600"
+                >
+                  Remove
+                </button>
               </li>
             ))}
           </ul>
         )}
+        {fileError && (
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {fileError}
+          </p>
+        )}
         <div className="mt-3">
           <input
-            id="resident-demo-files"
+            id="resident-attachment-files"
             type="file"
             multiple
+            accept={ACCEPTED_ATTACHMENT_INPUT}
             className="sr-only"
-            onChange={(e) =>
-              update(
-                'uploadedFileNames',
-                Array.from(e.target.files ?? []).map((file) => file.name),
-              )
-            }
+            onChange={(e) => onSelectFiles(e.target.files)}
           />
-          <label htmlFor="resident-demo-files" className="btn-secondary inline-flex cursor-pointer">
-            Upload file
+          <label htmlFor="resident-attachment-files" className="btn-secondary inline-flex cursor-pointer">
+            {form.files.length > 0 ? 'Choose different files' : 'Upload files'}
           </label>
         </div>
       </div>
@@ -741,7 +825,7 @@ function ReviewStep({ form, onEdit }: { form: FormState; onEdit: (step: number) 
           <ReviewItem label="Describe the issue" value={form.description || '—'} />
           <ReviewItem
             label="Uploaded Files"
-            value={form.uploadedFileNames.length > 0 ? form.uploadedFileNames.join(', ') : '—'}
+            value={form.files.length > 0 ? form.files.map((f) => f.name).join(', ') : '—'}
           />
         </ReviewGroup>
 

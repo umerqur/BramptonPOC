@@ -7,9 +7,12 @@ import { residentRowToCase } from '../../services/residentCaseBridge'
 import {
   STATUS_LABELS,
   getResidentRequests,
+  getResidentRequestAttachmentsForCases,
+  type ResidentRequestAttachment,
   type ResidentRequestRow,
   type ResidentStatus,
 } from '../../services/residentRequests'
+import ResidentAttachments from '../../components/app/ResidentAttachments'
 
 // Staff Inbox — the page authenticated staff land on first. It lists the newest
 // resident submissions from public.resident_service_requests and, for each one,
@@ -53,6 +56,8 @@ export default function AppStaffInboxPage() {
   const navigate = useNavigate()
   const [state, setState] = useState<LoadState>({ rows: [], loading: true, error: null })
   const [tab, setTab] = useState<QueueTab>('open')
+  // Attachments for the loaded cases, batched into one query and grouped by case.
+  const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
 
   const openRows = useMemo(() => state.rows.filter((r) => OPEN_STATUSES.includes(r.status)), [state.rows])
   const closedRows = useMemo(() => state.rows.filter((r) => CLOSED_STATUSES.includes(r.status)), [state.rows])
@@ -60,8 +65,23 @@ export default function AppStaffInboxPage() {
 
   const load = useCallback(() => {
     setState((s) => ({ ...s, loading: true, error: null }))
+    setAttachmentsByCase({})
     getResidentRequests(100)
-      .then((rows) => setState({ rows, loading: false, error: null }))
+      .then((rows) => {
+        setState({ rows, loading: false, error: null })
+        // Load attachment metadata for these cases. Best-effort: a failure here
+        // (e.g. the table not migrated yet) must never break the queue.
+        getResidentRequestAttachmentsForCases(rows.map((r) => r.case_id))
+          .then((atts) => {
+            const map: Record<string, ResidentRequestAttachment[]> = {}
+            for (const a of atts) (map[a.case_id] ??= []).push(a)
+            setAttachmentsByCase(map)
+          })
+          .catch((err: unknown) => {
+            console.error('Failed to load resident attachments:', err)
+            setAttachmentsByCase({})
+          })
+      })
       .catch((err: unknown) => {
         console.error('Failed to load resident requests:', err)
         setState({ rows: [], loading: false, error: sectionError(err) })
@@ -122,7 +142,11 @@ export default function AppStaffInboxPage() {
           <ul className="space-y-4">
             {visibleRows.map((row) => (
               <li key={row.case_id}>
-                <InboxCard row={row} onOpen={() => openCase(row)} />
+                <InboxCard
+                  row={row}
+                  attachments={attachmentsByCase[row.case_id] ?? []}
+                  onOpen={() => openCase(row)}
+                />
               </li>
             ))}
           </ul>
@@ -167,7 +191,15 @@ function TabButton({
   )
 }
 
-function InboxCard({ row, onOpen }: { row: ResidentRequestRow; onOpen: () => void }) {
+function InboxCard({
+  row,
+  attachments,
+  onOpen,
+}: {
+  row: ResidentRequestRow
+  attachments: ResidentRequestAttachment[]
+  onOpen: () => void
+}) {
   // Deterministic generated triage from the row (placeholder for a real AI
   // result). Memoised so we don't re-run the workflow on every render.
   const triageCase = useMemo(() => residentRowToCase(row), [row])
@@ -202,6 +234,9 @@ function InboxCard({ row, onOpen }: { row: ResidentRequestRow; onOpen: () => voi
           </p>
         )}
       </div>
+
+      {/* Resident-uploaded photos / documents (private; viewed via signed URL). */}
+      <ResidentAttachments caseId={row.case_id} attachments={attachments} variant="card" />
 
       {/* Generated AI triage — support only, below the resident's complaint. */}
       <div className="mt-4 rounded-lg border border-accent-200 bg-accent-50/50 p-4">

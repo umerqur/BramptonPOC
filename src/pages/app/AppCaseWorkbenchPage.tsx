@@ -13,6 +13,7 @@ import {
   NoCaseState,
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
+import ResidentAttachments from '../../components/app/ResidentAttachments'
 import type { DemoCase, FieldVisitOutcome, Priority } from '../../data/demoWorkflowTypes'
 
 // Demo roster of by-law officers a supervisor/CSR can assign a case to.
@@ -120,6 +121,8 @@ export default function AppCaseWorkbenchPage() {
               </p>
             )}
           </Panel>
+
+          <ResidentAttachments caseId={c.id} variant="full" />
 
           <Panel title="Case summary" subtitle="AI summary / recommended action — decision support for staff review">
             <p className="text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>

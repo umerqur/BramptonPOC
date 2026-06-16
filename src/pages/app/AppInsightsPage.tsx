@@ -15,7 +15,8 @@ export default function AppInsightsPage() {
         <p className="mt-2 text-ink-muted">
           Where the service-request workload sits across NYC, using the NYC 311 benchmark dataset. The default council
           district view is the ward-like operational equivalent; the borough view is the high-level executive overview.
-          This is decision support only — staff review every case.
+          Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure — this
+          is supervisor decision support only, not an enforcement decision and not a risk prediction.
         </p>
       </div>
 

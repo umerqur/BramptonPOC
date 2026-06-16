@@ -18,6 +18,34 @@ import { addWorkflowEvent } from './municipalServiceRequests'
 
 export const RESIDENT_REQUESTS_TABLE = 'resident_service_requests'
 
+/** Metadata table + private Storage bucket for resident-uploaded attachments. */
+export const RESIDENT_ATTACHMENTS_TABLE = 'resident_request_attachments'
+export const RESIDENT_ATTACHMENTS_BUCKET = 'resident-request-attachments'
+
+/** Max accepted size per uploaded file (10 MB). */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+/** Human-readable accepted-files hint for the resident form. */
+export const ACCEPTED_ATTACHMENT_HINT = 'Images (PNG, JPG, GIF, WEBP) or PDF · up to 10 MB each'
+/** `accept` attribute for the file input — images and PDFs only. */
+export const ACCEPTED_ATTACHMENT_INPUT = 'image/*,application/pdf'
+
+/** Whether a file is an accepted attachment type (image or PDF) and not oversized. */
+export function isAcceptedAttachmentType(file: File): boolean {
+  const type = (file.type || '').toLowerCase()
+  return type === 'application/pdf' || type.startsWith('image/')
+}
+
+/** Per-file attachment metadata stored in resident_request_attachments. */
+export type ResidentRequestAttachment = {
+  id: string
+  case_id: string
+  file_name: string
+  file_path: string
+  content_type: string | null
+  file_size_bytes: number | null
+  uploaded_at: string
+}
+
 /** Server-side Netlify function that sends resident email via Mailjet. */
 const RESIDENT_EMAIL_ENDPOINT = '/.netlify/functions/send-resident-email'
 
@@ -163,7 +191,8 @@ export type ResidentRequestInput = {
   requestType: string
   description: string
   happeningNow?: string
-  uploadedFileNames?: string[]
+  /** Real files the resident attaches (photos / PDFs). Uploaded to Storage. */
+  files?: File[]
 
   // Contact
   firstName: string
@@ -263,6 +292,66 @@ export type SubmitResult = {
   caseId: string
   /** Whether the confirmation email was accepted by the email service. */
   emailSent: boolean
+  /** Number of resident attachments successfully stored. */
+  attachmentsUploaded: number
+  /** True if one or more selected attachments failed to upload. */
+  attachmentError: boolean
+}
+
+/** Sanitize a filename to a safe storage object name (keeps a useful suffix). */
+function safeFileName(name: string): string {
+  const cleaned = name.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '')
+  return cleaned.slice(-100) || 'file'
+}
+
+/**
+ * Upload the resident's files to the private Storage bucket under
+ * resident-requests/{caseId}/… and record each one in resident_request_attachments.
+ * Best-effort per file: a single failed file does not abort the others. Returns
+ * how many succeeded and how many failed so the caller can warn the resident.
+ */
+async function uploadResidentAttachments(
+  client: NonNullable<typeof supabase>,
+  caseId: string,
+  files: File[],
+): Promise<{ uploaded: number; failed: number }> {
+  let uploaded = 0
+  let failed = 0
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    // Defensive validation (the form validates too): images / PDFs, ≤ 10 MB.
+    if (!isAcceptedAttachmentType(file) || file.size > MAX_ATTACHMENT_BYTES) {
+      failed++
+      continue
+    }
+
+    const path = `resident-requests/${caseId}/${Date.now()}-${i}-${safeFileName(file.name)}`
+    const { error: uploadError } = await client.storage
+      .from(RESIDENT_ATTACHMENTS_BUCKET)
+      .upload(path, file, { contentType: file.type || undefined, upsert: false })
+    if (uploadError) {
+      console.error('Resident attachment upload failed:', uploadError)
+      failed++
+      continue
+    }
+
+    const { error: metaError } = await client.from(RESIDENT_ATTACHMENTS_TABLE).insert({
+      case_id: caseId,
+      file_name: file.name,
+      file_path: path,
+      content_type: file.type || null,
+      file_size_bytes: file.size,
+    })
+    if (metaError) {
+      console.error('Resident attachment metadata insert failed:', metaError)
+      failed++
+      continue
+    }
+    uploaded++
+  }
+
+  return { uploaded, failed }
 }
 
 /**
@@ -285,9 +374,6 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
     input.happeningNow ? `Is this happening now: ${input.happeningNow}` : null,
     input.concernUnitNumber ? `Location unit or apartment number: ${input.concernUnitNumber.trim()}` : null,
     input.concernPostalCode ? `Location postal code: ${input.concernPostalCode.trim()}` : null,
-    input.uploadedFileNames?.length
-      ? `Demo uploaded files: ${input.uploadedFileNames.map((name) => name.trim()).filter(Boolean).join(', ')}`
-      : null,
     input.contactStreetAddress ? `Contact street address: ${input.contactStreetAddress.trim()}` : null,
     input.contactCity ? `Contact city: ${input.contactCity.trim()}` : null,
     input.contactProvince ? `Contact province: ${input.contactProvince.trim()}` : null,
@@ -334,6 +420,22 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
 
   if (error) throw error
 
+  // Upload any attached files to private Storage and record their metadata,
+  // linked to this case id. The request row is already saved, so an upload
+  // failure here never loses the request — it surfaces as a warning instead.
+  let attachmentsUploaded = 0
+  let attachmentError = false
+  if (input.files && input.files.length > 0) {
+    try {
+      const result = await uploadResidentAttachments(client, caseId, input.files)
+      attachmentsUploaded = result.uploaded
+      attachmentError = result.failed > 0
+    } catch (err) {
+      console.error('Resident attachment upload failed:', err)
+      attachmentError = true
+    }
+  }
+
   // Only the resident is ever emailed — first this confirmation, then a message
   // on each staff-driven status change. Staff do not receive email.
   const emailSent = await sendResidentEmail({
@@ -345,7 +447,7 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
     location: row.location,
   })
 
-  return { caseId, emailSent }
+  return { caseId, emailSent, attachmentsUploaded, attachmentError }
 }
 
 /**
@@ -479,4 +581,55 @@ export async function markResidentRequestClosedFromClosureReview(
 
   // e. return the updated row
   return updated as ResidentRequestRow
+}
+
+const ATTACHMENT_COLUMNS = 'id, case_id, file_name, file_path, content_type, file_size_bytes, uploaded_at'
+
+/** Staff (authenticated) — read attachment metadata for a single case, oldest first. */
+export async function getResidentRequestAttachments(caseId: string): Promise<ResidentRequestAttachment[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(RESIDENT_ATTACHMENTS_TABLE)
+    .select(ATTACHMENT_COLUMNS)
+    .eq('case_id', caseId)
+    .order('uploaded_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as ResidentRequestAttachment[]
+}
+
+/**
+ * Staff (authenticated) — read attachment metadata for many cases in one query.
+ * Used by the Work Queue to show an attachment count per card without N requests.
+ */
+export async function getResidentRequestAttachmentsForCases(
+  caseIds: string[],
+): Promise<ResidentRequestAttachment[]> {
+  if (caseIds.length === 0) return []
+  const client = requireClient()
+  const { data, error } = await client
+    .from(RESIDENT_ATTACHMENTS_TABLE)
+    .select(ATTACHMENT_COLUMNS)
+    .in('case_id', caseIds)
+    .order('uploaded_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as ResidentRequestAttachment[]
+}
+
+/**
+ * Staff (authenticated) — mint a short-lived signed URL to view one private
+ * attachment object. The bucket is never public; this URL expires quickly.
+ */
+export async function createAttachmentSignedUrl(filePath: string, expiresInSeconds = 120): Promise<string> {
+  const client = requireClient()
+  const { data, error } = await client.storage
+    .from(RESIDENT_ATTACHMENTS_BUCKET)
+    .createSignedUrl(filePath, expiresInSeconds)
+  if (error) throw error
+  if (!data?.signedUrl) throw new Error('Could not create a view link for this file.')
+  return data.signedUrl
+}
+
+/** True when an attachment's content type is an image (for inline preview hints). */
+export function isImageAttachment(att: ResidentRequestAttachment): boolean {
+  return (att.content_type ?? '').toLowerCase().startsWith('image/')
 }

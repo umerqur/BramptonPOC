@@ -39,6 +39,8 @@ type ModeAdapter = {
   headerSubtitle: string
   /** Fine-print context, kept distinct per mode (operational vs executive). */
   context: string
+  /** Shown when the live Supabase view is unavailable or empty. */
+  fallbackMessage: string
   loadUnits: () => Promise<AreaUnit[]>
   loadVolumes: () => Promise<AreaVolume[]>
   sample: () => AreaVolume[]
@@ -48,9 +50,11 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
   district: {
     toggleLabel: 'Council district workload',
     unitLabel: 'council district',
-    headerSubtitle: 'Real NYC council district boundaries · NYC 311 benchmark volume by council district',
+    headerSubtitle: 'Ward like operational view of NYC 311 workload by council district.',
     context:
-      'Real NYC City Council district boundaries — the ward-like operational unit — are shaded by real NYC 311 benchmark complaint volume per district. Districts with higher complaint volume show higher workload intensity. This is the operational view: finer than boroughs and the closest NYC equivalent to a Brampton/Toronto ward. Benchmark decision support only — not a risk prediction — and this NYC geography and volume is never plotted onto Brampton wards.',
+      'Real NYC City Council district boundaries — the ward-like operational unit — are shaded by real NYC 311 benchmark complaint volume per district. Districts with higher complaint volume show higher workload intensity. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. This is supervisor decision support only — not a risk prediction, not where to enforce, and this NYC geography and volume is never plotted onto Brampton wards.',
+    fallbackMessage:
+      'Showing benchmark sample volume. Live NYC 311 council district aggregation is not loaded yet.',
     async loadUnits() {
       const districts = await getNYCCouncilDistrictBoundaries()
       return districts.map((d) => ({
@@ -76,9 +80,10 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
   borough: {
     toggleLabel: 'Borough overview',
     unitLabel: 'borough',
-    headerSubtitle: 'Real NYC borough boundaries · NYC 311 benchmark volume by borough',
+    headerSubtitle: 'High level NYC borough workload overview.',
     context:
-      'Real NYC borough boundaries give the high-level executive overview, shaded by real NYC 311 benchmark complaint volume per borough. Boroughs are broad geographic areas — not a ward-like unit — so use the council district view for the operational equivalent of a Brampton/Toronto ward. This is benchmark decision support only — not a risk prediction — and this NYC geography and volume is never plotted onto Brampton wards.',
+      'Real NYC borough boundaries give the high-level executive overview, shaded by real NYC 311 benchmark complaint volume per borough. Boroughs are broad geographic areas — not a ward-like unit — so use the council district view for the operational equivalent of a Brampton/Toronto ward. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. Supervisor decision support only — not a risk prediction — and this NYC geography and volume is never plotted onto Brampton wards.',
+    fallbackMessage: 'Showing benchmark sample volume — live NYC 311 borough aggregation unavailable.',
     async loadUnits() {
       const boroughs = await getNYCBoroughBoundaries()
       return boroughs.map((b, idx) => ({
@@ -289,7 +294,7 @@ function NYCWorkloadHeatMap({
       {fallback && (
         <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-5 py-2 text-[11px] text-amber-900">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-          Showing benchmark sample volume — live NYC 311 aggregation unavailable.
+          {adapter.fallbackMessage}
         </div>
       )}
 
@@ -399,6 +404,15 @@ function NYCWorkloadHeatMap({
             hasWorkload={hasWorkload}
           />
         </div>
+      </div>
+
+      {/* Supervisor decision-support framing. Deliberately not an enforcement
+          decision, does not direct officers, and is not a risk prediction. */}
+      <div className="border-t border-slate-100 px-5 py-3 text-[11px] leading-relaxed text-ink-subtle">
+        <span className="font-semibold text-ink-muted">Supervisor decision support.</span> These workload patterns help
+        supervisors see where complaint volume is concentrated, which {adapter.unitLabel}s are repeatedly busy, and where
+        service response pressure may be forming — input for reviewing staffing, patrol coverage, and supervisor review.
+        It does not tell staff where to enforce, does not decide where officers go, and is not a risk prediction.
       </div>
     </section>
   )
