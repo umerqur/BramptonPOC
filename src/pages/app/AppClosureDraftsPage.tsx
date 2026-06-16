@@ -167,7 +167,7 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
         {/* AI summary recap */}
         <div className="space-y-6">
-          <Panel title="AI case summary">
+          <Panel title="Case summary">
             <p className="text-sm leading-relaxed text-ink">{c.summary.plainLanguage}</p>
             <div className="mt-3">
               <Link to={`/app/workbench?case=${c.id}`} className="text-xs font-semibold text-accent-600 hover:text-accent-700">
@@ -202,13 +202,11 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
             </p>
           </Panel>
 
-          {/* Resident message governance — clarifies the outbound message is
-              template-controlled and staff-approved, with AI limited to summary
-              and context (not freeform generation of the resident letter). */}
+          {/* Compact governance: the outbound message is template-controlled and
+              staff-approved. */}
           <div className="rounded-lg border border-navy-200 bg-navy-50 px-4 py-3 text-xs text-navy-900">
-            <span className="font-semibold">Resident message governance:</span> this closure response is assembled from
-            approved template logic and recorded case facts. AI assists with summary and context, but the outbound
-            resident message is staff approved and template controlled.
+            <span className="font-semibold">Staff approved closure.</span> Assembled from approved templates and the
+            recorded field outcome; the resident response requires supervisor approval before it is sent.
           </div>
 
           <Panel title="Internal notes">
@@ -383,11 +381,11 @@ function Header({ cases, activeId, onPick }: { cases: DemoCase[]; activeId: stri
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="max-w-3xl">
-        <div className="section-eyebrow">Step 4 · Staff review & approval</div>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">Closure Drafts</h1>
+        <div className="section-eyebrow">Closure review</div>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">Closure review</h1>
         <p className="mt-2 text-ink-muted">
-          The system assembled a policy aligned closure draft from approved rules, templates, and the recorded field
-          outcome. Staff review, edit, and approve before anything is sent.
+          Review the case, the field outcome, and the draft closure response, then approve and send. Supervisor approval
+          is required before the resident is notified.
         </p>
       </div>
       <CaseSwitcher cases={cases} activeId={activeId} onPick={onPick} />

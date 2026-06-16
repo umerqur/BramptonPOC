@@ -48,11 +48,10 @@ function residentFieldMessage(outcome: FieldVisitOutcome, followUp: boolean): st
   return `${base}${FIELD_MESSAGE_TAIL[outcome]}${fu} We will send you a final update once the file is reviewed and closed.`
 }
 
-// Case Workbench — assembles the AI's gathered enforcement context and the
-// case summary in one place, plus the confidence gate from the diagram. Staff
-// act here on exceptions: approve routing, request more information, override
-// priority, and send the case to staff review (which prepares the closure
-// draft). This is where "AI reduces manual research" should feel obvious.
+// Case Workbench — assembles the gathered enforcement context and the case
+// summary in one place, plus the review-readiness gate. Staff act here: approve
+// routing, request more information, override priority, and send the case to
+// staff review (which prepares the closure draft).
 
 const PRIORITIES: Priority[] = ['P1', 'P2', 'P3', 'P4']
 
@@ -110,7 +109,7 @@ export default function AppCaseWorkbenchPage() {
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <AutomationBadge kind="ai" />
         <AutomationBadge kind="review" />
-        <span className="text-xs text-ink-subtle">AI gathered the context below — staff confirm and decide.</span>
+        <span className="text-xs text-ink-subtle">Context gathered for review — staff confirm and decide.</span>
       </div>
 
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
@@ -128,7 +127,7 @@ export default function AppCaseWorkbenchPage() {
 
           <ResidentAttachments caseId={c.id} variant="full" />
 
-          <Panel title="Case summary" subtitle="AI summary / recommended action — decision support for staff review">
+          <Panel title="Case summary" subtitle="Decision support for staff review">
             <p className="text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
             <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2">
               {summary.structuredFacts.map((f) => (
@@ -140,7 +139,7 @@ export default function AppCaseWorkbenchPage() {
             </div>
           </Panel>
 
-          <Panel title="Enforcement context" subtitle="Research the AI pulled so staff don't have to">
+          <Panel title="Enforcement context" subtitle="Related records and context for this case">
             <Sub label="Related complaint history">
               {ctx.complaintHistory.length === 0 ? (
                 <Empty>No prior complaints on record for this location.</Empty>
@@ -581,10 +580,10 @@ function Header({ cases, activeId, onPick }: { cases: DemoCase[]; activeId: stri
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="max-w-3xl">
-        <div className="section-eyebrow">Step 3 · Case workbench</div>
+        <div className="section-eyebrow">Case workbench</div>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">Case Workbench</h1>
         <p className="mt-2 text-ink-muted">
-          Enforcement context, case summary, and the confidence gate — assembled by AI, decided by staff.
+          Enforcement context, case summary, and review readiness — decision support for staff.
         </p>
       </div>
       <CaseSwitcher cases={cases} activeId={activeId} onPick={onPick} />

@@ -1,12 +1,11 @@
-// Shared UI primitives for the AI-assisted closure-response demo.
+// Shared UI primitives for the staff closure-response workflow.
 //
-// These make the automation-vs-human story visually obvious and keep the
-// end-to-end flow consistent across pages: a stepper that mirrors the use-case
-// diagram, automation/approval badges, a confidence meter, stage badges, and the
-// guardrail footer that must appear on every demo page.
+// These keep the end-to-end flow consistent across pages: a stepper that mirrors
+// the lifecycle, stage badges, a confidence meter, and a compact decision-support
+// guardrail footer.
 
 import { Link } from 'react-router-dom'
-import { DEMO_DATA_NOTE, DEMO_GUARDRAIL } from '../../services/demoWorkflowService'
+import { DEMO_DATA_NOTE } from '../../services/demoWorkflowService'
 import type { AutomationActor, DemoCase, WorkflowStage } from '../../data/demoWorkflowTypes'
 
 // The canonical end-to-end flow, in order. `lane` drives the swimlane styling
@@ -112,7 +111,7 @@ export function AutomationBadge({ kind }: { kind: 'ai' | 'review' | 'approval' }
   if (kind === 'ai') {
     return (
       <span className="badge bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200">
-        <Gear /> Automated by AI system
+        <Gear /> Decision support
       </span>
     )
   }
@@ -237,15 +236,17 @@ export function CaseSwitcher({
   )
 }
 
-/** Guardrail footer required on every demo page. */
+/** Compact decision-support guardrail shown at the foot of staff pages. */
 export function GuardrailFooter() {
   return (
     <div className="mt-12 rounded-xl border border-navy-200 bg-navy-50 px-5 py-4">
       <div className="flex items-start gap-3">
         <Shield className="mt-0.5 text-navy-700" />
         <div>
-          <p className="text-sm font-semibold text-navy-900">{DEMO_GUARDRAIL}</p>
-          <p className="mt-1 text-xs text-ink-muted">{DEMO_DATA_NOTE}</p>
+          <p className="text-sm font-semibold text-navy-900">Decision support only</p>
+          <p className="mt-1 text-xs text-ink-muted">
+            Assignments, field outcomes, and closure responses require authorized staff review.
+          </p>
         </div>
       </div>
     </div>

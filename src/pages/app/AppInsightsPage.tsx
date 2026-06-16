@@ -9,17 +9,15 @@ import InsightsDashboard, {
 import { useWorkflow } from '../../lib/workflowStore'
 
 // Insights — the supervisor/coordinator operational workload intelligence
-// dashboard over the NYC 311 benchmark dataset. It keeps the council-district /
-// borough workload map and adds supervisor-focused sections: KPIs, complaint
-// type pressure, closure and area bottlenecks, department workload, trend, and
-// channel mix. Every aggregate is read from a server-side Supabase view (never
-// the full table in the browser); clicking a map area, a complaint type, or a
-// bottleneck row opens the individual case records behind it.
+// dashboard over the New York City 311 public service request dataset. It keeps
+// the council-district / borough workload map and adds supervisor-focused
+// sections: KPIs, complaint type pressure, closure and area bottlenecks,
+// department workload, trend, and channel mix. Every aggregate is read from a
+// server-side Supabase view (never the full table in the browser); clicking a map
+// area, a complaint type, or a bottleneck row opens the case records behind it.
 //
 // By-law Officers do not see supervisor Insights and are redirected to their
-// Officer Field Console. This is NYC 311 benchmark decision support — not
-// Brampton operational data, not a risk prediction, and not an automated
-// enforcement decision.
+// Officer Field Console. Decision support only — not a risk prediction.
 export default function AppInsightsPage() {
   const { role } = useWorkflow()
   // Shared drilldown opened from the map, complaint types, or bottleneck rows.
