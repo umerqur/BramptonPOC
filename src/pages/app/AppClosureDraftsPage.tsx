@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
-import { formatDateTime } from '../../services/demoWorkflowService'
+import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
 import { sendResidentEmail } from '../../services/residentRequests'
+import { can, rolesAllowed } from '../../lib/roles'
 import {
   AutomationBadge,
   CaseSwitcher,
@@ -106,6 +107,8 @@ export default function AppClosureDraftsPage() {
 
 function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; onApprove: (body: string) => void }) {
   const draft = c.draft!
+  const { role } = useWorkflow()
+  const canApprove = can(role, 'approveClosure')
   const [body, setBody] = useState(draft.body)
   const [internal, setInternal] = useState('')
 
@@ -123,6 +126,22 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
         <AutomationBadge kind="approval" />
         <span className="text-xs text-ink-subtle">The AI drafted this response. Staff review, edit, and approve.</span>
       </div>
+
+      {/* What the letter is actually based on — a recorded field outcome, or a
+          review-only closure with no officer claim. */}
+      {c.fieldAction ? (
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-800">
+          <span className="font-semibold">Based on a recorded field visit:</span>{' '}
+          {FIELD_OUTCOME_LABELS[c.fieldAction.outcome]} by {c.fieldAction.officerName} on{' '}
+          {formatDateTime(c.fieldAction.visitedAt)}
+          {c.fieldAction.referenceNumber ? ` · ${c.fieldAction.referenceNumber}` : ''}. The letter states this outcome.
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
+          <span className="font-semibold">Review-only closure.</span> No officer field visit is on file, so the letter
+          does not claim an officer attended. Assign an officer in the Case Workbench if a site visit is needed first.
+        </div>
+      )}
 
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
         {/* AI summary recap */}
@@ -185,13 +204,24 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
               <div>
                 <h3 className="text-sm font-semibold text-navy-900">Approve final response</h3>
                 <p className="text-xs text-ink-muted">
-                  Human-in-the-loop approval.{' '}
-                  {willEmail
-                    ? `On approval, this response is emailed to ${c.input.residentEmail}.`
-                    : 'No deliverable resident email is on file, so the case is closed without sending an email.'}
+                  {canApprove ? (
+                    <>
+                      Human-in-the-loop approval.{' '}
+                      {willEmail
+                        ? `On approval, this response is emailed to ${c.input.residentEmail}.`
+                        : 'No deliverable resident email is on file, so the case is closed without sending an email.'}
+                    </>
+                  ) : (
+                    <>Closure approval is restricted to {rolesAllowed('approveClosure')}. Switch role to “Supervisor”.</>
+                  )}
                 </p>
               </div>
-              <button onClick={() => onApprove(body)} disabled={sending} className="btn-accent disabled:opacity-60">
+              <button
+                onClick={() => onApprove(body)}
+                disabled={sending || !canApprove}
+                title={canApprove ? undefined : `Only ${rolesAllowed('approveClosure')} can approve a closure`}
+                className="btn-accent disabled:opacity-60 disabled:cursor-not-allowed"
+              >
                 {sending ? 'Approving & sending…' : 'Approve final response →'}
               </button>
             </div>

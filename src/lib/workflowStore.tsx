@@ -17,6 +17,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react'
 import type {
   DemoCase,
+  FieldVisitOutcome,
+  OfficerFieldAction,
   Priority,
   ResidentComplaintInput,
   SupervisorMetrics,
@@ -26,17 +28,31 @@ import {
   buildClosureDraft,
   buildSeedCases,
   computeSupervisorMetrics,
+  FIELD_OUTCOME_LABELS,
   runWorkflow,
 } from '../services/demoWorkflowService'
 import { residentRowToCase } from '../services/residentCaseBridge'
 import type { ResidentRequestRow } from '../services/residentRequests'
+import { ROLE_ACTOR_NAME, type StaffRole } from './roles'
 
-const STORAGE_KEY = 'brampton-demo-workflow-v1'
+// Bumped to v2 when the officer field-action model landed, so older persisted
+// cases (with the previous canned officer-claim closure drafts) are reseeded.
+const STORAGE_KEY = 'brampton-demo-workflow-v2'
 const STAFF_NAME = 'M. Okafor (By-law Officer)'
+
+/** What an officer enters when recording a field investigation. */
+export type FieldActionInput = {
+  outcome: FieldVisitOutcome
+  observations: string
+  referenceNumber?: string | null
+  followUpRequired?: boolean
+}
 
 type WorkflowState = {
   cases: DemoCase[]
   activeCaseId: string | null
+  /** Demo role the reviewer is currently acting as (RBAC for the workflow). */
+  role: StaffRole
 }
 
 type WorkflowContextValue = {
@@ -44,12 +60,17 @@ type WorkflowContextValue = {
   activeCase: DemoCase | null
   metrics: SupervisorMetrics
   staffName: string
+  /** Current demo role + setter (role-based access for the workflow). */
+  role: StaffRole
+  setRole: (role: StaffRole) => void
   submitComplaint: (input: ResidentComplaintInput) => string
   ingestResidentCase: (row: ResidentRequestRow) => string
   setActiveCase: (id: string | null) => void
   approveRouting: (id: string) => void
   requestMoreInfo: (id: string, note?: string) => void
   overridePriority: (id: string, priority: Priority) => void
+  assignToOfficer: (id: string, officerName: string) => void
+  recordFieldAction: (id: string, input: FieldActionInput) => void
   sendToStaffReview: (id: string) => void
   editDraftBody: (id: string, body: string) => void
   approveClosure: (id: string, delivery?: ClosureDelivery) => void
@@ -65,6 +86,11 @@ type WorkflowContextValue = {
  */
 export type ClosureDelivery = { attempted: boolean; emailSent: boolean }
 
+/** Add N seconds to an ISO timestamp (keeps audit events strictly ordered). */
+function addSecondsIso(iso: string, secs: number): string {
+  return new Date(new Date(iso).getTime() + secs * 1000).toISOString()
+}
+
 const WorkflowContext = createContext<WorkflowContextValue | null>(null)
 
 function loadState(): WorkflowState {
@@ -72,15 +98,22 @@ function loadState(): WorkflowState {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY)
       if (raw) {
-        const parsed = JSON.parse(raw) as WorkflowState
-        if (Array.isArray(parsed.cases)) return parsed
+        const parsed = JSON.parse(raw) as Partial<WorkflowState>
+        if (Array.isArray(parsed.cases)) {
+          return {
+            cases: parsed.cases,
+            activeCaseId: parsed.activeCaseId ?? parsed.cases[0]?.id ?? null,
+            // Default older persisted state (no role) to supervisor.
+            role: parsed.role ?? 'supervisor',
+          }
+        }
       }
     } catch {
       // fall through to seed
     }
   }
   const cases = buildSeedCases()
-  return { cases, activeCaseId: cases[0]?.id ?? null }
+  return { cases, activeCaseId: cases[0]?.id ?? null, role: 'supervisor' }
 }
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
@@ -101,8 +134,12 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
   const submitComplaint = useCallback((input: ResidentComplaintInput): string => {
     const next = runWorkflow(input)
-    setState((s) => ({ cases: [next, ...s.cases], activeCaseId: next.id }))
+    setState((s) => ({ ...s, cases: [next, ...s.cases], activeCaseId: next.id }))
     return next.id
+  }, [])
+
+  const setRole = useCallback((role: StaffRole) => {
+    setState((s) => ({ ...s, role }))
   }, [])
 
   // Bridge a resident Supabase submission into the workbench. Reuses the case if
@@ -115,7 +152,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         return { ...s, activeCaseId: row.case_id }
       }
       const next = residentRowToCase(row)
-      return { cases: [next, ...s.cases], activeCaseId: row.case_id }
+      return { ...s, cases: [next, ...s.cases], activeCaseId: row.case_id }
     })
     return row.case_id
   }, [])
@@ -162,11 +199,66 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     [updateCase],
   )
 
+  // Supervisor / CSR assigns the case to a named officer for a field visit.
+  const assignToOfficer = useCallback(
+    (id: string, officerName: string) => {
+      const now = new Date().toISOString()
+      updateCase(id, (c) => ({
+        ...c,
+        stage: c.stage === 'closed' ? c.stage : 'assigned',
+        assignedOfficer: officerName,
+        decisions: [...c.decisions, { action: `Assigned to ${officerName}`, by: STAFF_NAME, at: now }],
+        audit: [
+          ...c.audit,
+          auditEvent('staff', 'Assigned to officer', `Case assigned to ${officerName} for a field investigation.`, now),
+        ],
+      }))
+    },
+    [updateCase],
+  )
+
+  // Officer records what actually happened on the field visit. The closure draft
+  // is rebuilt from that outcome so the resident letter only states real actions.
+  const recordFieldAction = useCallback(
+    (id: string, input: FieldActionInput) => {
+      const now = new Date().toISOString()
+      updateCase(id, (c) => {
+        const officerName = c.assignedOfficer ?? ROLE_ACTOR_NAME.officer
+        const fieldAction: OfficerFieldAction = {
+          officerName,
+          visitedAt: now,
+          outcome: input.outcome,
+          observations: input.observations,
+          referenceNumber: input.referenceNumber?.trim() ? input.referenceNumber.trim() : null,
+          followUpRequired: input.followUpRequired ?? false,
+          recordedAt: now,
+        }
+        // Regenerate the closure draft grounded in the recorded outcome.
+        const draft = buildClosureDraft(c.input, c.triage, c.context, now, fieldAction)
+        return {
+          ...c,
+          stage: 'field-visit',
+          fieldAction,
+          draft,
+          decisions: [...c.decisions, { action: `Recorded field outcome: ${FIELD_OUTCOME_LABELS[input.outcome]}`, by: officerName, at: now }],
+          audit: [
+            ...c.audit,
+            auditEvent('officer', 'Field visit recorded', `${officerName} attended the location and recorded the outcome: ${FIELD_OUTCOME_LABELS[input.outcome]}.`, now),
+            auditEvent('ai', 'Closure draft updated', 'Closure response regenerated to reflect the recorded field outcome.', addSecondsIso(now, 1)),
+          ],
+        }
+      })
+    },
+    [updateCase],
+  )
+
   const sendToStaffReview = useCallback(
     (id: string) => {
       const now = new Date().toISOString()
       updateCase(id, (c) => {
-        const draft = c.draft ?? buildClosureDraft(c.input, c.triage, c.context, now)
+        // Build (or rebuild) the draft from whatever field outcome is on file —
+        // null means the letter stays review-only and claims no site visit.
+        const draft = c.draft ?? buildClosureDraft(c.input, c.triage, c.context, now, c.fieldAction)
         const audit = [...c.audit]
         if (!c.draft) audit.push(auditEvent('ai', 'Closure draft prepared', 'Staff sent the case to review — a closure-response draft was prepared.', now))
         audit.push(auditEvent('staff', 'Sent to staff review', 'Case moved into the closure-draft review queue.', now))
@@ -238,7 +330,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
   const resetDemo = useCallback(() => {
     const cases = buildSeedCases()
-    setState({ cases, activeCaseId: cases[0]?.id ?? null })
+    setState((s) => ({ ...s, cases, activeCaseId: cases[0]?.id ?? null }))
   }, [])
 
   const activeCase = useMemo(
@@ -253,12 +345,16 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     activeCase,
     metrics,
     staffName: STAFF_NAME,
+    role: state.role,
+    setRole,
     submitComplaint,
     ingestResidentCase,
     setActiveCase,
     approveRouting,
     requestMoreInfo,
     overridePriority,
+    assignToOfficer,
+    recordFieldAction,
     sendToStaffReview,
     editDraftBody,
     approveClosure,

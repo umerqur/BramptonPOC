@@ -30,7 +30,7 @@ export type DemoCategory =
 export type Priority = 'P1' | 'P2' | 'P3' | 'P4'
 
 /** Who performed a workflow action — used to make automation vs. human review obvious. */
-export type AutomationActor = 'ai' | 'staff' | 'resident' | 'system'
+export type AutomationActor = 'ai' | 'staff' | 'resident' | 'system' | 'officer'
 
 /** Where a case currently sits in the end-to-end flow. */
 export type WorkflowStage =
@@ -39,6 +39,8 @@ export type WorkflowStage =
   | 'context'
   | 'summary'
   | 'needs-staff-attention'
+  | 'assigned'
+  | 'field-visit'
   | 'staff-review'
   | 'approved'
   | 'closed'
@@ -94,6 +96,31 @@ export type CaseSummary = {
   missingContext: string[]
 }
 
+/**
+ * The outcome of an officer's field investigation — the real-world action that
+ * actually happened on the case. The closure response may only assert officer
+ * activity when one of these has been recorded. Mirrors a standard municipal
+ * by-law enforcement disposition.
+ */
+export type FieldVisitOutcome = 'no_violation' | 'notice_issued' | 'ticket_issued' | 'resolved'
+
+/**
+ * A recorded officer field visit. Created only when a By-law Officer (role)
+ * attends the location and records what they found. Drives the truthful closure
+ * language — without this, the closure response must not claim an officer
+ * attended.
+ */
+export type OfficerFieldAction = {
+  officerName: string
+  visitedAt: string // ISO timestamp
+  outcome: FieldVisitOutcome
+  observations: string
+  /** Notice / ticket reference number, when the outcome issued one. */
+  referenceNumber: string | null
+  followUpRequired: boolean
+  recordedAt: string // ISO timestamp
+}
+
 /** The AI-drafted closure response staff review, edit, and approve. */
 export type ClosureDraft = {
   subject: string
@@ -134,6 +161,10 @@ export type DemoCase = {
   summary: CaseSummary
   draft: ClosureDraft | null
   priorityOverride: Priority | null
+  /** Officer assigned to investigate (set by a supervisor/CSR), or null. */
+  assignedOfficer: string | null
+  /** Recorded officer field investigation outcome, or null if none yet. */
+  fieldAction: OfficerFieldAction | null
   decisions: StaffDecision[]
   audit: AuditEvent[]
   closureMessage: string | null

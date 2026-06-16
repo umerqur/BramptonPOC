@@ -3,7 +3,8 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import Logo from './Logo'
 import Footer from './Footer'
 import { useAuth } from '../lib/auth'
-import { WorkflowProvider } from '../lib/workflowStore'
+import { useWorkflow, WorkflowProvider } from '../lib/workflowStore'
+import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLE_OPTIONS } from '../lib/roles'
 
 // Authenticated app shell for the staff workflow. Staff land on the Staff Inbox
 // of real resident submissions, then work a case through the Case Workbench and
@@ -57,6 +58,7 @@ export default function AppLayout() {
                   {item.label}
                 </StaffLink>
               ))}
+              <RoleSwitcher className="ml-1" />
               <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4 ml-1">
                 Sign out
               </button>
@@ -81,6 +83,9 @@ export default function AppLayout() {
                     {item.label}
                   </StaffLink>
                 ))}
+                <div className="px-3 py-2">
+                  <RoleSwitcher />
+                </div>
                 {email && <span className="px-3 py-2 text-xs text-ink-subtle">{email}</span>}
                 <button onClick={handleSignOut} className="btn-secondary mt-2">Sign out</button>
               </div>
@@ -94,6 +99,30 @@ export default function AppLayout() {
         <Footer />
       </div>
     </WorkflowProvider>
+  )
+}
+
+// Acting-as role switcher. The app sign-in has no real roles, so for the POC the
+// reviewer picks which role they are acting as; this gates the workflow actions
+// (assign to officer, record field visit, approve closure) across the app.
+function RoleSwitcher({ className = '' }: { className?: string }) {
+  const { role, setRole } = useWorkflow()
+  return (
+    <label className={`flex items-center gap-1.5 text-xs text-ink-subtle ${className}`}>
+      <span className="hidden 2xl:inline whitespace-nowrap">Acting as</span>
+      <select
+        value={role}
+        onChange={(e) => setRole(e.target.value as typeof role)}
+        title={ROLE_DESCRIPTIONS[role]}
+        className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-navy-900 focus:border-accent-500 focus:outline-none"
+      >
+        {ROLE_OPTIONS.map((r) => (
+          <option key={r} value={r}>
+            {ROLE_LABELS[r]}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 

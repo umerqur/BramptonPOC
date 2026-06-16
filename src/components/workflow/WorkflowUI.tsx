@@ -14,7 +14,7 @@ import type { AutomationActor, DemoCase, WorkflowStage } from '../../data/demoWo
 export type FlowStep = {
   key: string
   label: string
-  lane: 'ai' | 'staff' | 'resident'
+  lane: 'ai' | 'staff' | 'resident' | 'officer'
 }
 
 export const FLOW_STEPS: FlowStep[] = [
@@ -23,6 +23,8 @@ export const FLOW_STEPS: FlowStep[] = [
   { key: 'context', label: 'Enforcement context', lane: 'ai' },
   { key: 'summary', label: 'Case summary', lane: 'ai' },
   { key: 'confidence', label: 'Confidence check', lane: 'ai' },
+  { key: 'assigned', label: 'Assigned to officer', lane: 'staff' },
+  { key: 'field-visit', label: 'Officer field visit', lane: 'officer' },
   { key: 'staff-review', label: 'Staff review', lane: 'staff' },
   { key: 'closure-draft', label: 'Closure draft', lane: 'ai' },
   { key: 'approval', label: 'Final approval', lane: 'staff' },
@@ -42,12 +44,16 @@ export function stageProgress(stage: WorkflowStage): number {
       return 3
     case 'needs-staff-attention':
       return 4 // diverted at the confidence gate
+    case 'assigned':
+      return 5 // assigned to an officer for a field visit
+    case 'field-visit':
+      return 6 // officer recorded the field outcome
     case 'staff-review':
-      return 6 // draft prepared, awaiting approval
+      return 7 // draft prepared, awaiting approval
     case 'approved':
-      return 7
+      return 9
     case 'closed':
-      return 8
+      return 10
     default:
       return 0
   }
@@ -57,6 +63,7 @@ const LANE_DOT: Record<FlowStep['lane'], string> = {
   ai: 'bg-accent-600',
   staff: 'bg-navy-800',
   resident: 'bg-sky-600',
+  officer: 'bg-emerald-600',
 }
 
 /** Horizontal progress stepper used on every case-centric page. */
@@ -126,6 +133,7 @@ export function AutomationBadge({ kind }: { kind: 'ai' | 'review' | 'approval' }
 const ACTOR_STYLES: Record<AutomationActor, string> = {
   ai: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
   staff: 'bg-navy-50 text-navy-900 ring-1 ring-inset ring-navy-200',
+  officer: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200',
   resident: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
   system: 'bg-slate-100 text-slate-700',
 }
@@ -160,6 +168,8 @@ const STAGE_LABEL: Record<WorkflowStage, { label: string; cls: string }> = {
   context: { label: 'Context gathered', cls: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200' },
   summary: { label: 'Summary built', cls: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200' },
   'needs-staff-attention': { label: 'Needs staff attention', cls: 'bg-amber-50 text-amber-900 ring-1 ring-inset ring-amber-200' },
+  assigned: { label: 'Assigned to officer', cls: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200' },
+  'field-visit': { label: 'Field visit recorded', cls: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200' },
   'staff-review': { label: 'Staff review — draft ready', cls: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200' },
   approved: { label: 'Approved', cls: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200' },
   closed: { label: 'Closed', cls: 'bg-accent-100 text-accent-900 ring-1 ring-inset ring-accent-300' },

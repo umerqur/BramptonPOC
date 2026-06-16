@@ -60,9 +60,11 @@ export default function AppAuditTrailPage() {
                         ? 'bg-accent-500'
                         : e.actor === 'staff'
                           ? 'bg-navy-700'
-                          : e.actor === 'resident'
-                            ? 'bg-sky-500'
-                            : 'bg-slate-400'
+                          : e.actor === 'officer'
+                            ? 'bg-emerald-500'
+                            : e.actor === 'resident'
+                              ? 'bg-sky-500'
+                              : 'bg-slate-400'
                     }`}
                   />
                   {i < c.audit.length - 1 && <span className="mt-1 w-px flex-1 bg-slate-200" />}

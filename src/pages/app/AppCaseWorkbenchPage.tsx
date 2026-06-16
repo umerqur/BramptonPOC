@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
+import { can, rolesAllowed } from '../../lib/roles'
+import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
 import {
   AutomationBadge,
   CaseSwitcher,
@@ -10,7 +12,23 @@ import {
   NoCaseState,
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
-import type { DemoCase, Priority } from '../../data/demoWorkflowTypes'
+import type { DemoCase, FieldVisitOutcome, Priority } from '../../data/demoWorkflowTypes'
+
+// Demo roster of by-law officers a supervisor/CSR can assign a case to.
+const DEMO_OFFICERS = [
+  'R. Singh (By-law Officer)',
+  'L. Tremblay (By-law Officer)',
+  'D. Owens (By-law Officer)',
+]
+
+// Field outcomes in the order officers see them, with which ones issue a number.
+const OUTCOME_ORDER: FieldVisitOutcome[] = ['no_violation', 'notice_issued', 'ticket_issued', 'resolved']
+const OUTCOME_NEEDS_REFERENCE: Record<FieldVisitOutcome, boolean> = {
+  no_violation: false,
+  notice_issued: true,
+  ticket_issued: true,
+  resolved: false,
+}
 
 // Case Workbench — assembles the AI's gathered enforcement context and the
 // case summary in one place, plus the confidence gate from the diagram. Staff
@@ -241,13 +259,22 @@ export default function AppCaseWorkbenchPage() {
               <button
                 onClick={() => {
                   sendToStaffReview(c.id)
-                  note('Closure draft prepared. Sent to staff review.')
+                  note(
+                    c.fieldAction
+                      ? 'Closure draft prepared from the recorded field outcome. Sent to staff review.'
+                      : 'Review-only closure draft prepared (no officer field visit). Sent to staff review.',
+                  )
                   navigate(`/app/closure?case=${c.id}`)
                 }}
                 className="btn-primary justify-start text-sm"
               >
                 Prepare closure draft → send to staff review
               </button>
+              {!c.fieldAction && (
+                <p className="text-[11px] text-ink-subtle">
+                  No field visit recorded — the closure letter will be review-only and won’t claim an officer attended.
+                </p>
+              )}
             </div>
 
             {flash && (
@@ -256,6 +283,8 @@ export default function AppCaseWorkbenchPage() {
               </div>
             )}
           </Panel>
+
+          <FieldInvestigationPanel c={c} />
         </div>
       </div>
 
@@ -266,6 +295,174 @@ export default function AppCaseWorkbenchPage() {
       </div>
 
       <GuardrailFooter />
+    </div>
+  )
+}
+
+// Officer field-investigation panel — the real-world step a standard city
+// enforcement model has between triage and closure. A supervisor/CSR assigns the
+// case to an officer; the officer (role) attends and records the actual outcome,
+// which is what the closure letter is then allowed to state.
+function FieldInvestigationPanel({ c }: { c: DemoCase }) {
+  const { role, assignToOfficer, recordFieldAction } = useWorkflow()
+  const canAssign = can(role, 'assignOfficer')
+  const canRecord = can(role, 'recordFieldAction')
+
+  const [officer, setOfficer] = useState(c.assignedOfficer ?? DEMO_OFFICERS[0])
+  const [outcome, setOutcome] = useState<FieldVisitOutcome>('no_violation')
+  const [observations, setObservations] = useState('')
+  const [reference, setReference] = useState('')
+  const [followUp, setFollowUp] = useState(false)
+  const [flash, setFlash] = useState<string | null>(null)
+
+  const needsReference = OUTCOME_NEEDS_REFERENCE[outcome]
+
+  // Already investigated — show the recorded outcome (read-only).
+  if (c.fieldAction) {
+    const fa = c.fieldAction
+    return (
+      <Panel title="Field investigation" subtitle="Recorded officer outcome">
+        <span className="badge bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200">
+          {FIELD_OUTCOME_LABELS[fa.outcome]}
+        </span>
+        <dl className="mt-3 space-y-1.5 text-sm">
+          <Row label="Officer" value={fa.officerName} />
+          <Row label="Visited" value={formatDateTime(fa.visitedAt)} />
+          {fa.referenceNumber && <Row label="Reference" value={fa.referenceNumber} />}
+          <Row label="Follow-up" value={fa.followUpRequired ? 'Required' : 'Not required'} />
+        </dl>
+        {fa.observations && (
+          <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-ink-muted">
+            {fa.observations}
+          </p>
+        )}
+        <p className="mt-2 text-[11px] text-emerald-700">
+          The closure letter now states this outcome. Continue to staff review to approve it.
+        </p>
+      </Panel>
+    )
+  }
+
+  function handleRecord() {
+    if (!observations.trim()) {
+      setFlash('Add a short observation before recording the outcome.')
+      return
+    }
+    recordFieldAction(c.id, {
+      outcome,
+      observations: observations.trim(),
+      referenceNumber: needsReference ? reference.trim() || null : null,
+      followUpRequired: followUp,
+    })
+    setFlash('Field outcome recorded. The closure draft has been updated to match.')
+  }
+
+  return (
+    <Panel title="Field investigation" subtitle="Assign an officer, then record the on-site outcome">
+      {/* Assignment */}
+      <div>
+        <div className="text-xs text-ink-subtle">
+          {c.assignedOfficer ? (
+            <>Assigned to <span className="font-medium text-navy-900">{c.assignedOfficer}</span></>
+          ) : (
+            'Not yet assigned to an officer.'
+          )}
+        </div>
+        {canAssign ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              value={officer}
+              onChange={(e) => setOfficer(e.target.value)}
+              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
+            >
+              {DEMO_OFFICERS.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                assignToOfficer(c.id, officer)
+                setFlash(`Assigned to ${officer}.`)
+              }}
+              className="btn-secondary text-sm"
+            >
+              {c.assignedOfficer ? 'Reassign' : 'Assign to officer'}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-1 text-[11px] text-ink-subtle">Assigning is restricted to {rolesAllowed('assignOfficer')}.</p>
+        )}
+      </div>
+
+      {/* Record outcome — only once assigned */}
+      <div className="mt-4 border-t border-slate-100 pt-4">
+        {!c.assignedOfficer ? (
+          <p className="text-xs text-ink-subtle">Assign an officer first, then the officer records the field outcome.</p>
+        ) : !canRecord ? (
+          <p className="text-xs text-ink-subtle">
+            Recording a field visit is restricted to {rolesAllowed('recordFieldAction')}. Switch role to “By-law Officer”.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="text-xs font-medium text-navy-900">Record field visit outcome</div>
+            <label className="block">
+              <span className="stat-label">Outcome</span>
+              <select
+                value={outcome}
+                onChange={(e) => setOutcome(e.target.value as FieldVisitOutcome)}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
+              >
+                {OUTCOME_ORDER.map((o) => (
+                  <option key={o} value={o}>{FIELD_OUTCOME_LABELS[o]}</option>
+                ))}
+              </select>
+            </label>
+            {needsReference && (
+              <label className="block">
+                <span className="stat-label">{outcome === 'ticket_issued' ? 'Ticket number' : 'Notice number'}</span>
+                <input
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value)}
+                  placeholder={outcome === 'ticket_issued' ? 'e.g. TKT-20260616-014' : 'e.g. NTC-20260616-007'}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
+                />
+              </label>
+            )}
+            <label className="block">
+              <span className="stat-label">Observations</span>
+              <textarea
+                value={observations}
+                onChange={(e) => setObservations(e.target.value)}
+                rows={3}
+                placeholder="What the officer observed on site…"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <input type="checkbox" checked={followUp} onChange={(e) => setFollowUp(e.target.checked)} className="h-4 w-4" />
+              Follow-up / re-inspection required
+            </label>
+            <button onClick={handleRecord} className="btn-primary text-sm">
+              Record field outcome
+            </button>
+          </div>
+        )}
+      </div>
+
+      {flash && (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          {flash}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3 border-b border-slate-100 py-1 text-sm">
+      <dt className="text-ink-subtle">{label}</dt>
+      <dd className="text-right font-medium text-navy-900">{value}</dd>
     </div>
   )
 }

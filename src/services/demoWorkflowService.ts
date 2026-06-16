@@ -21,6 +21,8 @@ import type {
   DemoCase,
   DemoCategory,
   EnforcementContext,
+  FieldVisitOutcome,
+  OfficerFieldAction,
   Priority,
   ResidentComplaintInput,
   SampleComplaint,
@@ -54,9 +56,11 @@ function auditEvent(
       ? 'AI workflow system'
       : actor === 'staff'
         ? 'By-law staff'
-        : actor === 'resident'
-          ? 'Resident'
-          : 'System'
+        : actor === 'officer'
+          ? 'By-law officer'
+          : actor === 'resident'
+            ? 'Resident'
+            : 'System'
   return { id: nextId('evt'), at, actor, actorLabel, type, detail }
 }
 
@@ -358,13 +362,68 @@ function buildSummary(
 // Step 6 — Closure-response draft generation
 // ---------------------------------------------------------------------------
 
-const CLOSURE_OUTCOME_BY_CATEGORY: Record<DemoCategory, string> = {
-  'Property Standards': 'An enforcement officer inspected the property and a notice to comply was issued to the owner. The file will be re-inspected to confirm the repairs are completed.',
-  'Illegal Dumping': 'An officer attended the location, the dumped material has been scheduled for removal, and the area will be monitored for any repeat activity.',
-  Noise: 'An officer followed up on the reported noise. The responsible party was advised of the noise by-law requirements and the matter has been resolved.',
-  Parking: 'A parking enforcement officer attended the location and addressed the vehicle in question in accordance with the parking by-law.',
-  'Yard Maintenance': 'An officer assessed the lot and a notice to comply with the lot-maintenance by-law was issued. The property will be re-checked after the compliance period.',
-  Zoning: 'A zoning compliance review was completed for the reported use. The outcome has been recorded and any required follow-up has been scheduled.',
+/** Short, resident-facing label for each field outcome. */
+export const FIELD_OUTCOME_LABELS: Record<FieldVisitOutcome, string> = {
+  no_violation: 'No violation observed',
+  notice_issued: 'Notice to comply issued',
+  ticket_issued: 'Ticket issued',
+  resolved: 'Resolved on site',
+}
+
+function fieldVisitDateLabel(action: OfficerFieldAction): string {
+  return formatDate(action.visitedAt)
+}
+
+/**
+ * The closure paragraph that describes what actually happened. When an officer
+ * field action is on file it states the real outcome the officer recorded; with
+ * no field action it stays strictly to the review that was performed and never
+ * claims an officer attended.
+ */
+function closureOutcomeParagraph(
+  triage: AiTriageResult,
+  context: EnforcementContext,
+  fieldAction: OfficerFieldAction | null,
+): string {
+  const policy = `the City's ${context.policyMatch.name} (${context.policyMatch.reference})`
+  const where = triage.extractedLocation ? ` at ${triage.extractedLocation}` : ''
+
+  if (!fieldAction) {
+    // No officer attended — describe only the review that genuinely happened.
+    return (
+      `We reviewed the information you provided along with ${policy}. ` +
+      `Based on that review, your request has now been closed. ` +
+      `If you would like an officer to inspect the location, or if the issue continues, please reply or contact 311 with your case number.`
+    )
+  }
+
+  const date = fieldVisitDateLabel(fieldAction)
+  const ref = fieldAction.referenceNumber ? ` (${fieldAction.referenceNumber})` : ''
+  switch (fieldAction.outcome) {
+    case 'no_violation':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date} to investigate. ` +
+        `At the time of inspection, no violation of ${policy} was observed. ` +
+        `Based on that inspection, this file has been closed. If the issue recurs, please submit a new request so we can schedule a follow-up.`
+      )
+    case 'notice_issued':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
+        `A notice to comply${ref} was issued to the responsible party, and the location will be re-inspected after the compliance period. ` +
+        `Your service request has been closed now that enforcement action has been taken.`
+      )
+    case 'ticket_issued':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date}, observed a violation of ${policy}, ` +
+        `and issued a ticket${ref} to the responsible party. This file has now been closed.`
+      )
+    case 'resolved':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date}. ` +
+        `The issue had been resolved, so no further enforcement action under ${policy} was required and this file has been closed. ` +
+        `Thank you for reporting it.`
+      )
+  }
 }
 
 export function buildClosureDraft(
@@ -372,24 +431,38 @@ export function buildClosureDraft(
   triage: AiTriageResult,
   context: EnforcementContext,
   generatedAt: string,
+  fieldAction: OfficerFieldAction | null = null,
 ): ClosureDraft {
   const greeting = input.residentName ? `Dear ${input.residentName},` : 'Dear resident,'
   const body =
     `${greeting}\n\n` +
     `Thank you for your recent service request regarding a ${triage.category.toLowerCase()} concern` +
     `${triage.extractedLocation ? ` at ${triage.extractedLocation}` : ''}. We appreciate you taking the time to bring this to our attention.\n\n` +
-    `${CLOSURE_OUTCOME_BY_CATEGORY[triage.category]}\n\n` +
-    `This action was taken under the City's ${context.policyMatch.name} (${context.policyMatch.reference}). Your request has now been closed. ` +
-    `If the issue continues or recurs, please contact 311 and reference your case number and we will be glad to look into it again.\n\n` +
+    `${closureOutcomeParagraph(triage, context, fieldAction)}\n\n` +
     `Thank you for helping keep our community safe and well-maintained.\n\n` +
     `Sincerely,\nCity of Brampton — ${triage.recommendedDepartment}`
+
+  // The "action taken" claim is only truthful once an officer field action is on
+  // file; otherwise the letter is explicitly a review-only closure.
+  const internalNotes = [
+    `Matched response template: ${RESPONSE_TEMPLATE_BY_CATEGORY[triage.category]}.`,
+    `Draft assembled from intake + ${context.complaintHistory.length} historical record(s) + policy match.`,
+    fieldAction
+      ? `Field outcome on file: ${FIELD_OUTCOME_LABELS[fieldAction.outcome]} by ${fieldAction.officerName} on ${fieldVisitDateLabel(fieldAction)}${fieldAction.referenceNumber ? ` (ref ${fieldAction.referenceNumber})` : ''}.`
+      : 'No officer field action on file — closure language is review-only and claims no site visit.',
+    'Staff must review and approve before any resident communication is sent.',
+  ]
 
   return {
     subject: `Update on your service request — ${triage.category}`,
     body,
     policyChecklist: [
       { item: `Cites applicable by-law (${context.policyMatch.reference})`, ok: true },
-      { item: 'States the action taken by the City', ok: true },
+      {
+        item: fieldAction ? 'States the enforcement action taken' : 'States the review performed (no field action claimed)',
+        ok: true,
+      },
+      { item: 'Only claims a site visit when an officer recorded one', ok: true },
       { item: 'Confirms the case status (closed)', ok: true },
       { item: 'Provides a path to re-open if the issue recurs', ok: true },
     ],
@@ -399,11 +472,7 @@ export function buildClosureDraft(
       { item: 'No internal jargon or case-system codes', ok: true },
       { item: 'Personalized to the resident and issue', ok: Boolean(input.residentName) },
     ],
-    internalNotes: [
-      `Matched response template: ${RESPONSE_TEMPLATE_BY_CATEGORY[triage.category]}.`,
-      `Draft assembled from intake + ${context.complaintHistory.length} historical record(s) + policy match.`,
-      'Staff must review and approve before any resident communication is sent.',
-    ],
+    internalNotes,
     generatedBy: 'AI workflow system',
     generatedAt,
   }
@@ -456,6 +525,8 @@ export function runWorkflow(
     summary,
     draft,
     priorityOverride: null,
+    assignedOfficer: null,
+    fieldAction: null,
     decisions: [],
     audit,
     closureMessage: null,
@@ -589,18 +660,40 @@ export function buildSeedCases(): DemoCase[] {
   const cases: DemoCase[] = []
 
   // 1) A fully closed case (approved by staff) — gives the audit trail a full
-  //    lifecycle. High-confidence Noise complaint at a non-repeat address.
+  //    lifecycle: assigned to an officer, a real field visit recorded, then a
+  //    closure response approved that reflects what the officer actually did.
   const closed = runWorkflowAt(SEED_CLOSED_INPUT, daysAgo(2))
   if (closed.draft) {
+    const officerName = 'R. Singh (By-law Officer)'
+    const assignedAt = addSeconds(closed.createdAt, 200)
+    const visitedAt = addSeconds(closed.createdAt, 480)
+    const fieldAction: OfficerFieldAction = {
+      officerName,
+      visitedAt,
+      outcome: 'resolved',
+      observations: 'Attended the address; no active noise at the time of visit and the responsible party had already addressed it.',
+      referenceNumber: null,
+      followUpRequired: false,
+      recordedAt: visitedAt,
+    }
     const approvedAt = addSeconds(closed.createdAt, 600)
+    // Rebuild the closure draft from the recorded outcome so the closure message
+    // states what the officer actually found.
+    const draft = buildClosureDraft(closed.input, closed.triage, closed.context, approvedAt, fieldAction)
+    closed.assignedOfficer = officerName
+    closed.fieldAction = fieldAction
+    closed.draft = draft
     closed.stage = 'closed'
-    closed.closureMessage = closed.draft.body
-    closed.approvedBy = 'M. Okafor (By-law Officer)'
+    closed.closureMessage = draft.body
+    closed.approvedBy = 'M. Okafor (Supervisor)'
     closed.approvedAt = approvedAt
+    closed.decisions.push({ action: 'Assigned to officer', by: closed.approvedBy, at: assignedAt })
+    closed.decisions.push({ action: 'Recorded field visit outcome', by: officerName, at: visitedAt })
     closed.decisions.push({ action: 'Approved closure response', by: closed.approvedBy, at: approvedAt })
-    closed.audit.push(auditEvent('staff', 'Staff opened review', 'By-law officer opened the prepared draft for review.', addSeconds(closed.createdAt, 300)))
+    closed.audit.push(auditEvent('staff', 'Assigned to officer', `Supervisor assigned the case to ${officerName} for a field investigation.`, assignedAt))
+    closed.audit.push(auditEvent('officer', 'Field visit recorded', `${officerName} attended the location and recorded the outcome: ${FIELD_OUTCOME_LABELS[fieldAction.outcome]}.`, visitedAt))
     closed.audit.push(auditEvent('staff', 'Closure approved', `Final response approved by ${closed.approvedBy}.`, approvedAt))
-    closed.audit.push(auditEvent('system', 'Resident updated', 'Closure update delivered to the resident (demo — not actually sent).', addSeconds(approvedAt, 1)))
+    closed.audit.push(auditEvent('system', 'Resident emailed', 'The approved closure response was emailed to the resident.', addSeconds(approvedAt, 1)))
     closed.audit.push(auditEvent('system', 'Case closed', 'Case status changed to Closed and logged in the audit trail.', addSeconds(approvedAt, 2)))
   }
   cases.push(closed)
