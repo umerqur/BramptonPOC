@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  getInsightsSourceMeta,
+  formatPlainDate,
+  sampleInsightsSourceMeta,
   getInsightsKpis,
   getInsightsComplaintTypeVolume,
   getInsightsClosureBottlenecks,
@@ -22,6 +25,7 @@ import {
   type InsightsDepartmentWorkload,
   type MonthlyTrendPoint,
   type ChannelMixRow,
+  type InsightsSourceMeta,
 } from '../../services/insightsDashboard'
 import {
   getInsightsDrilldownCases,
@@ -42,6 +46,53 @@ import {
 // ---------------------------------------------------------------------------
 
 export type Drilldown = { title: string; filter: InsightsDrilldownFilter }
+
+// ---------------------------------------------------------------------------
+// Data source banner — states the real source (NYC 311 public data) with live
+// record count and date range. Only the hardcoded fallback is a placeholder.
+// ---------------------------------------------------------------------------
+
+export function InsightsSourceBanner() {
+  const { data, fallback } = useSection<InsightsSourceMeta>(
+    getInsightsSourceMeta,
+    sampleInsightsSourceMeta,
+    (d) => d.record_count === 0,
+  )
+  const earliest = formatPlainDate(data.earliest)
+  const latest = formatPlainDate(data.latest)
+  const range = earliest && latest ? `${earliest} to ${latest}` : 'Date range unavailable'
+
+  return (
+    <section className="mt-6 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-2">
+          <SourceLine label="Data source" value="New York City 311 public service requests" />
+          <SourceLine label="Records loaded" value={data.record_count.toLocaleString()} />
+          <SourceLine label="Date range" value={range} />
+          <SourceLine label="Purpose" value="Workload intelligence demo using public benchmark data" />
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sky-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-sky-800">
+          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
+          NYC 311 public data
+        </span>
+      </div>
+      {fallback && (
+        <p className="mt-3 text-[11px] text-amber-800">
+          Showing demo placeholder source figures — the live record count could not be loaded.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function SourceLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-900/70">{label}:</span>
+      <span className="text-sm text-navy-900">{value}</span>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Shared loading hook — read the live view, fall back to the benchmark sample
@@ -497,13 +548,22 @@ function SectionShell({
           <h2 className="text-sm font-semibold text-navy-900">{title}</h2>
           <p className="mt-0.5 text-xs text-ink-subtle">{subtitle}</p>
         </div>
-        {fallback && (
+        {fallback ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-800 ring-1 ring-inset ring-amber-200">
             <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-            Benchmark sample
+            Demo placeholder · Live data unavailable
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+            NYC 311 public data
           </span>
         )}
       </div>
+      {fallback && (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-900">
+          This section is using demo placeholder data because the live aggregate view could not be loaded.
+        </p>
+      )}
       <div className={`mt-4 ${loading ? 'animate-pulse opacity-60' : ''}`}>{children}</div>
     </section>
   )

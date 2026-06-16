@@ -23,6 +23,9 @@ export default function AppOfficerCasePage() {
   const { role } = useWorkflow()
   const [row, setRow] = useState<ResidentRequestRow | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
+  // True only right after the officer records the outcome this session, so we can
+  // show a focused success panel with the obvious next step.
+  const [justRecorded, setJustRecorded] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -58,6 +61,37 @@ export default function AppOfficerCasePage() {
         <BackLink />
         <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">
           {error ?? 'This case could not be found or is not assigned to you.'}
+        </div>
+      </div>
+    )
+  }
+
+  // Compact success state, shown right after the officer records the outcome.
+  if (justRecorded) {
+    return (
+      <div className="container-page py-10">
+        <BackLink />
+        <div className="mx-auto mt-6 max-w-xl card p-8 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </div>
+          <h1 className="mt-4 text-xl font-semibold text-navy-900">Field outcome recorded</h1>
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-900">
+            <div>
+              <span className="font-semibold">Status:</span> Ready for supervisor closure review
+            </div>
+            <div className="mt-1">
+              <span className="font-semibold">Next step:</span> Supervisor reviews the field outcome and approves the
+              closure response.
+            </div>
+          </div>
+          <div className="mt-6">
+            <Link to="/app/field" className="btn-primary">
+              Back to Officer Field Console
+            </Link>
+          </div>
         </div>
       </div>
     )
@@ -109,32 +143,36 @@ export default function AppOfficerCasePage() {
           <FieldOutcomeSection
             row={row}
             isClosed={isClosed}
-            onRecorded={(updated) => setRow(updated)}
+            onRecorded={(updated) => {
+              setRow(updated)
+              setJustRecorded(true)
+            }}
           />
         </div>
 
-        {/* Right: decision support (deterministic, not an enforcement decision) */}
+        {/* Right: assignment + secondary, collapsed decision support. Operational
+            first — governance/disclaimer detail stays out of the officer's way. */}
         <div className="space-y-6">
-          <Panel title="Decision support summary" subtitle="Deterministic suggestions — staff decide">
-            <dl className="space-y-2">
+          {row.assigned_officer_name && (
+            <Panel title="Assignment">
+              <dl className="space-y-2">
+                <Detail label="Assigned officer" value={row.assigned_officer_name} />
+                <Detail label="Assigned" value={row.assigned_at ? formatDateTime(row.assigned_at) : '—'} />
+              </dl>
+            </Panel>
+          )}
+
+          <details className="card p-5">
+            <summary className="cursor-pointer select-none text-sm font-semibold text-navy-900">
+              Decision support summary
+              <span className="ml-1 font-normal text-ink-subtle">(suggestions — staff decide)</span>
+            </summary>
+            <dl className="mt-3 space-y-2">
               <Detail label="Routing recommendation" value={routing} />
               <Detail label="Classification" value={classification} />
               <Detail label="Priority" value={priority} />
             </dl>
-            <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-              Suggestions only. The case was assigned to you by a supervisor (human assignment required); this is not an
-              automated enforcement decision.
-            </p>
-          </Panel>
-
-          {row.assigned_officer_name && (
-            <Panel title="Assignment notes">
-              <p className="text-sm text-ink">
-                Assigned to <span className="font-medium text-navy-900">{row.assigned_officer_name}</span> by a
-                supervisor{row.assigned_at ? ` on ${formatDateTime(row.assigned_at)}` : ''}.
-              </p>
-            </Panel>
-          )}
+          </details>
         </div>
       </div>
     </div>
@@ -155,9 +193,9 @@ function FieldOutcomeSection({
   // Read-only view once an outcome is recorded (or the case is closed).
   if (recorded) {
     return (
-      <Panel title="Field outcome" subtitle="Recorded — feeds closure review readiness">
+      <Panel title="Field outcome" subtitle="Field outcome recorded">
         <span className="badge bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200">
-          Field visit completed
+          Ready for closure review
         </span>
         <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
           <Detail label="Violation observed" value={row.field_violation_observed ?? '—'} />
@@ -181,7 +219,7 @@ function FieldOutcomeSection({
           </div>
         )}
         <p className="mt-3 text-[11px] text-emerald-700">
-          This field outcome feeds closure review. A supervisor approves the final closure.
+          Next step: a supervisor reviews this field outcome and approves the closure response.
         </p>
       </Panel>
     )

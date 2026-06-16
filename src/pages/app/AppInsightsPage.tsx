@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import NYCWorkloadMapPanel from '../../components/app/NYCWorkloadMapPanel'
-import InsightsDashboard, { DrilldownModal, type Drilldown } from '../../components/app/InsightsDashboard'
+import InsightsDashboard, {
+  DrilldownModal,
+  InsightsSourceBanner,
+  type Drilldown,
+} from '../../components/app/InsightsDashboard'
 import { useWorkflow } from '../../lib/workflowStore'
 
 // Insights — the supervisor/coordinator operational workload intelligence
@@ -37,6 +41,9 @@ export default function AppInsightsPage() {
           and service response pressure — not an enforcement decision and not a risk prediction.
         </p>
       </div>
+
+      {/* Data source banner — the real NYC 311 public dataset behind the dashboard. */}
+      <InsightsSourceBanner />
 
       {/* NYC 311 workload heat map — clicking a district opens its case drilldown. */}
       <NYCWorkloadMapPanel

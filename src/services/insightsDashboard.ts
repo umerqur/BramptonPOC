@@ -14,6 +14,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 // not a risk prediction, and not an automated enforcement decision. A human
 // coordinator or supervisor reviews and decides.
 
+const INSIGHTS_SOURCE_META_VIEW = 'v_insights_source_meta'
 const INSIGHTS_KPIS_VIEW = 'v_insights_kpis'
 const INSIGHTS_COMPLAINT_TYPE_VOLUME_VIEW = 'v_insights_complaint_type_volume'
 const INSIGHTS_CLOSURE_BOTTLENECKS_VIEW = 'v_insights_closure_bottlenecks'
@@ -40,6 +41,44 @@ function numOrNull(value: unknown): number | null {
   if (value == null) return null
   const n = typeof value === 'string' ? Number(value) : (value as number)
   return Number.isFinite(n) ? n : null
+}
+
+// ---------------------------------------------------------------------------
+// 0. Source metadata — the real data source behind the dashboard
+// ---------------------------------------------------------------------------
+
+export type InsightsSourceMeta = {
+  record_count: number
+  earliest: string | null
+  latest: string | null
+}
+
+export async function getInsightsSourceMeta(): Promise<InsightsSourceMeta> {
+  const client = requireClient()
+  const { data, error } = await client.from(INSIGHTS_SOURCE_META_VIEW).select('*').single()
+  if (error) throw error
+  const r = data as Record<string, unknown>
+  return {
+    record_count: num(r.record_count),
+    earliest: (r.earliest as string | null) ?? null,
+    latest: (r.latest as string | null) ?? null,
+  }
+}
+
+/** Plain-English date, e.g. "July 1, 2024". Returns null for unparseable input. */
+export function formatPlainDate(value: string | null): string | null {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+/**
+ * Demo placeholder source metadata, used only when the live source-meta view is
+ * unavailable. Illustrative figures for the NYC 311 public benchmark.
+ */
+export function sampleInsightsSourceMeta(): InsightsSourceMeta {
+  return { record_count: 3432183, earliest: '2024-07-01', latest: '2026-06-30' }
 }
 
 // ---------------------------------------------------------------------------
