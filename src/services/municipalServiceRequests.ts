@@ -372,6 +372,64 @@ export async function getAgingOpenComplaints(limit = 15): Promise<ComplaintRow[]
   return ((data ?? []) as MunicipalComplaintRow[]).map(mapComplaintRow)
 }
 
+/**
+ * Drilldown filter for the Insights dashboard. When a supervisor clicks a map
+ * area, a complaint type, or a bottleneck row, we fetch the individual records
+ * behind that aggregate — a small, filtered, limited slice of
+ * municipal_complaints, never the full table — so they can open each case file.
+ */
+export type InsightsDrilldownFilter = {
+  complaintType?: string
+  councilDistrict?: string
+  department?: string
+}
+
+/**
+ * Individual NYC 311 benchmark records behind an Insights aggregate, newest
+ * first. The council-district filter matches both the plain and zero-padded
+ * stored forms (e.g. "5" and "05"). Throws on any Supabase error so the caller
+ * can surface it.
+ */
+export async function getInsightsDrilldownCases(
+  filter: InsightsDrilldownFilter,
+  limit = 50,
+): Promise<ComplaintRow[]> {
+  const client = requireClient()
+  let query = client.from(COMPLAINTS_TABLE).select(LIST_COLUMNS).eq('source_city', 'NYC')
+
+  if (filter.complaintType) {
+    if (filter.complaintType === 'Uncategorized') {
+      query = query.or('complaint_type.is.null,complaint_type.eq.')
+    } else {
+      query = query.eq('complaint_type', filter.complaintType)
+    }
+  }
+
+  if (filter.councilDistrict) {
+    const plain = String(Number(filter.councilDistrict))
+    const padded = plain.padStart(2, '0')
+    query = query.in('council_district', Array.from(new Set([plain, padded, filter.councilDistrict])))
+  }
+
+  if (filter.department) {
+    // Department on the dashboard is assigned_department, falling back to the
+    // NYC agency name/code; match any of those so the drilldown lines up.
+    query = query.or(
+      [
+        `assigned_department.eq.${filter.department}`,
+        `agency_name.eq.${filter.department}`,
+        `agency.eq.${filter.department}`,
+      ].join(','),
+    )
+  }
+
+  const { data, error } = await query
+    .order('submitted_at', { ascending: false, nullsFirst: false })
+    .limit(limit)
+  if (error) throw error
+  return ((data ?? []) as MunicipalComplaintRow[]).map(mapComplaintRow)
+}
+
 export async function getComplaintByCaseId(caseId: string): Promise<MunicipalComplaintRow | null> {
   const client = requireClient()
   const { data, error } = await client

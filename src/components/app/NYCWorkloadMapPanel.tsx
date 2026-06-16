@@ -114,7 +114,12 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
  * geometry for the active mode plus the per-area NYC 311 workload counts, then
  * renders an interactive choropleth shaded by workload intensity.
  */
-export default function NYCWorkloadMapPanel() {
+export default function NYCWorkloadMapPanel({
+  onSelectDistrict,
+}: {
+  /** Fired when a council district is clicked (district mode), for case drilldown. */
+  onSelectDistrict?: (district: string) => void
+} = {}) {
   const [mode, setMode] = useState<MapMode>('district')
   const [units, setUnits] = useState<AreaUnit[]>([])
   const [volumes, setVolumes] = useState<AreaVolume[]>([])
@@ -171,6 +176,7 @@ export default function NYCWorkloadMapPanel() {
       units={units}
       volumes={volumes}
       fallback={fallback}
+      onSelectDistrict={onSelectDistrict}
     />
   )
 }
@@ -199,12 +205,14 @@ function NYCWorkloadHeatMap({
   units,
   volumes,
   fallback,
+  onSelectDistrict,
 }: {
   mode: MapMode
   onModeChange: (mode: MapMode) => void
   units: AreaUnit[]
   volumes: AreaVolume[]
   fallback: boolean
+  onSelectDistrict?: (district: string) => void
 }) {
   const adapter = ADAPTERS[mode]
   const map = useMemo(() => buildAreaMap(units), [units])
@@ -331,7 +339,12 @@ function NYCWorkloadHeatMap({
                       className="cursor-pointer transition-[fill-opacity]"
                       onMouseEnter={() => setHovered(shape.key)}
                       onMouseLeave={() => setHovered(null)}
-                      onClick={() => setSelected(shape.key)}
+                      onClick={() => {
+                        setSelected(shape.key)
+                        // In the ward-like district view, a click also opens the
+                        // case drilldown for that council district.
+                        if (mode === 'district') onSelectDistrict?.(shape.key)
+                      }}
                     >
                       <title>
                         {shape.label} — NYC 311 benchmark workload (not operational data, not a risk prediction)
