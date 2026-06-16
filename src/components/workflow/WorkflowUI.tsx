@@ -142,7 +142,7 @@ export function ActorBadge({ actor, label }: { actor: AutomationActor; label: st
   return <span className={`badge ${ACTOR_STYLES[actor]}`}>{label}</span>
 }
 
-/** Confidence meter for the "Enough confidence?" gate. */
+/** File-readiness meter for the "Is the file ready for staff review?" gate. */
 export function ConfidenceMeter({ value, level }: { value: number; level: 'High' | 'Medium' | 'Low' }) {
   const pct = Math.round(value * 100)
   const color = level === 'High' ? 'bg-accent-500' : level === 'Medium' ? 'bg-amber-400' : 'bg-rose-400'
@@ -150,7 +150,7 @@ export function ConfidenceMeter({ value, level }: { value: number; level: 'High'
   return (
     <div>
       <div className="flex items-baseline justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-ink-subtle">Workflow confidence</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-ink-subtle">File readiness</span>
         <span className={`text-sm font-semibold ${text}`}>
           {pct}% · {level}
         </span>

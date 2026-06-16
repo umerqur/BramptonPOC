@@ -164,11 +164,14 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const approveRouting = useCallback(
     (id: string) => {
       const now = new Date().toISOString()
-      updateCase(id, (c) => ({
+      updateCase(id, (c) => {
+        if (c.stage === 'closed') return c
+        return {
         ...c,
         decisions: [...c.decisions, { action: 'Approved AI routing', by: STAFF_NAME, at: now }],
         audit: [...c.audit, auditEvent('staff', 'Routing approved', `Staff confirmed the ${c.triage.category} classification and routing to ${c.triage.recommendedDepartment}.`, now)],
-      }))
+        }
+      })
     },
     [updateCase],
   )
@@ -176,12 +179,15 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const requestMoreInfo = useCallback(
     (id: string, note?: string) => {
       const now = new Date().toISOString()
-      updateCase(id, (c) => ({
+      updateCase(id, (c) => {
+        if (c.stage === 'closed') return c
+        return {
         ...c,
         stage: 'needs-staff-attention',
         decisions: [...c.decisions, { action: 'Requested more information', by: STAFF_NAME, at: now, note }],
         audit: [...c.audit, auditEvent('staff', 'More information requested', note || 'Staff requested additional details from the resident before closure.', now)],
-      }))
+        }
+      })
     },
     [updateCase],
   )
@@ -189,12 +195,15 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const overridePriority = useCallback(
     (id: string, priority: Priority) => {
       const now = new Date().toISOString()
-      updateCase(id, (c) => ({
+      updateCase(id, (c) => {
+        if (c.stage === 'closed') return c
+        return {
         ...c,
         priorityOverride: priority,
         decisions: [...c.decisions, { action: `Overrode priority to ${priority}`, by: STAFF_NAME, at: now }],
         audit: [...c.audit, auditEvent('staff', 'Priority overridden', `Staff changed priority from ${c.triage.recommendedPriority} to ${priority}.`, now)],
-      }))
+        }
+      })
     },
     [updateCase],
   )
@@ -203,16 +212,19 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const assignToOfficer = useCallback(
     (id: string, officerName: string) => {
       const now = new Date().toISOString()
-      updateCase(id, (c) => ({
+      updateCase(id, (c) => {
+        if (c.stage === 'closed') return c
+        return {
         ...c,
-        stage: c.stage === 'closed' ? c.stage : 'assigned',
+        stage: 'assigned',
         assignedOfficer: officerName,
         decisions: [...c.decisions, { action: `Assigned to ${officerName}`, by: STAFF_NAME, at: now }],
         audit: [
           ...c.audit,
           auditEvent('staff', 'Assigned to officer', `Case assigned to ${officerName} for a field investigation.`, now),
         ],
-      }))
+        }
+      })
     },
     [updateCase],
   )
@@ -223,6 +235,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     (id: string, input: FieldActionInput) => {
       const now = new Date().toISOString()
       updateCase(id, (c) => {
+        if (c.stage === 'closed') return c
         const officerName = c.assignedOfficer ?? ROLE_ACTOR_NAME.officer
         const fieldAction: OfficerFieldAction = {
           officerName,
@@ -256,6 +269,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     (id: string) => {
       const now = new Date().toISOString()
       updateCase(id, (c) => {
+        if (c.stage === 'closed') return c
         // Build (or rebuild) the draft from whatever field outcome is on file —
         // null means the letter stays review-only and claims no site visit.
         const draft = c.draft ?? buildClosureDraft(c.input, c.triage, c.context, now, c.fieldAction)
@@ -276,7 +290,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
   const editDraftBody = useCallback(
     (id: string, body: string) => {
-      updateCase(id, (c) => (c.draft ? { ...c, draft: { ...c.draft, body } } : c))
+      updateCase(id, (c) => (c.stage !== 'closed' && c.draft ? { ...c, draft: { ...c.draft, body } } : c))
     },
     [updateCase],
   )
@@ -286,6 +300,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString()
       updateCase(id, (c) => {
         if (!c.draft) return c
+        // Already closed — do not re-approve or append a second closure record.
+        if (c.stage === 'closed') return c
         // Record the real outcome of the resident email send (driven by the
         // closure page) so the audit trail never claims an email was delivered
         // when it was not.

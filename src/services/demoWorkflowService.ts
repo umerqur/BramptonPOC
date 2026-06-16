@@ -507,7 +507,7 @@ export function runWorkflow(
     auditEvent('ai', 'Facts extracted', `${triage.keyFacts.length} key facts extracted; ${triage.missingInformation.length} missing-information flag(s).`, addSeconds(t0, 3)),
     auditEvent('ai', 'Context gathered', `Pulled ${context.complaintHistory.length} history record(s), patrol/ticket notes, trend summary, and policy match.`, addSeconds(t0, 4)),
     auditEvent('ai', 'Case summary built', 'Plain-language summary and structured facts assembled for staff.', addSeconds(t0, 5)),
-    auditEvent('ai', 'Confidence checked', `Workflow confidence ${(triage.confidence * 100).toFixed(0)}% (${triage.confidenceLevel}).`, addSeconds(t0, 6)),
+    auditEvent('ai', 'Review readiness checked', `File readiness ${(triage.confidence * 100).toFixed(0)}% (${triage.confidenceLevel}).`, addSeconds(t0, 6)),
   ]
   if (draftReady) {
     audit.push(auditEvent('ai', 'Closure draft prepared', 'High confidence — a closure-response draft was prepared for staff review.', addSeconds(t0, 7)))
