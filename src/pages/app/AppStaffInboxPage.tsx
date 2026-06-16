@@ -258,27 +258,16 @@ function InboxCard({
         <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDateTime(row.created_at)}</span>
       </div>
 
-      {/* Assignment — supervisor/coordinator assigns the case to a By-law Officer
-          (explicit human assignment, never automated). */}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-        <div className="text-sm">
-          <span className="text-ink-subtle">Assigned officer: </span>
-          {row.assigned_officer_name ? (
-            <span className="font-medium text-navy-900">{row.assigned_officer_name}</span>
-          ) : (
-            <span className="font-medium text-amber-700">Human assignment required</span>
-          )}
-        </div>
-        {canAssign && row.status !== 'closed' && (
-          <button onClick={onAssign} disabled={assigning} className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-60">
-            {assigning
-              ? 'Assigning…'
-              : row.assigned_officer_email
-                ? 'Reassign officer'
-                : `Assign to ${DEMO_OFFICER.name}`}
-          </button>
-        )}
-      </div>
+      {/* Assignment — supervisor/coordinator assigns the case to a Bylaw Officer.
+          This is an explicit human assignment. The routing recommendation is
+          decision support only and never dispatches an officer on its own. */}
+      <AssignmentPanel
+        row={row}
+        canAssign={canAssign}
+        assigning={assigning}
+        onAssign={onAssign}
+        routingRecommendation={triage.recommendedDepartment}
+      />
 
       {/* Resident's own words — shown before, and above, the generated triage. */}
       <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -348,6 +337,70 @@ function InboxCard({
           {row.status === 'closed' ? 'View closed case →' : 'Open case →'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// Supervisor/coordinator assignment panel. A prominent block (not a thin row)
+// with two clear states: before assignment it shows the routing recommendation
+// and a single role-based "Assign to Bylaw Officer" action; after assignment it
+// shows the assigned officer, role, status, and the next step. The officer's
+// account email is an implementation detail and is intentionally never shown.
+function AssignmentPanel({
+  row,
+  canAssign,
+  assigning,
+  onAssign,
+  routingRecommendation,
+}: {
+  row: ResidentRequestRow
+  canAssign: boolean
+  assigning: boolean
+  onAssign: () => void
+  routingRecommendation: string
+}) {
+  const assigned = Boolean(row.assigned_officer_name)
+
+  if (assigned) {
+    return (
+      <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-indigo-500" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Assignment</span>
+        </div>
+        <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'Officer Oakley'} />
+          <Detail label="Role" value="Bylaw Officer" />
+          <Detail label="Status" value="Assigned for field review" />
+          <Detail label="Next step" value="Officer records field outcome" />
+        </dl>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+      <div className="flex items-center gap-2">
+        <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+        <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">Assignment</span>
+      </div>
+      <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-ink-subtle">Status</dt>
+          <dd className="mt-0.5 font-medium text-amber-700">Human assignment required</dd>
+        </div>
+        <Detail label="Routing recommendation" value={routingRecommendation} />
+      </dl>
+      <p className="mt-2 text-[11px] text-ink-subtle">
+        Routing recommendation does not dispatch an officer automatically.
+      </p>
+      {canAssign && row.status !== 'closed' && (
+        <div className="mt-3">
+          <button onClick={onAssign} disabled={assigning} className="btn-primary text-sm py-2 px-4 disabled:opacity-60">
+            {assigning ? 'Assigning…' : 'Assign to Bylaw Officer'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

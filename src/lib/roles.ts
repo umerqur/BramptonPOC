@@ -24,8 +24,11 @@ export const ROLE_LABELS: Record<StaffRole, string> = {
  * The single demo By-law Officer. Cases assigned to this officer appear in the
  * Officer Field Console for whoever is signed in with this email.
  */
+// Display name is the role-based officer identity shown in the UI. The email is
+// an implementation detail only (auth/account binding) and is never surfaced in
+// the normal supervisor or officer UI.
 export const DEMO_OFFICER = {
-  name: 'Oakley Carpentry Worker',
+  name: 'Officer Oakley',
   email: 'oakley.carpentry_worker@yahoo.com',
   role: 'officer' as StaffRole,
 }
