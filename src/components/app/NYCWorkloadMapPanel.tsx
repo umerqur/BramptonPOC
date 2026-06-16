@@ -260,11 +260,11 @@ function NYCWorkloadHeatMap({
       </div>
 
       {/* Map mode toggle: ward-like council districts (default) vs broad boroughs. */}
-      <div className="flex flex-col gap-1.5 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
         <div
           role="tablist"
           aria-label="Map detail level"
-          className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+          className="inline-flex items-center gap-1 rounded-2xl bg-slate-100 p-1.5 shadow-inner ring-1 ring-slate-200"
         >
           <ModeTab
             label="Council district workload"
@@ -273,10 +273,8 @@ function NYCWorkloadHeatMap({
           />
           <ModeTab label="Borough overview" active={mode === 'borough'} onClick={() => onModeChange('borough')} />
         </div>
-        <span className="text-[11px] text-ink-subtle">
-          {mode === 'district'
-            ? 'Operational view — the ward-like equivalent for NYC.'
-            : 'Executive overview — broad boroughs, not a ward-like unit.'}
+        <span className="text-xs font-medium text-ink-muted">
+          {mode === 'district' ? 'Operational map view' : 'Executive overview'}
         </span>
       </div>
 
@@ -425,10 +423,23 @@ function ModeTab({ label, active, onClick }: { label: string; active: boolean; o
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-        active ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'
+      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-100 ${
+        active
+          ? 'bg-white text-navy-900 shadow-md ring-1 ring-slate-200'
+          : 'text-ink-muted hover:bg-white/70 hover:text-navy-900'
       }`}
     >
+      {/* Selected indicator — a small checkmark dot inside the active tab. */}
+      <span
+        aria-hidden
+        className={`flex h-4 w-4 items-center justify-center rounded-full transition-all duration-200 ${
+          active ? 'scale-100 bg-accent-500 text-white' : 'scale-0 opacity-0'
+        }`}
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      </span>
       {label}
     </button>
   )
