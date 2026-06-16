@@ -314,13 +314,8 @@ function ResidentUpdateView({
             <Row label="Approved by" value={c.approvedBy ?? '—'} />
             <Row label="Approved at" value={c.approvedAt ? formatDateTime(c.approvedAt) : '—'} />
             <Row label="Case status" value="Closed" />
-            <Row label="Audit event" value="Recorded" />
+            <Row label="Audit event" value="Recorded in case history" />
           </dl>
-          <div className="mt-4">
-            <Link to={`/app/audit?case=${c.id}`} className="text-xs font-semibold text-accent-600 hover:text-accent-700">
-              View audit trail →
-            </Link>
-          </div>
         </Panel>
 
         <div className="lg:col-span-2">

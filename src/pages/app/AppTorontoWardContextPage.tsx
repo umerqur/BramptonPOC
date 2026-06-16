@@ -1,27 +1,22 @@
-import TorontoWardContextPanel from '../../components/app/TorontoWardContextPanel'
+import NYCWorkloadMapPanel from '../../components/app/NYCWorkloadMapPanel'
 
-// Authenticated NYC service request workload context (full /app/wards page).
-// REAL NYC borough / council district boundaries (NYC open data) are shaded by
-// REAL NYC 311 benchmark complaint volume aggregated per area. The map + area
-// coding visualization now lives in the shared TorontoWardContextPanel so the
-// same real visualization can also be embedded at the top of the Insights tab.
-// This page renders the full panel (including the collapsed geometry-validation
-// and Brampton future-context layers). The route is intentionally kept out of
-// the top nav; it remains reachable by direct URL and from the Insights "Open
-// full area context" link.
-export default function AppTorontoWardContextPage() {
+// Legacy NYC service request workload context page. Superseded by the Insights
+// tab (which embeds the same NYC 311 workload heat map). This route is removed
+// from the product surface — it redirects to Insights — and is kept only so the
+// underlying view still compiles for any internal use.
+export default function AppNYCWorkloadContextPage() {
   return (
     <div className="container-page py-10">
       <div className="section-eyebrow">Benchmark Context</div>
       <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">
-        NYC service request workload context (by borough / council district)
+        NYC service request workload context (by borough)
       </h1>
       <p className="mt-2 text-sm text-ink-muted max-w-3xl">
-        Real NYC borough / council district boundaries (NYC open data) provide the geographic base layer, shaded by real
-        NYC 311 benchmark complaint volume aggregated per area to show area-level workload intensity.
+        Real NYC borough boundaries (NYC open data) provide the geographic base layer, shaded by real NYC 311 benchmark
+        complaint volume aggregated per borough to show area-level workload intensity.
       </p>
 
-      <TorontoWardContextPanel showValidationLayers />
+      <NYCWorkloadMapPanel />
     </div>
   )
 }

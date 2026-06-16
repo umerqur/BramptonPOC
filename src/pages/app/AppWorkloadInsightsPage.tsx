@@ -5,7 +5,7 @@ import {
   getStatisticalAttentionQueue,
   type StatisticalCaseScore,
 } from '../../services/municipalServiceRequests'
-import TorontoWardContextPanel from '../../components/app/TorontoWardContextPanel'
+import NYCWorkloadMapPanel from '../../components/app/NYCWorkloadMapPanel'
 
 // Insights — a single, focused staff Insights experience built entirely around
 // the statistical attention queue (Review Attention Score): a transparent,
@@ -215,7 +215,7 @@ export default function AppWorkloadInsightsPage() {
         </div>
 
         <div className="mt-5">
-          <TorontoWardContextPanel showValidationLayers={false} />
+          <NYCWorkloadMapPanel />
         </div>
       </section>
     </div>

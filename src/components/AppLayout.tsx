@@ -6,25 +6,20 @@ import { useAuth } from '../lib/auth'
 import { useWorkflow, WorkflowProvider } from '../lib/workflowStore'
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLE_OPTIONS } from '../lib/roles'
 
-// Authenticated app shell for the staff workflow. Staff land on the Staff Inbox
-// of real resident submissions, then work a case through the Case Workbench and
-// Closure Review. Insights (the merged live dashboard + supervisor workflow-impact
-// view) and the Audit Trail give oversight, and the POC Walkthrough (last) keeps
-// the guided synthetic end-to-end narrative. Intake is resident-facing and is
-// intentionally not a staff tab. The prior standalone consoles remain reachable
-// via direct URL (/app/workflow, /app/wards, /app/cases, /app/legacy-insights,
-// /app/resident-intake); /app/dashboard and /app/supervisor now redirect to
-// /app/insights. The whole app is wrapped in WorkflowProvider so the case state
-// is shared across pages.
+// Authenticated app shell for the staff workflow. Staff land on the Work Queue
+// (the service-request queue) and open a case into the Case Workbench, then
+// Closure Review — both are drilldown workflow pages opened from a case, not top
+// nav tabs. The only top-level tabs are Work Queue and Insights (the NYC 311
+// workload heat map). The prior consoles (Case Workbench / Closure Review are
+// drilldowns; the old demo routes such as /app/walkthrough, /app/workflow,
+// /app/wards, /app/cases, /app/audit) are hidden from the top nav and redirect
+// to the Work Queue. The whole app is wrapped in WorkflowProvider so the case
+// state is shared across pages.
 
-// Primary staff navigation.
+// Primary staff navigation — Work Queue and Insights only.
 const NAV: { to: string; label: string; end?: boolean }[] = [
-  { to: '/app', label: 'Staff Inbox', end: true },
-  { to: '/app/workbench', label: 'Case Workbench' },
-  { to: '/app/closure', label: 'Closure Review' },
+  { to: '/app', label: 'Work Queue', end: true },
   { to: '/app/insights', label: 'Insights' },
-  { to: '/app/audit', label: 'Audit Trail' },
-  { to: '/app/walkthrough', label: 'POC Walkthrough' },
 ]
 
 export default function AppLayout() {

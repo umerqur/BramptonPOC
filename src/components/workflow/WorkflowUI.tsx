@@ -197,15 +197,11 @@ export function NoCaseState() {
     <div className="card p-10 text-center">
       <h2 className="text-base font-semibold text-navy-900">No active case yet</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-ink-muted">
-        Open a resident submission from the Staff Inbox to load it here, or run the POC Walkthrough to see the workflow
-        end-to-end on synthetic data.
+        Open a case from the Work Queue to load it here.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-3">
         <Link to="/app" className="btn-primary">
-          Go to Staff Inbox →
-        </Link>
-        <Link to="/app/walkthrough" className="btn-secondary">
-          POC Walkthrough
+          Go to Work Queue →
         </Link>
       </div>
     </div>

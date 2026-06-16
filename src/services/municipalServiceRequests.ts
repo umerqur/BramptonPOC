@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { cases } from '../data/mockCases'
+import { NYC_BOROUGH_BOUNDARIES } from '../data/nycBoroughBoundaries'
 
 // Primary data source for the authenticated Brampton complaint workflow app.
 // NYC 311 Open Data public benchmark data is loaded into `municipal_complaints`
@@ -11,7 +12,9 @@ import { cases } from '../data/mockCases'
 // the POC.
 export const COMPLAINTS_TABLE = 'municipal_complaints'
 export const WARDS_TABLE = 'brampton_ward_boundaries'
-export const TORONTO_WARDS_TABLE = 'toronto_ward_boundaries'
+// NYC 311 benchmark service-request volume per borough, aggregated from
+// municipal_complaints (see migration 014_nyc311_rich_fields.sql).
+export const NYC_WORKLOAD_VIEW = 'v_nyc_service_request_workload'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
@@ -157,35 +160,31 @@ export type WardBoundary = {
 }
 
 /**
- * A row in public.toronto_ward_boundaries — one of the 25 City of Toronto wards
- * (current 25-ward model) from City of Toronto Open Data "City Wards". REAL
- * Toronto ward polygons used as the geographic base layer for the Toronto ward
- * workload context map. `area_short_code` (1–25) is the join key to the real
- * Toronto 311 workload counts in v_toronto_ward_workload. This is Toronto
- * geography and must never be plotted onto Brampton wards.
+ * One real NYC borough boundary used as the geographic base layer for the NYC
+ * 311 workload heat map. Geometry is bundled from NYC Open Data — Borough
+ * Boundaries (nybb), EPSG:4326 GeoJSON (see src/data/nycBoroughBoundaries.ts).
+ * `borough_name` is the join key to the per-borough NYC 311 workload counts.
+ * This is NYC geography — never Toronto and never Brampton.
  */
-export type TorontoWardBoundary = {
+export type NYCBoroughBoundary = {
   id: number
-  area_short_code: number
-  ward_name: string
-  ward_desc: string
-  source_city: string | null
-  source_dataset: string | null
+  boro_code: number
+  borough_name: string
+  short_label: string
+  source_city: string
+  source_dataset: string
   geojson_geometry: unknown
 }
 
 /**
- * A row in public.v_toronto_ward_workload — REAL NYC 311 benchmark complaint
- * volume aggregated per Toronto ward from public.municipal_complaints. Joined to
- * TorontoWardBoundary by ward_number ↔ area_short_code. The live view exposes the
- * ward number, label (area_desc, aliased to ward_or_area) and complaint_volume
- * only; it does not provide per-status case counts. This is NYC 311 benchmark
- * data — decision support only, not Brampton operational complaint data, and never
- * a final enforcement decision.
+ * NYC 311 benchmark complaint volume aggregated per borough, from
+ * public.v_nyc_service_request_workload over public.municipal_complaints. Joined
+ * to NYCBoroughBoundary by borough name. This is NYC 311 benchmark data —
+ * decision support only, not Brampton operational complaint data, and never a
+ * final enforcement decision.
  */
-export type TorontoWardWorkload = {
-  ward_number: number
-  ward_or_area: string
+export type NYCBoroughWorkload = {
+  borough: string
   complaint_volume: number
 }
 
@@ -437,83 +436,70 @@ export async function getBramptonWardBoundaries(): Promise<WardBoundary[]> {
   return (data ?? []) as WardBoundary[]
 }
 
-// Real column list for the Toronto City Wards base layer, exactly as created by
-// migration 007 (no ward_name / ward_desc columns exist in the DB). We select the
-// real columns and map them to the TorontoWardBoundary view-model in TypeScript
-// below, so no Supabase query ever references ward_name / ward_desc.
-const TORONTO_WARD_COLUMNS =
-  'id, ward_number, area_name, area_desc, area_short_code, source_city, source_dataset, geojson_geometry'
-
-// Raw shape of a public.toronto_ward_boundaries row (real DB columns).
-type TorontoWardBoundaryRow = {
-  id: number
-  ward_number: number
-  area_name: string | null
-  area_desc: string | null
-  area_short_code: string | null
-  source_city: string | null
-  source_dataset: string | null
-  geojson_geometry: unknown
-}
-
-// Raw shape of a public.v_toronto_ward_workload row (real view columns).
-type TorontoWardWorkloadRow = {
-  ward_number: number
-  area_name: string | null
-  area_desc: string | null
-  area_short_code: string | null
-  complaint_volume: number
-}
-
 /**
- * Reads the 25 City of Toronto ward polygons from public.toronto_ward_boundaries,
- * ordered by ward number. Real Toronto City Wards geometry — the geographic base
- * layer of the Toronto ward workload context map. The real DB columns are mapped
- * into the TorontoWardBoundary view-model here (area_name -> ward_name,
- * area_desc -> ward_desc, ward_number -> the numeric join code area_short_code).
- * Any Supabase/RLS error is thrown so the caller can surface it.
+ * Returns the real NYC borough polygons used as the geographic base layer of the
+ * NYC 311 workload heat map. Geometry is bundled (NYC Open Data — Borough
+ * Boundaries, EPSG:4326 GeoJSON) rather than read from Supabase, so the map is
+ * always available and never falls back to any Toronto geometry. Async to keep a
+ * uniform load contract with the workload query.
  */
-export async function getTorontoWardBoundaries(): Promise<TorontoWardBoundary[]> {
-  const client = requireClient()
-  const { data, error } = await client
-    .from(TORONTO_WARDS_TABLE)
-    .select(TORONTO_WARD_COLUMNS)
-    .order('ward_number', { ascending: true })
-
-  if (error) throw error
-  return ((data ?? []) as TorontoWardBoundaryRow[]).map((r) => ({
-    id: r.id,
-    area_short_code: r.ward_number,
-    ward_name: r.area_name ?? '',
-    ward_desc: r.area_desc ?? '',
-    source_city: r.source_city,
-    source_dataset: r.source_dataset,
-    geojson_geometry: r.geojson_geometry,
+export async function getNYCBoroughBoundaries(): Promise<NYCBoroughBoundary[]> {
+  return NYC_BOROUGH_BOUNDARIES.map((b, idx) => ({
+    id: idx + 1,
+    boro_code: b.boro_code,
+    borough_name: b.borough_name,
+    short_label: b.short_label,
+    source_city: 'NYC',
+    source_dataset: 'NYC Open Data — Borough Boundaries (nybb)',
+    geojson_geometry: b.geojson_geometry,
   }))
 }
 
+// Raw shape of a public.v_nyc_service_request_workload row.
+type NYCWorkloadRow = {
+  area: string | null
+  complaint_volume: number | string | null
+}
+
 /**
- * Reads the real NYC 311 benchmark per-area complaint workload from
- * public.v_toronto_ward_workload (aggregated over municipal_complaints), highest
- * volume first. The live view exposes ward_number, area_name, area_desc,
- * area_short_code and complaint_volume (joined by ward_number); it does not carry
- * per-status case counts. area_desc is mapped to the ward_or_area label in
- * TypeScript. This is decision-support benchmark data — never Brampton operational
- * complaint data.
+ * Reads real NYC 311 benchmark complaint volume per borough from
+ * public.v_nyc_service_request_workload (aggregated over municipal_complaints),
+ * highest volume first. Joined to the borough geometry by borough name. This is
+ * decision-support benchmark data — never Brampton operational complaint data.
+ * Any Supabase/RLS error is thrown so the caller can fall back to the benchmark
+ * sample.
  */
-export async function getTorontoWardWorkload(): Promise<TorontoWardWorkload[]> {
+export async function getNYCWorkloadByBorough(): Promise<NYCBoroughWorkload[]> {
   const client = requireClient()
   const { data, error } = await client
-    .from('v_toronto_ward_workload')
-    .select('ward_number, area_name, area_desc, area_short_code, complaint_volume')
+    .from(NYC_WORKLOAD_VIEW)
+    .select('area, complaint_volume')
     .order('complaint_volume', { ascending: false })
 
   if (error) throw error
-  return ((data ?? []) as TorontoWardWorkloadRow[]).map((r) => ({
-    ward_number: r.ward_number,
-    ward_or_area: r.area_desc ?? r.area_name ?? `Ward ${r.ward_number}`,
-    complaint_volume: r.complaint_volume,
-  }))
+  return ((data ?? []) as NYCWorkloadRow[])
+    .map((r) => ({
+      borough: (r.area ?? '').trim(),
+      complaint_volume: Number(r.complaint_volume) || 0,
+    }))
+    // Drop empty / unspecified buckets so the heat map only reflects real boroughs.
+    .filter((r) => r.borough.length > 0 && r.borough.toLowerCase() !== 'unknown')
+}
+
+/**
+ * Representative NYC 311 benchmark complaint volume per borough, used when the
+ * live Supabase view is unavailable so the workload heat map still renders. These
+ * are illustrative benchmark figures (Brooklyn and Queens carry the most 311
+ * volume), not Brampton operational data.
+ */
+export function mockNYCWorkloadByBorough(): NYCBoroughWorkload[] {
+  return [
+    { borough: 'Brooklyn', complaint_volume: 31240 },
+    { borough: 'Queens', complaint_volume: 25890 },
+    { borough: 'Bronx', complaint_volume: 21470 },
+    { borough: 'Manhattan', complaint_volume: 18650 },
+    { borough: 'Staten Island', complaint_volume: 7980 },
+  ]
 }
 
 // ---------------------------------------------------------------------------

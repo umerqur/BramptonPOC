@@ -68,9 +68,9 @@ export default function AppStaffInboxPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="max-w-3xl">
           <div className="section-eyebrow">Staff workbench</div>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Staff Inbox</h1>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Work Queue</h1>
           <p className="mt-2 text-ink-muted">
-            Newest resident submissions, with a generated AI triage to help you decide what to open first. Open a case to
+            The service-request queue, with a generated AI triage to help you decide what to open first. Open a case to
             review the full workbench — every closure still needs staff approval.
           </p>
         </div>
@@ -191,9 +191,6 @@ function EmptyState() {
       <div className="mt-5 flex flex-wrap justify-center gap-3">
         <Link to="/resident/new-request" className="btn-primary text-sm py-2 px-4">
           Open resident form
-        </Link>
-        <Link to="/app/walkthrough" className="btn-secondary text-sm py-2 px-4">
-          See the POC Walkthrough
         </Link>
       </div>
     </div>
