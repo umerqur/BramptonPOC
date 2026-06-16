@@ -101,6 +101,13 @@ export default function AppStaffInboxPage() {
     navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
   }
 
+  // Once the officer has recorded a field outcome, the supervisor opens closure
+  // review for that case (the officer outcome is pulled into the closure draft).
+  function openClosureReview(row: ResidentRequestRow) {
+    ingestResidentCase(row)
+    navigate(`/app/closure?case=${encodeURIComponent(row.case_id)}`)
+  }
+
   // Supervisor/coordinator action: explicit human assignment to the By-law
   // Officer (never automated). Persisted to Supabase so the officer sees it.
   async function assignToOfficer(row: ResidentRequestRow) {
@@ -171,6 +178,7 @@ export default function AppStaffInboxPage() {
                   assigning={assigningId === row.case_id}
                   onAssign={() => assignToOfficer(row)}
                   onOpen={() => openCase(row)}
+                  onOpenClosureReview={() => openClosureReview(row)}
                 />
               </li>
             ))}
@@ -223,6 +231,7 @@ function InboxCard({
   assigning,
   onAssign,
   onOpen,
+  onOpenClosureReview,
 }: {
   row: ResidentRequestRow
   attachments: ResidentRequestAttachment[]
@@ -230,6 +239,7 @@ function InboxCard({
   assigning: boolean
   onAssign: () => void
   onOpen: () => void
+  onOpenClosureReview: () => void
 }) {
   // Deterministic intake decision-support result for this submission. The intake
   // pipeline is deterministic (rule based), not an agentic dispatcher: it only
@@ -268,6 +278,26 @@ function InboxCard({
         onAssign={onAssign}
         routingRecommendation={triage.recommendedDepartment}
       />
+
+      {/* Officer has recorded a field outcome — ready for supervisor closure review. */}
+      {row.field_visit_completed && row.status !== 'closed' && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-emerald-800">
+                Ready for closure review
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-ink">
+              Field outcome recorded by {row.assigned_officer_name ?? 'Officer Oakley'}.
+            </p>
+          </div>
+          <button onClick={onOpenClosureReview} className="btn-primary text-sm py-2 px-4">
+            Open closure review →
+          </button>
+        </div>
+      )}
 
       {/* Resident's own words — shown before, and above, the generated triage. */}
       <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">

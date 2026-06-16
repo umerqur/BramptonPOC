@@ -177,8 +177,20 @@ export function WorkflowProvider({
   // seed cases are never touched.
   const ingestResidentCase = useCallback((row: ResidentRequestRow): string => {
     setState((s) => {
-      if (s.cases.some((c) => c.id === row.case_id)) {
-        return { ...s, activeCaseId: row.case_id }
+      const existing = s.cases.find((c) => c.id === row.case_id)
+      if (existing) {
+        // Refresh a previously-opened case when the officer has since recorded a
+        // field outcome the cached version predates, so closure review reflects
+        // it. Closed cases are never re-derived.
+        const needsFieldOutcome =
+          row.field_visit_completed && !existing.fieldAction && existing.stage !== 'closed'
+        if (!needsFieldOutcome) return { ...s, activeCaseId: row.case_id }
+        const refreshed = residentRowToCase(row)
+        return {
+          ...s,
+          cases: s.cases.map((c) => (c.id === row.case_id ? refreshed : c)),
+          activeCaseId: row.case_id,
+        }
       }
       const next = residentRowToCase(row)
       return { ...s, cases: [next, ...s.cases], activeCaseId: row.case_id }
