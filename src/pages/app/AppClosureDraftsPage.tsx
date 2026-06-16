@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { isSupabaseConfigured } from '../../lib/supabase'
@@ -30,11 +30,14 @@ import type { DemoCase } from '../../data/demoWorkflowTypes'
 type SendResult = { attempted: boolean; emailSent: boolean; to: string }
 
 export default function AppClosureDraftsPage() {
-  const { cases, activeCase, setActiveCase, editDraftBody, approveClosure, sendToStaffReview } = useWorkflow()
+  const { cases, activeCase, setActiveCase, editDraftBody, approveClosure, sendToStaffReview, role } = useWorkflow()
   const c = useDemoCase()
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState<SendResult | null>(null)
   const [statusWarning, setStatusWarning] = useState<string | null>(null)
+
+  // Closure review/approval is a supervisor/coordinator surface, not the officer's.
+  if (role === 'officer') return <Navigate to="/app/field" replace />
 
   // Approve the closure: persist any staff edit, email the resident the approved
   // response (when deliverable), mark the linked Supabase resident request closed

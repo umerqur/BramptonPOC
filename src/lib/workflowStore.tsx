@@ -33,7 +33,7 @@ import {
 } from '../services/demoWorkflowService'
 import { residentRowToCase } from '../services/residentCaseBridge'
 import type { ResidentRequestRow } from '../services/residentRequests'
-import { ROLE_ACTOR_NAME, type StaffRole } from './roles'
+import { ROLE_ACTOR_NAME, canSwitchRoleForEmail, roleForEmail, type StaffRole } from './roles'
 
 // Bumped to v2 when the officer field-action model landed, so older persisted
 // cases (with the previous canned officer-claim closure drafts) are reseeded.
@@ -60,9 +60,13 @@ type WorkflowContextValue = {
   activeCase: DemoCase | null
   metrics: SupervisorMetrics
   staffName: string
-  /** Current demo role + setter (role-based access for the workflow). */
+  /** Current role (derived from the signed-in email) + setter. */
   role: StaffRole
   setRole: (role: StaffRole) => void
+  /** Email of the signed-in user (drives role separation). */
+  userEmail: string | null
+  /** Whether this user may switch the demo role (officers cannot). */
+  canSwitchRole: boolean
   submitComplaint: (input: ResidentComplaintInput) => string
   ingestResidentCase: (row: ResidentRequestRow) => string
   setActiveCase: (id: string | null) => void
@@ -116,8 +120,28 @@ function loadState(): WorkflowState {
   return { cases, activeCaseId: cases[0]?.id ?? null, role: 'supervisor' }
 }
 
-export function WorkflowProvider({ children }: { children: ReactNode }) {
+export function WorkflowProvider({
+  children,
+  userEmail = null,
+}: {
+  children: ReactNode
+  userEmail?: string | null
+}) {
   const [state, setState] = useState<WorkflowState>(loadState)
+  const canSwitchRole = canSwitchRoleForEmail(userEmail)
+
+  // Role comes from the signed-in email. A By-law Officer account is locked to
+  // the officer role; supervisors/coordinators default to supervisor but may use
+  // the "Acting as" selector for demo testing.
+  useEffect(() => {
+    if (!canSwitchRole) {
+      setState((s) => (s.role === 'officer' ? s : { ...s, role: 'officer' }))
+    } else {
+      // Ensure a locked officer session that later signs in as supervisor is not
+      // stuck on 'officer' from persisted state.
+      setState((s) => (s.role === 'officer' ? { ...s, role: roleForEmail(userEmail) } : s))
+    }
+  }, [userEmail, canSwitchRole])
 
   useEffect(() => {
     try {
@@ -138,9 +162,14 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     return next.id
   }, [])
 
-  const setRole = useCallback((role: StaffRole) => {
-    setState((s) => ({ ...s, role }))
-  }, [])
+  const setRole = useCallback(
+    (role: StaffRole) => {
+      // Officers cannot switch roles (no escalating to supervisor).
+      if (!canSwitchRole) return
+      setState((s) => ({ ...s, role }))
+    },
+    [canSwitchRole],
+  )
 
   // Bridge a resident Supabase submission into the workbench. Reuses the case if
   // it has already been opened (so staff actions are preserved), otherwise
@@ -363,6 +392,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     staffName: STAFF_NAME,
     role: state.role,
     setRole,
+    userEmail,
+    canSwitchRole,
     submitComplaint,
     ingestResidentCase,
     setActiveCase,

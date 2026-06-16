@@ -1,12 +1,14 @@
+import { Navigate } from 'react-router-dom'
 import NYCWorkloadMapPanel from '../../components/app/NYCWorkloadMapPanel'
+import { useWorkflow } from '../../lib/workflowStore'
 
-// Insights — the NYC 311 workload heat map only. The page intentionally shows
-// just the map for now: the live complaint dashboard, supervisor workflow-impact
-// metrics, automation-vs-human-review card, supporting links, and guardrail
-// footer have been removed to keep the staff product surface focused. The map is
-// NYC 311 benchmark decision support — not Brampton operational data and not a
-// risk prediction.
+// Insights — the NYC 311 workload heat map only. Supervisor/coordinator surface;
+// By-law Officers do not see supervisor Insights and are redirected to their
+// Officer Field Console. The map is NYC 311 benchmark decision support — not
+// Brampton operational data and not a risk prediction.
 export default function AppInsightsPage() {
+  const { role } = useWorkflow()
+  if (role === 'officer') return <Navigate to="/app/field" replace />
   return (
     <div className="container-page py-10">
       <div className="max-w-3xl">

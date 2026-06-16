@@ -13,6 +13,8 @@ import AppStaffInboxPage from './pages/app/AppStaffInboxPage'
 import AppCaseWorkbenchPage from './pages/app/AppCaseWorkbenchPage'
 import AppClosureDraftsPage from './pages/app/AppClosureDraftsPage'
 import AppInsightsPage from './pages/app/AppInsightsPage'
+import AppOfficerConsolePage from './pages/app/AppOfficerConsolePage'
+import AppOfficerCasePage from './pages/app/AppOfficerCasePage'
 import ResidentLayout from './components/resident/ResidentLayout'
 import ResidentHomePage from './pages/resident/ResidentHomePage'
 import ResidentNewRequestPage from './pages/resident/ResidentNewRequestPage'
@@ -59,6 +61,10 @@ export default function App() {
         <Route path="closure" element={<AppClosureDraftsPage />} />
         {/* Insights — NYC 311 workload heat map only. */}
         <Route path="insights" element={<AppInsightsPage />} />
+        {/* Officer Field Console — By-law Officer landing: only their assigned
+            cases and the field outcome they record. */}
+        <Route path="field" element={<AppOfficerConsolePage />} />
+        <Route path="field/:caseId" element={<AppOfficerCasePage />} />
         {/* Case detail — internal drilldown, not in nav. */}
         <Route path="cases/:id" element={<AppCaseDetailPage />} />
 
