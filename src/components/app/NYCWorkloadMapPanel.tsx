@@ -2,24 +2,23 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   getNYCBoroughBoundaries,
   getNYCWorkloadByBorough,
-  mockNYCWorkloadByBorough,
   getNYCCouncilDistrictBoundaries,
   getNYCWorkloadByCouncilDistrict,
-  mockNYCWorkloadByCouncilDistrict,
 } from '../../services/municipalServiceRequests'
 
 // NYC 311 workload heat map. Two geographic modes share one choropleth:
 //   * Council district workload (default) — real NYC City Council district
 //     polygons, the finer, ward-like operational unit.
 //   * Borough overview — real NYC borough polygons, the broad executive overview.
-// Both are shaded by real NYC 311 benchmark complaint volume. This is decision
-// support only — never Brampton operational data, never a risk prediction, and
-// never Toronto geometry. NYC has no wards: boroughs are too broad to stand in for
-// a Brampton/Toronto ward, so council districts are the ward-like operational view.
+// Both are shaded by live New York City 311 public service request volume read
+// from Supabase. This is decision support only — never a risk prediction and
+// never Toronto geometry. NYC has no wards: boroughs are too broad to stand in
+// for a Brampton/Toronto ward, so council districts are the ward-like view.
+// There is no hardcoded fallback: if the workload aggregate cannot be loaded the
+// map shades nothing and shows a clear "Live data unavailable" notice.
 
-// Required disclaimer for the NYC 311 workload map (both modes).
-const WORKLOAD_DISCLAIMER =
-  'NYC 311 benchmark data, not Brampton operational data. Decision support only.'
+// Required disclaimer for the workload map (both modes).
+const WORKLOAD_DISCLAIMER = 'New York City 311 public service requests. Decision support only.'
 
 type MapMode = 'district' | 'borough'
 
@@ -39,11 +38,8 @@ type ModeAdapter = {
   headerSubtitle: string
   /** Fine-print context, kept distinct per mode (operational vs executive). */
   context: string
-  /** Shown when the live Supabase view is unavailable or empty. */
-  fallbackMessage: string
   loadUnits: () => Promise<AreaUnit[]>
   loadVolumes: () => Promise<AreaVolume[]>
-  sample: () => AreaVolume[]
 }
 
 const ADAPTERS: Record<MapMode, ModeAdapter> = {
@@ -52,9 +48,7 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
     unitLabel: 'council district',
     headerSubtitle: 'Ward like operational view of NYC 311 workload by council district.',
     context:
-      'Real NYC City Council district boundaries — the ward-like operational unit — are shaded by real NYC 311 benchmark complaint volume per district. Districts with higher complaint volume show higher workload intensity. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. This is supervisor decision support only — not a risk prediction, not where to enforce, and this NYC geography and volume is never plotted onto Brampton wards.',
-    fallbackMessage:
-      'Showing benchmark sample volume. Live NYC 311 council district aggregation is not loaded yet.',
+      'Real NYC City Council district boundaries — the ward-like operational unit — are shaded by live New York City 311 public service request volume per district. Districts with higher volume show higher workload intensity. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. This is supervisor decision support only — not a risk prediction, and this NYC geography is never plotted onto Brampton wards.',
     async loadUnits() {
       const districts = await getNYCCouncilDistrictBoundaries()
       return districts.map((d) => ({
@@ -69,21 +63,13 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
       const rows = await getNYCWorkloadByCouncilDistrict()
       return rows.map((r) => ({ key: r.area, label: `District ${r.area}`, volume: r.complaint_volume }))
     },
-    sample() {
-      return mockNYCWorkloadByCouncilDistrict().map((r) => ({
-        key: r.area,
-        label: `District ${r.area}`,
-        volume: r.complaint_volume,
-      }))
-    },
   },
   borough: {
     toggleLabel: 'Borough overview',
     unitLabel: 'borough',
     headerSubtitle: 'High level NYC borough workload overview.',
     context:
-      'Real NYC borough boundaries give the high-level executive overview, shaded by real NYC 311 benchmark complaint volume per borough. Boroughs are broad geographic areas — not a ward-like unit — so use the council district view for the operational equivalent of a Brampton/Toronto ward. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. Supervisor decision support only — not a risk prediction — and this NYC geography and volume is never plotted onto Brampton wards.',
-    fallbackMessage: 'Showing benchmark sample volume — live NYC 311 borough aggregation unavailable.',
+      'Real NYC borough boundaries give the high-level executive overview, shaded by live New York City 311 public service request volume per borough. Boroughs are broad geographic areas — not a ward-like unit — so use the council district view for the operational equivalent of a Brampton/Toronto ward. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. Supervisor decision support only — not a risk prediction — and this NYC geography is never plotted onto Brampton wards.',
     async loadUnits() {
       const boroughs = await getNYCBoroughBoundaries()
       return boroughs.map((b, idx) => ({
@@ -97,13 +83,6 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
     async loadVolumes() {
       const rows = await getNYCWorkloadByBorough()
       return rows.map((r) => ({ key: boroughKey(r.borough), label: r.borough, volume: r.complaint_volume }))
-    },
-    sample() {
-      return mockNYCWorkloadByBorough().map((r) => ({
-        key: boroughKey(r.borough),
-        label: r.borough,
-        volume: r.complaint_volume,
-      }))
     },
   },
 }
@@ -123,15 +102,16 @@ export default function NYCWorkloadMapPanel({
   const [mode, setMode] = useState<MapMode>('district')
   const [units, setUnits] = useState<AreaUnit[]>([])
   const [volumes, setVolumes] = useState<AreaVolume[]>([])
-  // Whether the per-area volume came from the benchmark sample (Supabase view
-  // unavailable) rather than the live aggregation.
-  const [fallback, setFallback] = useState(false)
+  // Set when the live workload aggregate cannot be loaded from Supabase. No
+  // hardcoded sample is ever substituted — the map shows a clear notice instead.
+  const [unavailable, setUnavailable] = useState(false)
 
   useEffect(() => {
     let active = true
     const adapter = ADAPTERS[mode]
     setUnits([])
     setVolumes([])
+    setUnavailable(false)
 
     adapter
       .loadUnits()
@@ -146,20 +126,15 @@ export default function NYCWorkloadMapPanel({
       .loadVolumes()
       .then((data) => {
         if (!active) return
-        if (data.length === 0) {
-          setVolumes(adapter.sample())
-          setFallback(true)
-        } else {
-          setVolumes(data)
-          setFallback(false)
-        }
+        setVolumes(data)
+        setUnavailable(data.length === 0)
       })
       .catch((err: unknown) => {
-        // Fall back to the benchmark sample so the heat map still renders.
-        console.error('Failed to load NYC workload, using benchmark sample:', err)
+        // No fake fallback — surface the unavailable state instead.
+        console.error('Failed to load NYC workload from Supabase:', err)
         if (active) {
-          setVolumes(adapter.sample())
-          setFallback(true)
+          setVolumes([])
+          setUnavailable(true)
         }
       })
 
@@ -175,7 +150,7 @@ export default function NYCWorkloadMapPanel({
       onModeChange={setMode}
       units={units}
       volumes={volumes}
-      fallback={fallback}
+      unavailable={unavailable}
       onSelectDistrict={onSelectDistrict}
     />
   )
@@ -204,14 +179,14 @@ function NYCWorkloadHeatMap({
   onModeChange,
   units,
   volumes,
-  fallback,
+  unavailable,
   onSelectDistrict,
 }: {
   mode: MapMode
   onModeChange: (mode: MapMode) => void
   units: AreaUnit[]
   volumes: AreaVolume[]
-  fallback: boolean
+  unavailable: boolean
   onSelectDistrict?: (district: string) => void
 }) {
   const adapter = ADAPTERS[mode]
@@ -263,7 +238,7 @@ function NYCWorkloadHeatMap({
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-sky-800 sm:self-auto">
           <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
-          NYC 311 benchmark
+          {unavailable ? 'Live data unavailable' : 'Live Supabase data'}
         </span>
       </div>
 
@@ -297,10 +272,10 @@ function NYCWorkloadHeatMap({
         </span>
       </div>
 
-      {fallback && (
+      {unavailable && (
         <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-5 py-2 text-[11px] text-amber-900">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-          {adapter.fallbackMessage}
+          Live Supabase data unavailable. Unable to load the {adapter.unitLabel} workload aggregate.
         </div>
       )}
 
@@ -347,7 +322,7 @@ function NYCWorkloadHeatMap({
                       }}
                     >
                       <title>
-                        {shape.label} — NYC 311 benchmark workload (not operational data, not a risk prediction)
+                        {shape.label} — New York City 311 public workload (not a risk prediction)
                         {w
                           ? `\nWorkload intensity: ${workloadTier(norm(w.volume))}` +
                             `\nComplaint volume: ${num(w.volume)}`
@@ -513,8 +488,7 @@ function SelectedAreaPanel({
       <div className="text-[10px] uppercase tracking-wider text-ink-subtle">NYC 311 complaint volume</div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Real NYC 311 benchmark complaint volume — decision support only, not a risk prediction and not Brampton
-        operational complaint data.
+        Live New York City 311 public service request volume — decision support only, not a risk prediction.
       </p>
     </div>
   )

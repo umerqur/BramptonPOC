@@ -35,10 +35,10 @@ export default function AppInsightsPage() {
           Operational workload intelligence
         </h1>
         <p className="mt-2 text-ink-muted">
-          Where the service-request workload sits and where closure is under pressure across the NYC 311 benchmark
-          dataset. The council district view is the ward-like operational unit; the borough view is the executive
-          overview. These workload and closure patterns are supervisor decision support for reviewing staffing, routing,
-          and service response pressure — not an enforcement decision and not a risk prediction.
+          Where the service-request workload sits and where closure is under pressure across the New York City 311
+          public service request dataset. The council district view is the ward-like operational unit; the borough view
+          is the executive overview. These workload and closure patterns are supervisor decision support for reviewing
+          staffing, routing, and service response pressure — not an enforcement decision and not a risk prediction.
         </p>
       </div>
 
