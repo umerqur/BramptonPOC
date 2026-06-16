@@ -77,6 +77,7 @@ export default function AppCaseWorkbenchPage() {
   const ctx = c.context
   const summary = c.summary
   const effectivePriority = c.priorityOverride ?? c.triage.recommendedPriority
+  const isClosed = c.stage === 'closed'
 
   function note(msg: string) {
     setFlash(msg)
@@ -86,6 +87,16 @@ export default function AppCaseWorkbenchPage() {
   return (
     <div className="container-page py-10">
       <Header cases={cases} activeId={c.id} onPick={setActiveCase} />
+
+      {isClosed && (
+        <div className="mt-6 flex items-start gap-2.5 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-navy-900">
+          <svg className="mt-0.5 h-4 w-4 flex-none text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span className="font-medium">This case is closed. Actions are locked and the record is read only.</span>
+        </div>
+      )}
 
       <div className="mt-6 card p-5">
         <WorkflowStepper stage={c.stage} />
@@ -196,7 +207,7 @@ export default function AppCaseWorkbenchPage() {
 
         {/* Right: confidence gate + staff actions */}
         <div className="space-y-6">
-          <Panel title="Confidence gate" subtitle="Enough confidence?">
+          <Panel title="Review readiness" subtitle="Is the file ready for staff review?">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />
             <div
               className={`mt-3 rounded-lg px-3 py-2 text-xs ${
@@ -206,8 +217,8 @@ export default function AppCaseWorkbenchPage() {
               }`}
             >
               {c.triage.confidenceLevel === 'High'
-                ? 'Yes → routed to Staff Review with a prepared closure draft.'
-                : 'No → routed to Needs Staff Attention. Resolve drivers below, then send to review.'}
+                ? 'The file has enough intake detail, policy match, and context to prepare a staff reviewed closure draft.'
+                : 'More information is needed before staff review. Resolve the items below before preparing a closure draft.'}
             </div>
             <div className="mt-3">
               <div className="stat-label">Recommended next step</div>
@@ -236,6 +247,17 @@ export default function AppCaseWorkbenchPage() {
             )}
           </Panel>
 
+          {isClosed ? (
+            <Panel title="Case closed">
+              <p className="text-sm text-ink-muted">
+                This case has already been closed. No further workflow actions are available.
+              </p>
+              <dl className="mt-3 space-y-1.5 text-sm">
+                <Row label="Approved by" value={c.approvedBy ?? '—'} />
+                <Row label="Approved at" value={c.approvedAt ? formatDateTime(c.approvedAt) : '—'} />
+              </dl>
+            </Panel>
+          ) : (
           <Panel title="Staff actions" subtitle="Human review / decision">
             <div className="flex items-center gap-2 text-xs text-ink-subtle">
               <span>Effective priority:</span>
@@ -310,16 +332,25 @@ export default function AppCaseWorkbenchPage() {
               </div>
             )}
           </Panel>
+          )}
 
-          <FieldInvestigationPanel c={c} />
+          <FieldInvestigationPanel c={c} readOnly={isClosed} />
         </div>
       </div>
 
-      <div className="mt-6">
-        <Link to={`/app/closure?case=${c.id}`} className="text-sm font-semibold text-accent-600 hover:text-accent-700">
-          Continue to closure draft & staff review →
-        </Link>
-      </div>
+      {isClosed ? (
+        <div className="mt-6">
+          <Link to={`/app/closure?case=${c.id}`} className="text-sm font-semibold text-accent-600 hover:text-accent-700">
+            View approved closure record →
+          </Link>
+        </div>
+      ) : (
+        <div className="mt-6">
+          <Link to={`/app/closure?case=${c.id}`} className="text-sm font-semibold text-accent-600 hover:text-accent-700">
+            Continue to closure draft & staff review →
+          </Link>
+        </div>
+      )}
 
       <GuardrailFooter />
     </div>
@@ -330,10 +361,10 @@ export default function AppCaseWorkbenchPage() {
 // enforcement model has between triage and closure. A supervisor/CSR assigns the
 // case to an officer; the officer (role) attends and records the actual outcome,
 // which is what the closure letter is then allowed to state.
-function FieldInvestigationPanel({ c }: { c: DemoCase }) {
+function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnly?: boolean }) {
   const { role, assignToOfficer, recordFieldAction } = useWorkflow()
-  const canAssign = can(role, 'assignOfficer')
-  const canRecord = can(role, 'recordFieldAction')
+  const canAssign = !readOnly && can(role, 'assignOfficer')
+  const canRecord = !readOnly && can(role, 'recordFieldAction')
 
   const [officer, setOfficer] = useState(c.assignedOfficer ?? DEMO_OFFICERS[0])
   const [outcome, setOutcome] = useState<FieldVisitOutcome>('no_violation')
@@ -393,8 +424,19 @@ function FieldInvestigationPanel({ c }: { c: DemoCase }) {
           </p>
         )}
         <p className="mt-2 text-[11px] text-emerald-700">
-          The closure letter now states this outcome. Continue to staff review to approve it.
+          {readOnly
+            ? 'This case is closed. The recorded field outcome is read only.'
+            : 'The closure letter now states this outcome. Continue to staff review to approve it.'}
         </p>
+      </Panel>
+    )
+  }
+
+  // Closed with no recorded field visit — nothing can be assigned or recorded.
+  if (readOnly) {
+    return (
+      <Panel title="Field investigation" subtitle="Read only — case closed">
+        <p className="text-sm text-ink-subtle">No field investigation was recorded for this case.</p>
       </Panel>
     )
   }

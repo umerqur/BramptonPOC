@@ -221,7 +221,7 @@ function InboxCard({ row, onOpen }: { row: ResidentRequestRow; onOpen: () => voi
             </dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-subtle">Confidence</dt>
+            <dt className="text-xs uppercase tracking-wide text-ink-subtle">File readiness</dt>
             <dd className="mt-0.5 text-ink">
               {Math.round(triage.confidence * 100)}% · {triage.confidenceLevel}
             </dd>
@@ -236,7 +236,7 @@ function InboxCard({ row, onOpen }: { row: ResidentRequestRow; onOpen: () => voi
 
       <div className="mt-4 flex items-center justify-end">
         <button onClick={onOpen} className="btn-primary text-sm py-2 px-4">
-          Open case →
+          {row.status === 'closed' ? 'View closed case →' : 'Open case →'}
         </button>
       </div>
     </div>
