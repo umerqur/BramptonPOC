@@ -431,3 +431,52 @@ export async function applyStaffStatusUpdate(
 
   return { row: updated, emailSent }
 }
+
+/**
+ * Mark the linked resident request closed when a closure response is approved in
+ * the Closure Review Workbench. Updates resident_service_requests.status to
+ * 'closed' and writes a workflow event for the audit trail.
+ *
+ * IMPORTANT: this deliberately does NOT call sendResidentEmail. The rich
+ * `closure` email is already sent from AppClosureDraftsPage, so emailing here
+ * would deliver a duplicate generic "closed" status email to the resident.
+ */
+export async function markResidentRequestClosedFromClosureReview(
+  caseId: string,
+): Promise<ResidentRequestRow> {
+  const client = requireClient()
+
+  // a. read the existing row
+  const { data: existing, error: readError } = await client
+    .from(RESIDENT_REQUESTS_TABLE)
+    .select(RESIDENT_REQUEST_COLUMNS)
+    .eq('case_id', caseId)
+    .single()
+  if (readError) throw readError
+
+  // b. capture the prior status
+  const priorStatus = (existing as ResidentRequestRow).status
+
+  // c. update status to closed
+  const { data: updated, error: updateError } = await client
+    .from(RESIDENT_REQUESTS_TABLE)
+    .update({ status: 'closed' })
+    .eq('case_id', caseId)
+    .select(RESIDENT_REQUEST_COLUMNS)
+    .single()
+  if (updateError) throw updateError
+
+  // d. write a workflow event (no email)
+  await addWorkflowEvent({
+    case_id: caseId,
+    event_type: 'resident_request_closed',
+    event_label: 'Closure Review: Case closed',
+    from_status: STATUS_LABELS[priorStatus],
+    to_status: STATUS_LABELS.closed,
+    actor_type: 'staff',
+    notes: 'Final closure response approved through Closure Review Workbench',
+  })
+
+  // e. return the updated row
+  return updated as ResidentRequestRow
+}

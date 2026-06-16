@@ -473,7 +473,7 @@ export function buildClosureDraft(
       { item: 'Personalized to the resident and issue', ok: Boolean(input.residentName) },
     ],
     internalNotes,
-    generatedBy: 'AI workflow system',
+    generatedBy: 'Rules based closure template engine',
     generatedAt,
   }
 }

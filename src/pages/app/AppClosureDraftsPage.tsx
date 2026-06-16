@@ -2,8 +2,13 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
+import { isSupabaseConfigured } from '../../lib/supabase'
 import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
-import { isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
+import {
+  isSendableEmail,
+  markResidentRequestClosedFromClosureReview,
+  sendResidentEmail,
+} from '../../services/residentRequests'
 import { can, rolesAllowed } from '../../lib/roles'
 import {
   AutomationBadge,
@@ -14,12 +19,13 @@ import {
 } from '../../components/workflow/WorkflowUI'
 import type { DemoCase } from '../../data/demoWorkflowTypes'
 
-// Closure Drafts — the staff review page. The AI has already written the
-// closure response; staff only review the summary, edit the message if needed,
-// confirm the policy/tone checklists, and approve. On approval the case is
-// closed, an audit event is recorded, and — when the case carries a deliverable
-// resident email — the staff-approved closure response is actually emailed to the
-// resident through the server-side Netlify email function.
+// Closure Drafts — the staff review page. The system assembled a policy-aligned
+// closure draft from approved rules, templates, and the recorded field outcome;
+// staff review, edit, and approve. On approval the case is closed, an audit
+// event is recorded, the staff-approved closure response is emailed to the
+// resident (when deliverable), and — for real resident requests (RSR-…) — the
+// linked resident_service_requests row is marked closed in Supabase (without a
+// second generic email).
 
 type SendResult = { attempted: boolean; emailSent: boolean; to: string }
 
@@ -28,9 +34,11 @@ export default function AppClosureDraftsPage() {
   const c = useDemoCase()
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState<SendResult | null>(null)
+  const [statusWarning, setStatusWarning] = useState<string | null>(null)
 
   // Approve the closure: persist any staff edit, email the resident the approved
-  // response (when deliverable), then close the case with the real send outcome.
+  // response (when deliverable), mark the linked Supabase resident request closed
+  // (for RSR- cases, with no second email), then close the case locally.
   async function handleApprove(caseObj: DemoCase, body: string) {
     if (!caseObj.draft || sending) return
     if (body !== caseObj.draft.body) editDraftBody(caseObj.id, body)
@@ -38,6 +46,7 @@ export default function AppClosureDraftsPage() {
     const to = caseObj.input.residentEmail.trim()
     const attempted = isSendableEmail(to)
     let emailSent = false
+    let warning: string | null = null
 
     setSending(true)
     try {
@@ -53,9 +62,28 @@ export default function AppClosureDraftsPage() {
           message: body,
         })
       }
+
+      // Sync the linked resident request to closed in Supabase — real resident
+      // submissions only (RSR-…). No second email is sent from here. A failure
+      // must not block the local closure approval; surface it as a warning.
+      if (caseObj.id.startsWith('RSR-')) {
+        if (!isSupabaseConfigured) {
+          warning =
+            'The closure email may have been sent, but Supabase is not configured in this environment, so the resident request status could not be updated to closed.'
+        } else {
+          try {
+            await markResidentRequestClosedFromClosureReview(caseObj.id)
+          } catch (err) {
+            console.error('Failed to mark resident request closed in Supabase:', err)
+            warning =
+              'The closure email may have been sent, but the resident request status could not be updated to closed in Supabase. You can close it from Resident Intake.'
+          }
+        }
+      }
     } finally {
       approveClosure(caseObj.id, { attempted, emailSent })
       setSendResult({ attempted, emailSent, to })
+      setStatusWarning(warning)
       setSending(false)
     }
   }
@@ -81,7 +109,7 @@ export default function AppClosureDraftsPage() {
       </div>
 
       {c.stage === 'closed' ? (
-        <ResidentUpdateView c={c} sendResult={sendResult} />
+        <ResidentUpdateView c={c} sendResult={sendResult} statusWarning={statusWarning} />
       ) : c.draft ? (
         <ReviewView c={c} sending={sending} onApprove={(body) => handleApprove(c, body)} />
       ) : (
@@ -110,9 +138,11 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
   return (
     <>
       <div className="mt-6 flex flex-wrap items-center gap-2">
-        <AutomationBadge kind="ai" />
+        <AutomationBadge kind="review" />
         <AutomationBadge kind="approval" />
-        <span className="text-xs text-ink-subtle">The AI drafted this response. Staff review, edit, and approve.</span>
+        <span className="text-xs text-ink-subtle">
+          Assembled from approved templates and the recorded case facts. Staff review, edit, and approve.
+        </span>
       </div>
 
       {/* What the letter is actually based on — a recorded field outcome, or a
@@ -153,7 +183,7 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
 
         {/* Editable draft */}
         <div className="lg:col-span-2 space-y-6">
-          <Panel title="AI closure-response draft" subtitle={`Generated by ${draft.generatedBy} · ${formatDateTime(draft.generatedAt)}`}>
+          <Panel title="Rules based closure draft" subtitle={`Generated by ${draft.generatedBy} · ${formatDateTime(draft.generatedAt)}`}>
             <div className="mb-2 text-sm">
               <span className="text-ink-subtle">Subject: </span>
               <span className="font-medium text-navy-900">{draft.subject}</span>
@@ -165,9 +195,18 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
               className="w-full rounded-lg border border-slate-300 p-3 font-sans text-sm leading-relaxed text-ink focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
             />
             <p className="mt-2 text-xs text-ink-subtle">
-              {body === draft.body ? 'Unedited AI draft.' : 'Edited by staff — your changes will be saved on approval.'}
+              {body === draft.body ? 'Unedited template draft.' : 'Edited by staff — your changes will be saved on approval.'}
             </p>
           </Panel>
+
+          {/* Resident message governance — clarifies the outbound message is
+              template-controlled and staff-approved, with AI limited to summary
+              and context (not freeform generation of the resident letter). */}
+          <div className="rounded-lg border border-navy-200 bg-navy-50 px-4 py-3 text-xs text-navy-900">
+            <span className="font-semibold">Resident message governance:</span> this closure response is assembled from
+            approved template logic and recorded case facts. AI assists with summary and context, but the outbound
+            resident message is staff approved and template controlled.
+          </div>
 
           <Panel title="Internal notes">
             <ul className="space-y-1.5">
@@ -241,7 +280,15 @@ function NeedsDraftView({ c, onPrepare }: { c: DemoCase; onPrepare: () => void }
   )
 }
 
-function ResidentUpdateView({ c, sendResult }: { c: DemoCase; sendResult: SendResult | null }) {
+function ResidentUpdateView({
+  c,
+  sendResult,
+  statusWarning,
+}: {
+  c: DemoCase
+  sendResult: SendResult | null
+  statusWarning: string | null
+}) {
   return (
     <>
       <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -254,6 +301,12 @@ function ResidentUpdateView({ c, sendResult }: { c: DemoCase; sendResult: SendRe
       </div>
 
       <ResidentEmailNotice sendResult={sendResult} />
+
+      {statusWarning && (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
+          <span className="font-semibold">Resident request status not updated.</span> {statusWarning}
+        </div>
+      )}
 
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
         <Panel title="Approval record">
@@ -335,7 +388,8 @@ function Header({ cases, activeId, onPick }: { cases: DemoCase[]; activeId: stri
         <div className="section-eyebrow">Step 4 · Staff review & approval</div>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">Closure Drafts</h1>
         <p className="mt-2 text-ink-muted">
-          The AI already drafted the closure response. Staff only review, edit if needed, and approve.
+          The system assembled a policy aligned closure draft from approved rules, templates, and the recorded field
+          outcome. Staff review, edit, and approve before anything is sent.
         </p>
       </div>
       <CaseSwitcher cases={cases} activeId={activeId} onPick={onPick} />
