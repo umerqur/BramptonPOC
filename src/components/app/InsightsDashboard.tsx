@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
@@ -791,18 +791,20 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 const PAGE_SIZE = 25
 
 function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilters; onFiltersChange: (f: CaseExplorerFilters) => void }) {
-  const [page, setPage] = useState(0)
   const [rows, setRows] = useState<NycCaseRow[]>([])
-  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  // Cheap planner estimate only — never an exact count over the 3.4M-row table.
+  const [estimatedTotal, setEstimatedTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<CaseExplorerOptions | null>(null)
   const [openCase, setOpenCase] = useState<string | null>(null)
 
-  // Reset to the first page whenever the filters change.
-  useEffect(() => {
-    setPage(0)
-  }, [filters])
+  // Last loaded page (zero-based) for "Load more", and a request token so a slow
+  // response for stale filters can never overwrite the current results.
+  const pageRef = useRef(0)
+  const reqRef = useRef(0)
 
   useEffect(() => {
     getCaseExplorerOptions()
@@ -810,33 +812,58 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
       .catch((err) => console.error('Failed to load explorer options:', err))
   }, [])
 
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    getNycCaseExplorerPage(filters, page, PAGE_SIZE)
-      .then((res) => {
-        if (!active) return
-        setRows(res.rows)
-        setTotal(res.total)
-      })
-      .catch((err: unknown) => {
-        console.error('Case Explorer load failed:', err)
-        if (active) {
+  // Load one page. `append` accumulates ("Load more"); otherwise it replaces and
+  // starts a fresh result set (new filters / first load).
+  const fetchPage = useCallback(
+    (pageIndex: number, append: boolean) => {
+      const id = ++reqRef.current
+      pageRef.current = pageIndex
+      if (append) setLoadingMore(true)
+      else setLoading(true)
+      setError(null)
+      getNycCaseExplorerPage(filters, pageIndex, PAGE_SIZE)
+        .then((res) => {
+          if (id !== reqRef.current) return
+          setRows((prev) => (append ? [...prev, ...res.rows] : res.rows))
+          setHasMore(res.hasMore)
+          setEstimatedTotal(res.estimatedTotal)
+        })
+        .catch((err: unknown) => {
+          if (id !== reqRef.current) return
+          console.error('Case Explorer load failed:', err)
           setError(errorMessage(err))
-          setRows([])
-          setTotal(0)
-        }
-      })
-      .finally(() => active && setLoading(false))
-    return () => {
-      active = false
-    }
-  }, [filters, page])
+          if (!append) {
+            setRows([])
+            setHasMore(false)
+            setEstimatedTotal(null)
+          }
+        })
+        .finally(() => {
+          if (id !== reqRef.current) return
+          setLoading(false)
+          setLoadingMore(false)
+        })
+    },
+    [filters],
+  )
+
+  // Reload from the first page whenever the filters change.
+  useEffect(() => {
+    fetchPage(0, false)
+  }, [fetchPage])
 
   const set = (patch: Partial<CaseExplorerFilters>) => onFiltersChange({ ...filters, ...patch })
-  const from = total === 0 ? 0 : page * PAGE_SIZE + 1
-  const to = Math.min(total, (page + 1) * PAGE_SIZE)
+
+  // Safe, count-free result label. We never claim an exact total.
+  const countLabel = error
+    ? 'Live data unavailable'
+    : loading
+      ? 'Loading…'
+      : estimatedTotal != null && estimatedTotal > rows.length
+        ? `Showing ${fmtInt(rows.length)} of approx. ${fmtInt(estimatedTotal)} matching cases`
+        : hasMore
+          ? `Showing first ${fmtInt(rows.length)} matching cases`
+          : `Showing ${fmtInt(rows.length)} matching case${rows.length === 1 ? '' : 's'}`
 
   return (
     <div className="mt-6 space-y-4">
@@ -858,7 +885,7 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
 
       <section className="card p-5">
         <div className="mb-3 flex items-center justify-between text-xs text-ink-subtle">
-          <span>{error ? 'Live data unavailable' : loading ? 'Loading…' : `${fmtInt(from)}–${fmtInt(to)} of ${fmtInt(total)}`}</span>
+          <span>{countLabel}</span>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider">Live data</span>
         </div>
 
@@ -891,14 +918,15 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           />
         )}
 
-        {!error && total > PAGE_SIZE && (
-          <div className="mt-4 flex items-center justify-between">
-            <button type="button" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-50">
-              ← Prev
-            </button>
-            <span className="text-xs text-ink-subtle">Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
-            <button type="button" disabled={to >= total} onClick={() => setPage((p) => p + 1)} className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-50">
-              Next →
+        {!error && hasMore && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => fetchPage(pageRef.current + 1, true)}
+              className="btn-secondary text-xs py-1.5 px-4 disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading…' : 'Load more'}
             </button>
           </div>
         )}
