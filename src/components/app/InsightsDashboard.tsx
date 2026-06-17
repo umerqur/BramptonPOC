@@ -36,6 +36,7 @@ import {
   type NycCaseRow,
   type CaseExplorerOptions,
   type OpenReviewRow,
+  type OpenSourceRecord,
   type OpenQueueFilters,
   type OpenQueueOptions,
   type OpenAgingBucket,
@@ -1052,25 +1053,100 @@ function HistoricalCaseDetailBody({ row }: { row: NycCaseRow }) {
 
 function OpenCaseDetailBody({ row }: { row: OpenReviewRow }) {
   return (
-    <dl className="space-y-2.5">
-      <DetailRow label="Submitted" value={fmtDate(row.submitted_at)} />
-      <DetailRow label="Status" value={row.status ?? '—'} />
-      <DetailRow label="Complaint type" value={row.complaint_type ?? '—'} />
-      <DetailRow label="Descriptor" value={row.descriptor ?? '—'} />
-      <DetailRow label="Agency" value={row.agency ?? '—'} />
-      <DetailRow label="Borough" value={row.borough ?? '—'} />
-      <DetailRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
-      <DetailRow label="Location" value={row.address_or_location ?? '—'} />
-      <DetailRow label="Due date" value={fmtDate(row.due_date)} />
-      <DetailRow label="Source channel" value={row.source_channel ?? '—'} />
-      <DetailRow label="Age" value={row.age_days == null ? '—' : `${row.age_days} days`} />
-      <DetailRow label="Review priority" value={row.priority_score == null ? '—' : row.priority_score.toFixed(0)} />
-      <DetailRow label="Priority tier" value={row.priority_tier ?? '—'} />
-      <DetailRow label="Priority reason" value={row.priority_reason ?? '—'} />
-      <p className="pt-1 text-[11px] leading-relaxed text-ink-subtle">
+    <div className="space-y-4">
+      {/* Clean operational summary first. */}
+      <dl className="space-y-2.5">
+        <DetailRow label="Submitted" value={fmtDate(row.submitted_at)} />
+        <DetailRow label="Status" value={row.status ?? '—'} />
+        <DetailRow label="Complaint type" value={row.complaint_type ?? '—'} />
+        <DetailRow label="Descriptor" value={row.descriptor ?? '—'} />
+        <DetailRow label="Agency" value={row.agency ?? '—'} />
+        <DetailRow label="Borough" value={row.borough ?? '—'} />
+        <DetailRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
+        <DetailRow label="Location" value={row.address_or_location ?? '—'} />
+        <DetailRow label="Due date" value={fmtDate(row.due_date)} />
+        <DetailRow label="Source channel" value={row.source_channel ?? '—'} />
+        <DetailRow label="Age" value={row.age_days == null ? '—' : `${row.age_days} days`} />
+        <DetailRow label="Review priority" value={row.priority_score == null ? '—' : row.priority_score.toFixed(0)} />
+        <DetailRow label="Priority tier" value={row.priority_tier ?? '—'} />
+        <DetailRow label="Priority reason" value={row.priority_reason ?? '—'} />
+      </dl>
+
+      {/* Full transparency into the underlying record — collapsed by default so
+          it never overwhelms the curated summary above. */}
+      <SourceRecordDetails source={row.source} />
+
+      <p className="text-[11px] leading-relaxed text-ink-subtle">
         Decision support — staff review and decide. Review priority is a transparent ranking aid, not an automated decision.
       </p>
-    </dl>
+    </div>
+  )
+}
+
+/** Combine non-empty parts with a separator, or return null if none are present. */
+function joinParts(parts: (string | null)[], sep = ' · '): string | null {
+  const present = parts.filter((p): p is string => !!p && p.trim().length > 0)
+  return present.length > 0 ? present.join(sep) : null
+}
+
+/**
+ * Collapsible "Source record details" — the remaining verbatim fields from the
+ * public NYC 311 source record (nyc_open_service_requests). Collapsed by default;
+ * only fields that carry a value are shown, so the section stays clean.
+ */
+function SourceRecordDetails({ source }: { source: OpenSourceRecord }) {
+  const latLng =
+    source.latitude != null && source.longitude != null
+      ? `${source.latitude.toFixed(5)}, ${source.longitude.toFixed(5)}`
+      : null
+
+  const rows: { label: string; value: string | null }[] = [
+    { label: 'Source dataset ID / unique key', value: source.unique_key },
+    { label: 'Location type', value: source.location_type },
+    { label: 'ZIP', value: source.incident_zip },
+    { label: 'Incident address', value: source.incident_address },
+    { label: 'Street name', value: source.street_name },
+    { label: 'Cross streets', value: joinParts([source.cross_street_1, source.cross_street_2]) },
+    { label: 'Intersection streets', value: joinParts([source.intersection_street_1, source.intersection_street_2]) },
+    { label: 'Address type', value: source.address_type },
+    { label: 'City', value: source.city },
+    { label: 'Resolution description', value: source.resolution_description },
+    { label: 'Resolution action updated', value: source.resolution_action_updated_date ? fmtDate(source.resolution_action_updated_date) : null },
+    { label: 'Latitude / longitude', value: latLng },
+  ].filter((r) => r.value != null)
+
+  return (
+    <details className="group rounded-lg border border-slate-200 bg-slate-50/60">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-2.5">
+        <span className="min-w-0">
+          <span className="block text-[11px] font-semibold uppercase tracking-wider text-navy-900">Source record details</span>
+          <span className="block text-[11px] text-ink-subtle">Public service request source data</span>
+        </span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+          className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </summary>
+      <div className="border-t border-slate-200 px-3.5 py-3">
+        {rows.length === 0 ? (
+          <p className="text-xs text-ink-subtle">No additional source fields available for this record.</p>
+        ) : (
+          <dl className="space-y-2.5">
+            {rows.map((r) => (
+              <DetailRow key={r.label} label={r.label} value={r.value as string} />
+            ))}
+          </dl>
+        )}
+      </div>
+    </details>
   )
 }
 
