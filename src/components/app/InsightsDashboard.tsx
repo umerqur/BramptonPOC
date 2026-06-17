@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
   getInsightsKpis,
@@ -23,7 +23,6 @@ import {
 } from '../../services/insightsDashboard'
 import {
   getNycCaseExplorerPage,
-  getNycCaseDetail,
   getCaseExplorerOptions,
   getNycOpenQueuePage,
   getNycOpenQueueDiversified,
@@ -36,7 +35,6 @@ import {
   type NycCaseRow,
   type CaseExplorerOptions,
   type OpenReviewRow,
-  type OpenSourceRecord,
   type OpenQueueFilters,
   type OpenQueueOptions,
   type OpenAgingBucket,
@@ -791,15 +789,13 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 const PAGE_SIZE = 25
 
 function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilters; onFiltersChange: (f: CaseExplorerFilters) => void }) {
+  const navigate = useNavigate()
   const [rows, setRows] = useState<NycCaseRow[]>([])
   const [hasMore, setHasMore] = useState(false)
-  // Cheap planner estimate only — never an exact count over the 3.4M-row table.
-  const [estimatedTotal, setEstimatedTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<CaseExplorerOptions | null>(null)
-  const [openCase, setOpenCase] = useState<string | null>(null)
 
   // Last loaded page (zero-based) for "Load more", and a request token so a slow
   // response for stale filters can never overwrite the current results.
@@ -826,7 +822,6 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           if (id !== reqRef.current) return
           setRows((prev) => (append ? [...prev, ...res.rows] : res.rows))
           setHasMore(res.hasMore)
-          setEstimatedTotal(res.estimatedTotal)
         })
         .catch((err: unknown) => {
           if (id !== reqRef.current) return
@@ -835,7 +830,6 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           if (!append) {
             setRows([])
             setHasMore(false)
-            setEstimatedTotal(null)
           }
         })
         .finally(() => {
@@ -854,16 +848,17 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
 
   const set = (patch: Partial<CaseExplorerFilters>) => onFiltersChange({ ...filters, ...patch })
 
-  // Safe, count-free result label. We never claim an exact total.
+  // Count-free result label. We never claim an exact total over the 3.4M-row
+  // table — just how many rows are loaded and whether more are available.
   const countLabel = error
     ? 'Live data unavailable'
     : loading
       ? 'Loading…'
-      : estimatedTotal != null && estimatedTotal > rows.length
-        ? `Showing ${fmtInt(rows.length)} of approx. ${fmtInt(estimatedTotal)} matching cases`
+      : rows.length === 0
+        ? 'No results'
         : hasMore
-          ? `Showing first ${fmtInt(rows.length)} matching cases`
-          : `Showing ${fmtInt(rows.length)} matching case${rows.length === 1 ? '' : 's'}`
+          ? `Showing ${fmtInt(rows.length)} results · More results available`
+          : `Showing ${fmtInt(rows.length)} result${rows.length === 1 ? '' : 's'}`
 
   return (
     <div className="mt-6 space-y-4">
@@ -903,7 +898,7 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
               const dur = closureDurationDays(r)
               return {
                 key: r.case_id,
-                onClick: () => setOpenCase(r.case_id),
+                onClick: () => navigate(`/app/nyc_case/${encodeURIComponent(r.case_id)}`),
                 cells: [
                   r.case_id,
                   fmtDate(r.submitted_at),
@@ -931,8 +926,6 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           </div>
         )}
       </section>
-
-      <CaseDetailDrawer historicalId={openCase} onClose={() => setOpenCase(null)} />
     </div>
   )
 }
@@ -970,224 +963,6 @@ function FilterDate({ label, value, onChange }: { label: string; value: string; 
 }
 
 // ---------------------------------------------------------------------------
-// Case detail drawer (shared by Explorer + Open queue)
-// ---------------------------------------------------------------------------
-
-/**
- * Case detail drawer. Two sources, never mixed:
- *   * Historical Case Explorer rows → fetched from municipal_complaints by id.
- *   * Open review-queue rows → rendered from the already-loaded open-case row
- *     (sourced from v_nyc_open_review_queue), so the open detail never falls back
- *     to the historical table and needs no second round trip.
- */
-function CaseDetailDrawer({
-  historicalId,
-  openRow,
-  onClose,
-}: {
-  historicalId?: string | null
-  openRow?: OpenReviewRow | null
-  onClose: () => void
-}) {
-  const isOpen = openRow != null
-  const caseId = isOpen ? openRow!.case_id : historicalId ?? null
-  const active = isOpen || historicalId != null
-
-  const [row, setRow] = useState<NycCaseRow | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    // Only the historical Case Explorer fetches; open rows arrive fully loaded.
-    if (isOpen || !historicalId) return
-    let live = true
-    setLoading(true)
-    setError(null)
-    setRow(null)
-    getNycCaseDetail(historicalId)
-      .then((d) => live && setRow(d))
-      .catch((err: unknown) => live && setError(errorMessage(err)))
-      .finally(() => live && setLoading(false))
-    return () => {
-      live = false
-    }
-  }, [historicalId, isOpen])
-
-  useEffect(() => {
-    if (!active) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [active, onClose])
-
-  if (!active) return null
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-navy-900/40" role="dialog" aria-modal="true" aria-label={`Case ${caseId}`} onClick={onClose}>
-      <div className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
-          <div className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-              {isOpen ? 'Open case detail' : 'Case detail'}
-            </div>
-            <h3 className="truncate text-sm font-semibold text-navy-900">{caseId}</h3>
-          </div>
-          <button type="button" onClick={onClose} className="btn-secondary text-xs py-1.5 px-3">Close</button>
-        </div>
-        <div className="overflow-y-auto px-5 py-4">
-          {isOpen ? (
-            <OpenCaseDetailBody row={openRow!} />
-          ) : loading ? (
-            <div className="py-10 text-center text-sm text-ink-subtle">Loading case…</div>
-          ) : error ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-900">Live data unavailable. {error}</div>
-          ) : !row ? (
-            <div className="py-10 text-center text-sm text-ink-subtle">Case not found.</div>
-          ) : (
-            <HistoricalCaseDetailBody row={row} />
-          )}
-        </div>
-        <div className="border-t border-slate-100 px-5 py-2.5 text-[11px] text-ink-subtle">Source: New York City 311 public service requests.</div>
-      </div>
-    </div>
-  )
-}
-
-function HistoricalCaseDetailBody({ row }: { row: NycCaseRow }) {
-  const dur = closureDurationDays(row)
-  const agency = row.agency_name || row.agency || row.assigned_department || '—'
-  return (
-    <dl className="space-y-2.5">
-      <DetailRow label="Submitted" value={fmtDate(row.submitted_at)} />
-      <DetailRow label="Closed" value={fmtDate(row.closed_at)} />
-      <DetailRow label="Closure duration" value={dur == null ? '—' : `${dur} days`} />
-      <DetailRow label="Status" value={row.status ?? '—'} />
-      <DetailRow label="Complaint type" value={row.complaint_type ?? '—'} />
-      <DetailRow label="Request detail" value={[row.request_detail, row.request_detail_2].filter(Boolean).join(' · ') || '—'} />
-      <DetailRow label="Agency" value={agency} />
-      <DetailRow label="Borough" value={row.borough ?? '—'} />
-      <DetailRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
-      <DetailRow label="Location" value={row.address_or_location || row.ward_or_area || '—'} />
-      <DetailRow label="Resolution" value={row.resolution_description ?? '—'} />
-      <DetailRow label="Dataset id" value={row.source_dataset_id ?? '—'} />
-      <div className="pt-2">
-        <Link to={`/app/cases/${encodeURIComponent(row.case_id)}`} className="text-xs font-medium text-accent-700 hover:text-accent-900">
-          Open full case file →
-        </Link>
-      </div>
-    </dl>
-  )
-}
-
-function OpenCaseDetailBody({ row }: { row: OpenReviewRow }) {
-  return (
-    <div className="space-y-4">
-      {/* Clean operational summary first. */}
-      <dl className="space-y-2.5">
-        <DetailRow label="Submitted" value={fmtDate(row.submitted_at)} />
-        <DetailRow label="Status" value={row.status ?? '—'} />
-        <DetailRow label="Complaint type" value={row.complaint_type ?? '—'} />
-        <DetailRow label="Descriptor" value={row.descriptor ?? '—'} />
-        <DetailRow label="Agency" value={row.agency ?? '—'} />
-        <DetailRow label="Borough" value={row.borough ?? '—'} />
-        <DetailRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
-        <DetailRow label="Location" value={row.address_or_location ?? '—'} />
-        <DetailRow label="Due date" value={fmtDate(row.due_date)} />
-        <DetailRow label="Source channel" value={row.source_channel ?? '—'} />
-        <DetailRow label="Age" value={row.age_days == null ? '—' : `${row.age_days} days`} />
-        <DetailRow label="Review priority" value={row.priority_score == null ? '—' : row.priority_score.toFixed(0)} />
-        <DetailRow label="Priority tier" value={row.priority_tier ?? '—'} />
-        <DetailRow label="Priority reason" value={row.priority_reason ?? '—'} />
-      </dl>
-
-      {/* Full transparency into the underlying record — collapsed by default so
-          it never overwhelms the curated summary above. */}
-      <SourceRecordDetails source={row.source} />
-
-      <p className="text-[11px] leading-relaxed text-ink-subtle">
-        Decision support — staff review and decide. Review priority is a transparent ranking aid, not an automated decision.
-      </p>
-    </div>
-  )
-}
-
-/** Combine non-empty parts with a separator, or return null if none are present. */
-function joinParts(parts: (string | null)[], sep = ' · '): string | null {
-  const present = parts.filter((p): p is string => !!p && p.trim().length > 0)
-  return present.length > 0 ? present.join(sep) : null
-}
-
-/**
- * Collapsible "Source record details" — the remaining verbatim fields from the
- * public NYC 311 source record (nyc_open_service_requests). Collapsed by default;
- * only fields that carry a value are shown, so the section stays clean.
- */
-function SourceRecordDetails({ source }: { source: OpenSourceRecord }) {
-  const latLng =
-    source.latitude != null && source.longitude != null
-      ? `${source.latitude.toFixed(5)}, ${source.longitude.toFixed(5)}`
-      : null
-
-  const rows: { label: string; value: string | null }[] = [
-    { label: 'Source dataset ID / unique key', value: source.unique_key },
-    { label: 'Location type', value: source.location_type },
-    { label: 'ZIP', value: source.incident_zip },
-    { label: 'Incident address', value: source.incident_address },
-    { label: 'Street name', value: source.street_name },
-    { label: 'Cross streets', value: joinParts([source.cross_street_1, source.cross_street_2]) },
-    { label: 'Intersection streets', value: joinParts([source.intersection_street_1, source.intersection_street_2]) },
-    { label: 'Address type', value: source.address_type },
-    { label: 'City', value: source.city },
-    { label: 'Resolution description', value: source.resolution_description },
-    { label: 'Resolution action updated', value: source.resolution_action_updated_date ? fmtDate(source.resolution_action_updated_date) : null },
-    { label: 'Latitude / longitude', value: latLng },
-  ].filter((r) => r.value != null)
-
-  return (
-    <details className="group rounded-lg border border-slate-200 bg-slate-50/60">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-2.5">
-        <span className="min-w-0">
-          <span className="block text-[11px] font-semibold uppercase tracking-wider text-navy-900">Source record details</span>
-          <span className="block text-[11px] text-ink-subtle">Public service request source data</span>
-        </span>
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-          className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180"
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </summary>
-      <div className="border-t border-slate-200 px-3.5 py-3">
-        {rows.length === 0 ? (
-          <p className="text-xs text-ink-subtle">No additional source fields available for this record.</p>
-        ) : (
-          <dl className="space-y-2.5">
-            {rows.map((r) => (
-              <DetailRow key={r.label} label={r.label} value={r.value as string} />
-            ))}
-          </dl>
-        )}
-      </div>
-    </details>
-  )
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 break-words text-sm text-ink">{value}</dd>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Open cases queue tab
 // ---------------------------------------------------------------------------
 
@@ -1206,6 +981,7 @@ const DIVERSIFIED_SIZE = 60
 type QueueMode = 'priority' | 'diversified'
 
 function OpenCasesQueue() {
+  const navigate = useNavigate()
   const [filters, setFilters] = useState<OpenQueueFilters>({})
   const [mode, setMode] = useState<QueueMode>('priority')
   const [page, setPage] = useState(0)
@@ -1214,7 +990,6 @@ function OpenCasesQueue() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<OpenQueueOptions | null>(null)
-  const [openRow, setOpenRow] = useState<OpenReviewRow | null>(null)
 
   // Aging buckets across the FULL open population (not just the loaded page).
   const aging = useLive<OpenAgingBucket[]>(getNycOpenAgingBuckets)
@@ -1355,7 +1130,7 @@ function OpenCasesQueue() {
             align={['right', 'left', 'left', 'right', 'left', 'left', 'left']}
             rows={rows.map((r) => ({
               key: r.case_id,
-              onClick: () => setOpenRow(r),
+              onClick: () => navigate(`/app/nyc_case/${encodeURIComponent(r.case_id)}`),
               cells: [
                 r.priority_score == null ? '—' : r.priority_score.toFixed(0),
                 r.priority_tier ?? '—',
@@ -1377,8 +1152,6 @@ function OpenCasesQueue() {
           </div>
         )}
       </SectionShell>
-
-      <CaseDetailDrawer openRow={openRow} onClose={() => setOpenRow(null)} />
     </div>
   )
 }

@@ -4,13 +4,15 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 //
 // Case Explorer is a paginated, filtered window over the historical NYC 311
 // public service requests in public.municipal_complaints — it NEVER loads all
-// rows (every query is filtered + range-paginated with an exact count). The Open
-// review queue reads a separate, prioritized open-cases view
-// (public.v_nyc_open_review_queue) when that dataset has been loaded; until then
-// the reader surfaces a clear "not loaded" state rather than inventing data.
+// rows and NEVER asks for a row count. Every query is filtered, range-paginated,
+// and ordered by an indexed column; pagination is cursor-style ("more results
+// available") rather than an exact "page X of N". The Open review queue reads a
+// separate, prioritized open-cases view (public.v_nyc_open_review_queue) when
+// that dataset has been loaded; until then the reader surfaces a clear
+// "not loaded" state rather than inventing data.
 
 function requireClient() {
-  if (!isSupabaseConfigured || !supabase) throw new Error('Supabase is not configured')
+  if (!isSupabaseConfigured || !supabase) throw new Error('Live data service is not configured')
   return supabase
 }
 
@@ -75,10 +77,10 @@ const EXPLORER_COLUMNS =
 
 export type CaseExplorerPage = {
   rows: NycCaseRow[]
-  /** Whether more rows exist beyond this page — computed WITHOUT an exact count. */
+  /** Whether more rows exist beyond this page — computed WITHOUT any row count. */
   hasMore: boolean
-  /** Cheap planner estimate of total matching rows. Approximate; may be null. */
-  estimatedTotal: number | null
+  /** Next zero-based page index, or null when there are no more rows. */
+  nextPage: number | null
 }
 
 /** Closure duration in whole days, or null when the case is not closed cleanly. */
@@ -92,17 +94,19 @@ export function closureDurationDays(row: { submitted_at: string | null; closed_a
 
 /**
  * One filtered page of NYC 311 cases for the Case Explorer drilldowns. `page` is
- * zero-based and pages are meant to accumulate ("Load more"), never to drive an
- * exact page count.
+ * zero-based and pages are meant to accumulate ("Load more").
  *
- * IMPORTANT — no exact counts. Counting 3.4M rows filtered by a high-volume
- * complaint type (e.g. Illegal Parking) and ordered by submitted_at was blowing
- * the Postgres statement timeout (57014). Instead we:
- *   * fetch pageSize + 1 rows so we know if there is a next page without a count, and
- *   * ask only for a cheap PLANNED count (planner estimate) for an approximate
- *     "Approx. X matching cases" hint.
- * Combined with the partial indexes in migration 024, the ordered, limited slice
- * uses an index and returns quickly. We never load the full result set.
+ * IMPORTANT — no row counts of any kind. Counting 3.4M rows filtered by a
+ * high-volume complaint type (e.g. Illegal Parking) and ordered by submitted_at
+ * blew the Postgres statement timeout (57014). Instead we fetch pageSize + 1 rows
+ * so we know whether a next page exists without ever counting, then trim back to
+ * pageSize. Combined with the partial indexes in migration 025, the ordered,
+ * limited slice is served straight from an index and returns quickly.
+ *
+ * Exact-ID search short circuit: when the search term is an exact case ID (or
+ * source dataset ID) — historical OR open review queue — we resolve it directly
+ * to a single row so searching an open case like "NYC-OPEN-68296525" works even
+ * though that case does not live in the historical table.
  */
 export async function getNycCaseExplorerPage(
   filters: CaseExplorerFilters,
@@ -110,23 +114,44 @@ export async function getNycCaseExplorerPage(
   pageSize = 25,
 ): Promise<CaseExplorerPage> {
   const client = requireClient()
-  let query = client
-    .from(COMPLAINTS_TABLE)
-    .select(EXPLORER_COLUMNS, { count: 'planned' })
-    .eq('source_city', 'NYC')
 
-  const term = filters.search?.trim().replace(/[,()*%]/g, ' ').trim()
+  const term = filters.search?.trim()
+
   if (term) {
-    query = query.or(
-      [
-        `case_id.ilike.%${term}%`,
-        `source_dataset_id.ilike.%${term}%`,
-        `complaint_type.ilike.%${term}%`,
-        `address_or_location.ilike.%${term}%`,
-        `request_detail.ilike.%${term}%`,
-      ].join(','),
-    )
+    // Try an exact ID match first (historical or open review queue). Defensive:
+    // a missing open queue view must never break ordinary text search, so any
+    // lookup error falls through to the normal filtered query below.
+    try {
+      const exact = await getUnifiedNycCaseDetail(term)
+      if (exact) {
+        return {
+          rows: [caseDetailToExplorerRow(exact)],
+          hasMore: false,
+          nextPage: null,
+        }
+      }
+    } catch {
+      // Ignore — fall through to the filtered text search.
+    }
   }
+
+  let query = client.from(COMPLAINTS_TABLE).select(EXPLORER_COLUMNS).eq('source_city', 'NYC')
+
+  if (term) {
+    const safeTerm = term.replace(/[,()*%]/g, ' ').trim()
+    if (safeTerm) {
+      query = query.or(
+        [
+          `case_id.ilike.%${safeTerm}%`,
+          `source_dataset_id.ilike.%${safeTerm}%`,
+          `complaint_type.ilike.%${safeTerm}%`,
+          `address_or_location.ilike.%${safeTerm}%`,
+          `request_detail.ilike.%${safeTerm}%`,
+        ].join(','),
+      )
+    }
+  }
+
   if (filters.complaintType) query = query.eq('complaint_type', filters.complaintType)
   // Indexed equality on the normalized (uppercase) borough name, so a map label
   // ("Brooklyn") and a stored value ("BROOKLYN") both match and the borough btree
@@ -150,25 +175,157 @@ export async function getNycCaseExplorerPage(
   if (filters.dateFrom) query = query.gte('submitted_at', filters.dateFrom)
   if (filters.dateTo) query = query.lte('submitted_at', `${filters.dateTo}T23:59:59`)
 
-  // Fetch one extra row to detect a next page without an exact count.
+  // Fetch one extra row to detect a next page without a row count.
   const from = page * pageSize
-  const { data, error, count } = await query
+  const to = from + pageSize
+  const { data, error } = await query
     .order('submitted_at', { ascending: false, nullsFirst: false })
-    .range(from, from + pageSize)
+    .range(from, to)
 
   if (error) throw error
-  const all = (data ?? []) as NycCaseRow[]
-  const hasMore = all.length > pageSize
-  const rows = hasMore ? all.slice(0, pageSize) : all
-  return { rows, hasMore, estimatedTotal: count ?? null }
+  const rows = (data ?? []) as NycCaseRow[]
+  const hasMore = rows.length > pageSize
+
+  return {
+    rows: rows.slice(0, pageSize),
+    hasMore,
+    nextPage: hasMore ? page + 1 : null,
+  }
 }
 
-/** Full detail for one case (all columns), or null if not found. */
-export async function getNycCaseDetail(caseId: string): Promise<NycCaseRow | null> {
+// ---------------------------------------------------------------------------
+// Unified case detail — resolves a case ID to its full source record from
+// EITHER the historical NYC 311 history (public.municipal_complaints) or the
+// active open review queue (public.v_nyc_open_review_queue). Powers the full
+// NYC case page and the Case Explorer exact-ID search.
+// ---------------------------------------------------------------------------
+
+/**
+ * Full detail for one case, drawn verbatim from its source record. `sourceType`
+ * tells the UI which dataset the record came from so it can label it honestly
+ * (historical public 311 record vs. active open review queue) and only show
+ * review-priority fields for open cases. `raw` carries every source column for a
+ * transparent "raw source record" view — no invented fields.
+ */
+export type UnifiedNycCaseDetail = {
+  sourceType: 'historical' | 'open_review'
+  case_id: string
+  source_dataset_id: string | null
+  submitted_at: string | null
+  closed_at: string | null
+  due_date: string | null
+  status: string | null
+  complaint_type: string | null
+  request_detail: string | null
+  request_detail_2: string | null
+  agency: string | null
+  agency_name: string | null
+  assigned_department: string | null
+  borough: string | null
+  council_district: string | null
+  address_or_location: string | null
+  resolution_description: string | null
+  priority_score: number | null
+  priority_tier: string | null
+  priority_reason: string | null
+  age_days: number | null
+  raw: Record<string, unknown>
+}
+
+export async function getUnifiedNycCaseDetail(caseId: string): Promise<UnifiedNycCaseDetail | null> {
   const client = requireClient()
-  const { data, error } = await client.from(COMPLAINTS_TABLE).select('*').eq('case_id', caseId).maybeSingle()
-  if (error) throw error
-  return (data as NycCaseRow) ?? null
+  const id = caseId.trim()
+
+  const historical = await client
+    .from(COMPLAINTS_TABLE)
+    .select('*')
+    .or(`case_id.eq.${id},source_dataset_id.eq.${id}`)
+    .maybeSingle()
+
+  if (historical.error) throw historical.error
+
+  if (historical.data) {
+    const r = historical.data as Record<string, unknown>
+    return {
+      sourceType: 'historical',
+      case_id: String(r.case_id ?? id),
+      source_dataset_id: r.source_dataset_id == null ? null : String(r.source_dataset_id),
+      submitted_at: r.submitted_at == null ? null : String(r.submitted_at),
+      closed_at: r.closed_at == null ? null : String(r.closed_at),
+      due_date: null,
+      status: r.status == null ? null : String(r.status),
+      complaint_type: r.complaint_type == null ? null : String(r.complaint_type),
+      request_detail: r.request_detail == null ? null : String(r.request_detail),
+      request_detail_2: r.request_detail_2 == null ? null : String(r.request_detail_2),
+      agency: r.agency == null ? null : String(r.agency),
+      agency_name: r.agency_name == null ? null : String(r.agency_name),
+      assigned_department: r.assigned_department == null ? null : String(r.assigned_department),
+      borough: r.borough == null ? null : String(r.borough),
+      council_district: r.council_district == null ? null : String(r.council_district),
+      address_or_location: r.address_or_location == null ? null : String(r.address_or_location),
+      resolution_description: r.resolution_description == null ? null : String(r.resolution_description),
+      priority_score: null,
+      priority_tier: null,
+      priority_reason: null,
+      age_days: null,
+      raw: r,
+    }
+  }
+
+  const open = await client.from(OPEN_QUEUE_VIEW).select('*').eq('case_id', id).maybeSingle()
+
+  if (open.error) throw open.error
+
+  if (!open.data) return null
+
+  const r = open.data as Record<string, unknown>
+
+  return {
+    sourceType: 'open_review',
+    case_id: String(r.case_id ?? id),
+    source_dataset_id: r.source_dataset_id == null ? null : String(r.source_dataset_id),
+    submitted_at: r.submitted_at == null ? null : String(r.submitted_at),
+    closed_at: null,
+    due_date: r.due_date == null ? null : String(r.due_date),
+    status: r.status == null ? null : String(r.status),
+    complaint_type: r.complaint_type == null ? null : String(r.complaint_type),
+    request_detail: r.request_detail == null ? null : String(r.request_detail),
+    request_detail_2: r.request_detail_2 == null ? null : String(r.request_detail_2),
+    agency: r.agency == null ? null : String(r.agency),
+    agency_name: r.agency_name == null ? null : String(r.agency_name),
+    assigned_department: r.assigned_department == null ? null : String(r.assigned_department),
+    borough: r.borough == null ? null : String(r.borough),
+    council_district: r.council_district == null ? null : String(r.council_district),
+    address_or_location: r.address_or_location == null ? null : String(r.address_or_location),
+    resolution_description: r.resolution_description == null ? null : String(r.resolution_description),
+    priority_score: r.priority_score == null ? null : Number(r.priority_score),
+    priority_tier: r.priority_tier == null ? null : String(r.priority_tier),
+    priority_reason: r.priority_reason == null ? null : String(r.priority_reason),
+    age_days: r.age_days == null ? null : Number(r.age_days),
+    raw: r,
+  }
+}
+
+/** Project a unified detail record into a Case Explorer table row. */
+function caseDetailToExplorerRow(row: UnifiedNycCaseDetail): NycCaseRow {
+  return {
+    case_id: row.case_id,
+    source_dataset_id: row.source_dataset_id,
+    submitted_at: row.submitted_at,
+    closed_at: row.closed_at,
+    status: row.status,
+    complaint_type: row.complaint_type,
+    request_detail: row.request_detail,
+    request_detail_2: row.request_detail_2,
+    agency: row.agency,
+    agency_name: row.agency_name,
+    assigned_department: row.assigned_department,
+    borough: row.borough,
+    council_district: row.council_district,
+    address_or_location: row.address_or_location,
+    ward_or_area: null,
+    resolution_description: row.resolution_description,
+  }
 }
 
 // ---------------------------------------------------------------------------
