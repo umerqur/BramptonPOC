@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { can, DEMO_OFFICER } from '../../lib/roles'
 import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
-import { formatDateTime } from '../../services/demoWorkflowService'
+import { formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import {
   STATUS_LABELS,
@@ -12,32 +12,38 @@ import {
   getResidentRequestAttachmentsForCases,
   type ResidentRequestAttachment,
   type ResidentRequestRow,
-  type ResidentStatus,
 } from '../../services/residentRequests'
+import {
+  loadOpenBenchmarkWorkRows,
+  mapResidentToWorkRow,
+  sortByReviewPriority,
+  isActiveResident,
+  REVIEW_PRIORITY_EXPLAINER,
+  REVIEW_PRIORITY_FACTORS,
+  type WorkQueueRow,
+  type ReviewPriorityTier,
+} from '../../services/workQueue'
+import type { OpenReviewRow } from '../../services/caseExplorer'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 
-// Work Queue — the page authenticated staff land on first. It lists active
-// resident service requests from public.resident_service_requests and, for each
-// one, shows a decision support summary (routing recommendation, priority,
-// classification, file readiness) generated from the intake details so staff can
-// scan what needs action. "Open case" brings the request into the Case Workbench.
+// Work Queue — the unified, active review surface staff land on first. It brings
+// together two LIVE sources of active work, with clear source labels on every row:
+//
+//   * Resident intake — public.resident_service_requests (the app's intake form).
+//   * NYC open benchmark — public.v_nyc_open_review_queue (the active open queue).
+//
+// Historical CLOSED NYC cases are NOT here — they live in the Insights Case
+// Explorer. Insights Open Cases stays as analytics/drilldown; this is where the
+// active review work happens.
+//
+// Review priority is deterministic decision support (age, due-date pressure, and
+// historical workload/closure pressure) — never an automated enforcement
+// decision, an AI decision, or a risk score. A human reviews and decides.
 
-type LoadState = {
-  rows: ResidentRequestRow[]
-  loading: boolean
-  error: string | null
-}
+// The five Work Queue views.
+type WorkTab = 'all' | 'resident' | 'open' | 'assigned' | 'closure'
 
-// The Work Queue is split into Open and Closed tabs. A case stays in Open while
-// it moves through the active lifecycle (submitted → received → assigned →
-// in_review) and leaves Open the moment it is closed, where it then appears in
-// Closed.
-const OPEN_STATUSES: ResidentStatus[] = ['submitted', 'received', 'assigned', 'in_review']
-const CLOSED_STATUSES: ResidentStatus[] = ['closed']
-
-type QueueTab = 'open' | 'closed'
-
-const STATUS_STYLES: Record<ResidentStatus, string> = {
+const STATUS_STYLES: Record<string, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
   received: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
   assigned: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200',
@@ -52,28 +58,43 @@ const PRIORITY_STYLES: Record<string, string> = {
   P4: 'bg-slate-100 text-slate-700',
 }
 
+// Source + review-priority-tier badge styles for the normalized rows.
+const SOURCE_STYLES: Record<WorkQueueRow['source_type'], string> = {
+  resident: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200',
+  nyc_open: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200',
+}
+
+const TIER_STYLES: Record<ReviewPriorityTier, string> = {
+  High: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200',
+  Medium: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
+  Low: 'bg-slate-100 text-slate-700',
+  Unscored: 'bg-slate-100 text-slate-500',
+}
+
+type ResidentState = { rows: ResidentRequestRow[]; loading: boolean; error: string | null }
+type OpenState = { rows: WorkQueueRow[]; total: number; loading: boolean; error: string | null }
+
+const OPEN_BENCHMARK_LIMIT = 50
+
 export default function AppStaffInboxPage() {
   const { ingestResidentCase, role } = useWorkflow()
   const navigate = useNavigate()
-  const [state, setState] = useState<LoadState>({ rows: [], loading: true, error: null })
-  const [tab, setTab] = useState<QueueTab>('open')
-  // Attachments for the loaded cases, batched into one query and grouped by case.
+
+  const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
+  const [open, setOpen] = useState<OpenState>({ rows: [], total: 0, loading: true, error: null })
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
+  const [tab, setTab] = useState<WorkTab>('all')
   const [assigningId, setAssigningId] = useState<string | null>(null)
+  const [drawerRow, setDrawerRow] = useState<OpenReviewRow | null>(null)
   const canAssign = can(role, 'assignOfficer')
 
-  const openRows = useMemo(() => state.rows.filter((r) => OPEN_STATUSES.includes(r.status)), [state.rows])
-  const closedRows = useMemo(() => state.rows.filter((r) => CLOSED_STATUSES.includes(r.status)), [state.rows])
-  const visibleRows = tab === 'open' ? openRows : closedRows
-
   const load = useCallback(() => {
-    setState((s) => ({ ...s, loading: true, error: null }))
+    // Resident intake requests + their attachment counts.
+    setResident((s) => ({ ...s, loading: true, error: null }))
     setAttachmentsByCase({})
     getResidentRequests(100)
       .then((rows) => {
-        setState({ rows, loading: false, error: null })
-        // Load attachment metadata for these cases. Best-effort: a failure here
-        // (e.g. the table not migrated yet) must never break the queue.
+        setResident({ rows, loading: false, error: null })
         getResidentRequestAttachmentsForCases(rows.map((r) => r.case_id))
           .then((atts) => {
             const map: Record<string, ResidentRequestAttachment[]> = {}
@@ -87,7 +108,16 @@ export default function AppStaffInboxPage() {
       })
       .catch((err: unknown) => {
         console.error('Failed to load resident requests:', err)
-        setState({ rows: [], loading: false, error: sectionError(err) })
+        setResident({ rows: [], loading: false, error: sectionError(err) })
+      })
+
+    // NYC open benchmark cases — graceful "not loaded" if the open view is absent.
+    setOpen((s) => ({ ...s, loading: true, error: null }))
+    loadOpenBenchmarkWorkRows(OPEN_BENCHMARK_LIMIT)
+      .then(({ rows, total }) => setOpen({ rows, total, loading: false, error: null }))
+      .catch((err: unknown) => {
+        console.error('Failed to load NYC open benchmark cases:', err)
+        setOpen({ rows: [], total: 0, loading: false, error: sectionError(err) })
       })
   }, [])
 
@@ -95,20 +125,40 @@ export default function AppStaffInboxPage() {
     load()
   }, [load])
 
-  function openCase(row: ResidentRequestRow) {
+  // Active resident requests only — closed cases belong in Case Explorer, not the
+  // active Work Queue.
+  const residentActive = useMemo(() => resident.rows.filter(isActiveResident), [resident.rows])
+
+  const residentWorkRows = useMemo(
+    () => residentActive.map((r) => mapResidentToWorkRow(r, attachmentsByCase[r.case_id]?.length ?? 0)),
+    [residentActive, attachmentsByCase],
+  )
+
+  const allActive = useMemo(
+    () => sortByReviewPriority([...residentWorkRows, ...open.rows]),
+    [residentWorkRows, open.rows],
+  )
+  const assignedInProgress = useMemo(
+    () => sortByReviewPriority(residentWorkRows.filter((r) => r.in_progress)),
+    [residentWorkRows],
+  )
+  const readyForClosure = useMemo(
+    () => sortByReviewPriority(residentWorkRows.filter((r) => r.ready_for_closure)),
+    [residentWorkRows],
+  )
+
+  function openResidentCase(row: ResidentRequestRow) {
     ingestResidentCase(row)
     navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
   }
 
-  // Once the officer has recorded a field outcome, the supervisor opens closure
-  // review for that case (the officer outcome is pulled into the closure draft).
   function openClosureReview(row: ResidentRequestRow) {
     ingestResidentCase(row)
     navigate(`/app/closure?case=${encodeURIComponent(row.case_id)}`)
   }
 
   // Supervisor/coordinator action: explicit human assignment to the By-law
-  // Officer (never automated). Persisted to Supabase so the officer sees it.
+  // Officer (never automated).
   async function assignToOfficer(row: ResidentRequestRow) {
     setAssigningId(row.case_id)
     try {
@@ -116,14 +166,30 @@ export default function AppStaffInboxPage() {
       load()
     } catch (err) {
       console.error('Failed to assign case to officer:', err)
-      setState((s) => ({ ...s, error: sectionError(err) }))
+      setResident((s) => ({ ...s, error: sectionError(err) }))
     } finally {
       setAssigningId(null)
     }
   }
 
+  // Open a normalized row: resident rows go into the workbench; NYC benchmark
+  // rows open a read-only review drawer (deep analytics stay in Insights).
+  function openWorkRow(row: WorkQueueRow) {
+    if (row.source_type === 'resident' && row.resident) openResidentCase(row.resident)
+    else if (row.source_type === 'nyc_open' && row.open) setDrawerRow(row.open)
+  }
+
   // By-law Officers do not see the citywide Work Queue — send them to their console.
   if (role === 'officer') return <Navigate to="/app/field" replace />
+
+  const loading = resident.loading || open.loading
+  const counts: Record<WorkTab, number> = {
+    all: allActive.length,
+    resident: residentActive.length,
+    open: open.rows.length,
+    assigned: assignedInProgress.length,
+    closure: readyForClosure.length,
+  }
 
   return (
     <div className="container-page py-10">
@@ -132,56 +198,415 @@ export default function AppStaffInboxPage() {
           <div className="section-eyebrow">Staff workbench</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Work Queue</h1>
           <p className="mt-2 text-ink-muted">
-            Active resident service requests requiring staff review, officer assignment, field outcome, or closure
-            approval.
+            Active work to review — resident intakes and NYC open benchmark cases in one place, ordered by review
+            priority. Closed historical cases live in Insights Case Explorer.
           </p>
         </div>
-        <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={state.loading}>
-          {state.loading ? 'Refreshing…' : 'Refresh'}
+        <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={loading}>
+          {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
-      {!state.error && !state.loading && state.rows.length > 0 && (
-        <div className="mt-8 flex gap-1 border-b border-slate-200">
-          <TabButton label="Open" count={openRows.length} active={tab === 'open'} onClick={() => setTab('open')} />
-          <TabButton label="Closed" count={closedRows.length} active={tab === 'closed'} onClick={() => setTab('closed')} />
-        </div>
-      )}
+      <ReviewPriorityNote />
+
+      <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
+        <TabButton label="All active work" count={counts.all} active={tab === 'all'} onClick={() => setTab('all')} />
+        <TabButton label="Resident intakes" count={counts.resident} active={tab === 'resident'} onClick={() => setTab('resident')} />
+        <TabButton
+          label="Open benchmark cases"
+          count={open.error ? null : counts.open}
+          active={tab === 'open'}
+          onClick={() => setTab('open')}
+        />
+        <TabButton label="Assigned / in progress" count={counts.assigned} active={tab === 'assigned'} onClick={() => setTab('assigned')} />
+        <TabButton label="Ready for closure review" count={counts.closure} active={tab === 'closure'} onClick={() => setTab('closure')} />
+      </div>
 
       <div className="mt-6">
-        {state.error ? (
-          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800">
-            <span className="font-semibold">Couldn’t load resident requests.</span>{' '}
-            <span className="text-rose-700">{state.error}</span>
-          </div>
-        ) : state.loading ? (
-          <div className="card p-8 text-center text-sm text-ink-subtle">Loading the inbox…</div>
-        ) : state.rows.length === 0 ? (
-          <EmptyState />
-        ) : visibleRows.length === 0 ? (
-          <div className="card p-8 text-center text-sm text-ink-subtle">
-            {tab === 'open' ? 'No open cases need staff action right now.' : 'No closed cases yet.'}
-          </div>
+        {tab === 'resident' ? (
+          <ResidentIntakesView
+            state={resident}
+            rows={residentActive}
+            attachmentsByCase={attachmentsByCase}
+            canAssign={canAssign}
+            assigningId={assigningId}
+            onAssign={assignToOfficer}
+            onOpen={openResidentCase}
+            onOpenClosureReview={openClosureReview}
+          />
+        ) : tab === 'open' ? (
+          <OpenBenchmarkView state={open} onView={(row) => row.open && setDrawerRow(row.open)} />
         ) : (
-          <ul className="space-y-4">
-            {visibleRows.map((row) => (
-              <li key={row.case_id}>
-                <InboxCard
-                  row={row}
-                  attachments={attachmentsByCase[row.case_id] ?? []}
-                  canAssign={canAssign}
-                  assigning={assigningId === row.case_id}
-                  onAssign={() => assignToOfficer(row)}
-                  onOpen={() => openCase(row)}
-                  onOpenClosureReview={() => openClosureReview(row)}
-                />
-              </li>
-            ))}
-          </ul>
+          <NormalizedListView
+            rows={tab === 'all' ? allActive : tab === 'assigned' ? assignedInProgress : readyForClosure}
+            loading={loading}
+            residentError={resident.error}
+            openError={tab === 'all' ? open.error : null}
+            emptyLabel={
+              tab === 'all'
+                ? 'No active work in the queue right now.'
+                : tab === 'assigned'
+                  ? 'No cases are assigned or under review right now.'
+                  : 'No cases are ready for closure review right now.'
+            }
+            onOpen={openWorkRow}
+            onOpenClosureReview={(row) => row.resident && openClosureReview(row.resident)}
+          />
         )}
       </div>
 
+      <OpenBenchmarkDrawer row={drawerRow} onClose={() => setDrawerRow(null)} />
+
       <GuardrailFooter />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Review-priority explainer
+// ---------------------------------------------------------------------------
+
+/** Collapsible note explaining review priority as decision support — not ML. */
+function ReviewPriorityNote() {
+  return (
+    <details className="group mt-6 rounded-xl border border-slate-200 bg-slate-50/60">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3">
+        <span className="flex items-center gap-2">
+          <span className="badge bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200">Review priority</span>
+          <span className="text-sm text-ink-muted">How review priority works — decision support, not an automated decision.</span>
+        </span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </summary>
+      <div className="border-t border-slate-200 px-4 py-3 text-sm text-ink">
+        <p className="leading-relaxed">{REVIEW_PRIORITY_EXPLAINER}</p>
+        <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-subtle">Considered factors</div>
+        <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink-muted">
+          {REVIEW_PRIORITY_FACTORS.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+        <p className="mt-3 text-[11px] text-ink-subtle">
+          Routing support for staffing and review order. Staff review and decide — this is not AI deciding, not automated
+          enforcement, and not a risk score.
+        </p>
+      </div>
+    </details>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Normalized cross-source list (All active work / Assigned / Ready for closure)
+// ---------------------------------------------------------------------------
+
+function NormalizedListView({
+  rows,
+  loading,
+  residentError,
+  openError,
+  emptyLabel,
+  onOpen,
+  onOpenClosureReview,
+}: {
+  rows: WorkQueueRow[]
+  loading: boolean
+  residentError: string | null
+  openError: string | null
+  emptyLabel: string
+  onOpen: (row: WorkQueueRow) => void
+  onOpenClosureReview: (row: WorkQueueRow) => void
+}) {
+  if (loading && rows.length === 0) {
+    return <div className="card p-8 text-center text-sm text-ink-subtle">Loading the Work Queue…</div>
+  }
+  return (
+    <div className="space-y-4">
+      {residentError && <SourceWarning label="resident intake requests" error={residentError} />}
+      {openError && <SourceWarning label="NYC open benchmark cases" error={openError} />}
+      {rows.length === 0 ? (
+        <div className="card p-8 text-center text-sm text-ink-subtle">{emptyLabel}</div>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map((row) => (
+            <li key={row.key}>
+              <WorkRowCard row={row} onOpen={() => onOpen(row)} onOpenClosureReview={() => onOpenClosureReview(row)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** A compact, source-agnostic Work Queue row. */
+function WorkRowCard({
+  row,
+  onOpen,
+  onOpenClosureReview,
+}: {
+  row: WorkQueueRow
+  onOpen: () => void
+  onOpenClosureReview: () => void
+}) {
+  const isResident = row.source_type === 'resident'
+  return (
+    <div className="card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-navy-900">{row.case_id}</span>
+            <span className={`badge ${SOURCE_STYLES[row.source_type]}`}>{row.source_label}</span>
+            <span className="badge bg-slate-100 text-slate-700">{row.complaint_type ?? '—'}</span>
+            <span className="badge bg-slate-100 text-slate-600">{row.status_label}</span>
+          </div>
+          <div className="mt-1 truncate text-sm text-ink-muted">{row.location ?? 'Location not provided'}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <span className={`badge ${TIER_STYLES[row.priority_tier]}`}>
+            {row.priority_tier === 'Unscored' ? 'Unscored' : `${row.priority_tier} priority`}
+          </span>
+          <div className="mt-1 text-[11px] tabular-nums text-ink-subtle">
+            {row.priority_score == null ? '—' : `Score ${row.priority_score}`}
+            {row.submitted_at ? ` · ${formatDate(row.submitted_at)}` : ''}
+          </div>
+        </div>
+      </div>
+
+      {row.priority_reason && (
+        <p className="mt-2 text-xs text-ink-muted">
+          <span className="font-medium text-ink">Why review:</span> {row.priority_reason}
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[11px] text-ink-subtle">
+          {row.workflow_stage}
+          {row.assigned_to ? ` · ${row.assigned_to}` : ''}
+        </div>
+        <div className="flex gap-2">
+          {isResident && row.ready_for_closure && (
+            <button onClick={onOpenClosureReview} className="btn-secondary text-sm py-1.5 px-3">
+              Closure review →
+            </button>
+          )}
+          <button onClick={onOpen} className="btn-primary text-sm py-1.5 px-3">
+            {isResident ? 'Open case →' : 'View details'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Open benchmark view (normalized list, read-only review)
+// ---------------------------------------------------------------------------
+
+function OpenBenchmarkView({ state, onView }: { state: OpenState; onView: (row: WorkQueueRow) => void }) {
+  if (state.loading && state.rows.length === 0) {
+    return <div className="card p-8 text-center text-sm text-ink-subtle">Loading open benchmark cases…</div>
+  }
+  if (state.error) {
+    return (
+      <div className="card p-6">
+        <h3 className="text-sm font-semibold text-navy-900">Open benchmark queue not loaded</h3>
+        <p className="mt-1 text-sm text-ink-muted">
+          The active NYC open benchmark queue (review priority) is not available right now. Load the open dataset to
+          review benchmark cases here.
+        </p>
+        <p className="mt-2 font-mono text-[11px] text-ink-subtle">{state.error}</p>
+      </div>
+    )
+  }
+  if (state.rows.length === 0) {
+    return <div className="card p-8 text-center text-sm text-ink-subtle">No open benchmark cases available.</div>
+  }
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-subtle">
+        <span>
+          Showing the top {state.rows.length} of {state.total.toLocaleString()} open benchmark cases by review priority.
+        </span>
+        <Link to="/app/insights" className="font-medium text-accent-700 hover:text-accent-900">
+          Open in Insights · Open Cases →
+        </Link>
+      </div>
+      <ul className="space-y-3">
+        {state.rows.map((row) => (
+          <li key={row.key}>
+            <WorkRowCard row={row} onOpen={() => onView(row)} onOpenClosureReview={() => {}} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// NYC open benchmark detail drawer (read-only review)
+// ---------------------------------------------------------------------------
+
+function OpenBenchmarkDrawer({ row, onClose }: { row: OpenReviewRow | null; onClose: () => void }) {
+  useEffect(() => {
+    if (!row) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [row, onClose])
+
+  if (!row) return null
+
+  const src = row.source
+  const latLng =
+    src.latitude != null && src.longitude != null ? `${src.latitude.toFixed(5)}, ${src.longitude.toFixed(5)}` : null
+  const sourceRows: { label: string; value: string | null }[] = [
+    { label: 'Source dataset ID / unique key', value: src.unique_key },
+    { label: 'Location type', value: src.location_type },
+    { label: 'ZIP', value: src.incident_zip },
+    { label: 'Incident address', value: src.incident_address },
+    { label: 'City', value: src.city },
+    { label: 'Resolution description', value: src.resolution_description },
+    { label: 'Latitude / longitude', value: latLng },
+  ].filter((r) => r.value != null)
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-navy-900/40" role="dialog" aria-modal="true" aria-label={`Open benchmark case ${row.case_id}`} onClick={onClose}>
+      <div className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">NYC open benchmark case</div>
+            <h3 className="truncate text-sm font-semibold text-navy-900">{row.case_id}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="btn-secondary text-xs py-1.5 px-3">Close</button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-4 space-y-4">
+          <dl className="space-y-2.5">
+            <DrawerRow label="Submitted" value={row.submitted_at ? formatDate(row.submitted_at) : '—'} />
+            <DrawerRow label="Status" value={row.status ?? '—'} />
+            <DrawerRow label="Complaint type" value={row.complaint_type ?? '—'} />
+            <DrawerRow label="Descriptor" value={row.descriptor ?? '—'} />
+            <DrawerRow label="Agency" value={row.agency ?? '—'} />
+            <DrawerRow label="Borough" value={row.borough ?? '—'} />
+            <DrawerRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
+            <DrawerRow label="Location" value={row.address_or_location ?? '—'} />
+            <DrawerRow label="Due date" value={row.due_date ? formatDate(row.due_date) : '—'} />
+            <DrawerRow label="Age" value={row.age_days == null ? '—' : `${row.age_days} days`} />
+          </dl>
+
+          {/* Review priority — decision support, not an automated decision. */}
+          <div className="rounded-lg border border-accent-200 bg-accent-50/50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-accent-800">Review priority</div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+              <DrawerRow label="Score" value={row.priority_score == null ? '—' : row.priority_score.toFixed(0)} />
+              <DrawerRow label="Tier" value={row.priority_tier ?? '—'} />
+            </div>
+            {row.priority_reason && <DrawerRow label="Reason" value={row.priority_reason} />}
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+              {REVIEW_PRIORITY_EXPLAINER} Decision support — staff review and decide.
+            </p>
+          </div>
+
+          {sourceRows.length > 0 && (
+            <details className="group rounded-lg border border-slate-200 bg-slate-50/60">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-2.5">
+                <span className="min-w-0">
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-navy-900">Source record details</span>
+                  <span className="block text-[11px] text-ink-subtle">Public service request source data</span>
+                </span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </summary>
+              <div className="border-t border-slate-200 px-3.5 py-3">
+                <dl className="space-y-2.5">
+                  {sourceRows.map((r) => (
+                    <DrawerRow key={r.label} label={r.label} value={r.value as string} />
+                  ))}
+                </dl>
+              </div>
+            </details>
+          )}
+        </div>
+
+        <div className="border-t border-slate-100 px-5 py-2.5 text-[11px] text-ink-subtle">
+          NYC open benchmark — analytics drilldown lives in Insights · Open Cases.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DrawerRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</dt>
+      <dd className="mt-0.5 break-words text-sm text-ink">{value}</dd>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Resident intakes view (rich workflow cards — unchanged experience)
+// ---------------------------------------------------------------------------
+
+function ResidentIntakesView({
+  state,
+  rows,
+  attachmentsByCase,
+  canAssign,
+  assigningId,
+  onAssign,
+  onOpen,
+  onOpenClosureReview,
+}: {
+  state: ResidentState
+  rows: ResidentRequestRow[]
+  attachmentsByCase: Record<string, ResidentRequestAttachment[]>
+  canAssign: boolean
+  assigningId: string | null
+  onAssign: (row: ResidentRequestRow) => void
+  onOpen: (row: ResidentRequestRow) => void
+  onOpenClosureReview: (row: ResidentRequestRow) => void
+}) {
+  if (state.error) {
+    return (
+      <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800">
+        <span className="font-semibold">Couldn’t load resident requests.</span>{' '}
+        <span className="text-rose-700">{state.error}</span>
+      </div>
+    )
+  }
+  if (state.loading) {
+    return <div className="card p-8 text-center text-sm text-ink-subtle">Loading resident intakes…</div>
+  }
+  if (rows.length === 0) {
+    return <EmptyState />
+  }
+  return (
+    <ul className="space-y-4">
+      {rows.map((row) => (
+        <li key={row.case_id}>
+          <InboxCard
+            row={row}
+            attachments={attachmentsByCase[row.case_id] ?? []}
+            canAssign={canAssign}
+            assigning={assigningId === row.case_id}
+            onAssign={() => onAssign(row)}
+            onOpen={() => onOpen(row)}
+            onOpenClosureReview={() => onOpenClosureReview(row)}
+          />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function SourceWarning({ label, error }: { label: string; error: string }) {
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-900">
+      <span className="font-semibold">Couldn’t load {label}.</span> <span className="text-amber-800">{error}</span>
     </div>
   )
 }
@@ -193,7 +618,7 @@ function TabButton({
   onClick,
 }: {
   label: string
-  count: number
+  count: number | null
   active: boolean
   onClick: () => void
 }) {
@@ -202,19 +627,19 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
-        active
-          ? 'border-accent-600 text-navy-900'
-          : 'border-transparent text-ink-subtle hover:text-navy-900'
+        active ? 'border-accent-600 text-navy-900' : 'border-transparent text-ink-subtle hover:text-navy-900'
       }`}
     >
       {label}
-      <span
-        className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${
-          active ? 'bg-accent-100 text-accent-800' : 'bg-slate-100 text-slate-600'
-        }`}
-      >
-        {count}
-      </span>
+      {count != null && (
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${
+            active ? 'bg-accent-100 text-accent-800' : 'bg-slate-100 text-slate-600'
+          }`}
+        >
+          {count}
+        </span>
+      )}
     </button>
   )
 }
@@ -253,6 +678,7 @@ function InboxCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-navy-900">{row.case_id}</span>
+            <span className="badge bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200">Resident intake</span>
             <span className={`badge ${STATUS_STYLES[row.status]}`}>{STATUS_LABELS[row.status]}</span>
             <span className="badge bg-slate-100 text-slate-700">{row.request_type}</span>
           </div>
