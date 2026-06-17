@@ -195,6 +195,29 @@ export type OpenReviewRow = {
   due_date: string | null
   submitted_at: string | null
   address_or_location: string | null
+  // Raw source-record fields from the public NYC 311 dataset, surfaced in the
+  // collapsible "Source record details" section of the open-case drawer for
+  // transparency. Not used for the curated operational summary.
+  source: OpenSourceRecord
+}
+
+/** Verbatim fields from the public NYC 311 source record (nyc_open_service_requests). */
+export type OpenSourceRecord = {
+  unique_key: string | null
+  location_type: string | null
+  incident_zip: string | null
+  incident_address: string | null
+  street_name: string | null
+  cross_street_1: string | null
+  cross_street_2: string | null
+  intersection_street_1: string | null
+  intersection_street_2: string | null
+  address_type: string | null
+  city: string | null
+  resolution_description: string | null
+  resolution_action_updated_date: string | null
+  latitude: number | null
+  longitude: number | null
 }
 
 const OPEN_QUEUE_VIEW = 'v_nyc_open_review_queue'
@@ -208,6 +231,33 @@ const numOrNull = (v: unknown): number | null => {
 const pick = (r: Record<string, unknown>, keys: string[]): unknown => {
   for (const k of keys) if (r[k] != null) return r[k]
   return null
+}
+
+const strOrNull = (v: unknown): string | null => {
+  if (v == null) return null
+  const s = String(v).trim()
+  return s.length > 0 ? s : null
+}
+
+/** Pull the verbatim source-record fields from a raw queue row, reading names defensively. */
+function mapOpenSource(r: Record<string, unknown>): OpenSourceRecord {
+  return {
+    unique_key: strOrNull(pick(r, ['unique_key', 'source_dataset_id', 'case_id', 'id'])),
+    location_type: strOrNull(pick(r, ['location_type'])),
+    incident_zip: strOrNull(pick(r, ['incident_zip', 'zip', 'postal_code'])),
+    incident_address: strOrNull(pick(r, ['incident_address', 'address_or_location'])),
+    street_name: strOrNull(pick(r, ['street_name'])),
+    cross_street_1: strOrNull(pick(r, ['cross_street_1', 'cross_street_one'])),
+    cross_street_2: strOrNull(pick(r, ['cross_street_2', 'cross_street_two'])),
+    intersection_street_1: strOrNull(pick(r, ['intersection_street_1', 'intersection_street_one'])),
+    intersection_street_2: strOrNull(pick(r, ['intersection_street_2', 'intersection_street_two'])),
+    address_type: strOrNull(pick(r, ['address_type'])),
+    city: strOrNull(pick(r, ['city'])),
+    resolution_description: strOrNull(pick(r, ['resolution_description'])),
+    resolution_action_updated_date: strOrNull(pick(r, ['resolution_action_updated_date'])),
+    latitude: numOrNull(pick(r, ['latitude', 'lat'])),
+    longitude: numOrNull(pick(r, ['longitude', 'lon', 'lng', 'long'])),
+  }
 }
 
 /** Map a raw queue view row to an OpenReviewRow, reading field names defensively. */
@@ -229,6 +279,7 @@ function mapOpenRow(r: Record<string, unknown>): OpenReviewRow {
     due_date: (pick(r, ['due_date', 'due_at']) as string | null) ?? null,
     submitted_at: (pick(r, ['submitted_at', 'created_at', 'created_date']) as string | null) ?? null,
     address_or_location: (pick(r, ['address_or_location', 'incident_address']) as string | null) ?? null,
+    source: mapOpenSource(r),
   }
 }
 
