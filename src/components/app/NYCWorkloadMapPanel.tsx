@@ -15,10 +15,9 @@ import {
 // never Toronto geometry. NYC has no wards: boroughs are too broad to stand in
 // for a Brampton/Toronto ward, so council districts are the ward-like view.
 // There is no hardcoded fallback: if the workload aggregate cannot be loaded the
-// map shades nothing and shows a clear "Live data unavailable" notice.
-
-// Required disclaimer for the workload map (both modes).
-const WORKLOAD_DISCLAIMER = 'New York City 311 public service requests. Decision support only.'
+// map shades nothing and shows a clear "Live data unavailable" notice. Each mode
+// is shaded relative to its own geography level, so the two tabs are not directly
+// comparable — the UI states this.
 
 type MapMode = 'district' | 'borough'
 
@@ -31,24 +30,32 @@ type AreaVolume = { key: string; label: string; volume: number }
 const boroughKey = (name: string) => name.trim().toLowerCase()
 
 type ModeAdapter = {
-  /** Label shown on the mode toggle. */
+  /** Short tab label. */
   toggleLabel: string
   /** Singular noun for an area in this mode, e.g. "council district". */
   unitLabel: string
-  headerSubtitle: string
-  /** Fine-print context, kept distinct per mode (operational vs executive). */
-  context: string
+  /** Short helper under the title. */
+  helper: string
+  /** Short blue banner copy. */
+  banner: string
+  /** Side-card heading for the highest area in this mode. */
+  cardLabel: string
   loadUnits: () => Promise<AreaUnit[]>
   loadVolumes: () => Promise<AreaVolume[]>
 }
 
+// Each mode is shaded RELATIVE to its own geography level — district red means
+// "highest district", borough red means "highest borough". The two tabs are not
+// directly comparable, and the UI says so.
+const SCALE_NOTE = 'Each map uses its own scale because districts and boroughs are different geographic levels.'
+
 const ADAPTERS: Record<MapMode, ModeAdapter> = {
   district: {
-    toggleLabel: 'Council district workload',
+    toggleLabel: 'Council districts',
     unitLabel: 'council district',
-    headerSubtitle: 'Ward like operational view of NYC 311 workload by council district.',
-    context:
-      'Real NYC City Council district boundaries — the ward-like operational unit — are shaded by live New York City 311 public service request volume per district. Districts with higher volume show higher workload intensity. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. This is supervisor decision support only — not a risk prediction, and this NYC geography is never plotted onto Brampton wards.',
+    helper: 'Operational view by NYC council district.',
+    banner: 'Operational view. Shows live complaint volume by NYC council district.',
+    cardLabel: 'Highest council district',
     async loadUnits() {
       const districts = await getNYCCouncilDistrictBoundaries()
       return districts.map((d) => ({
@@ -65,11 +72,11 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
     },
   },
   borough: {
-    toggleLabel: 'Borough overview',
+    toggleLabel: 'Boroughs',
     unitLabel: 'borough',
-    headerSubtitle: 'High level NYC borough workload overview.',
-    context:
-      'Real NYC borough boundaries give the high-level executive overview, shaded by live New York City 311 public service request volume per borough. Boroughs are broad geographic areas — not a ward-like unit — so use the council district view for the operational equivalent of a Brampton/Toronto ward. Workload patterns may help supervisors review staffing, patrol coverage, and service response pressure. Supervisor decision support only — not a risk prediction — and this NYC geography is never plotted onto Brampton wards.',
+    helper: 'Executive overview by NYC borough.',
+    banner: 'Executive view. Shows live complaint volume by NYC borough.',
+    cardLabel: 'Highest borough',
     async loadUnits() {
       const boroughs = await getNYCBoroughBoundaries()
       return boroughs.map((b, idx) => ({
@@ -169,9 +176,9 @@ function heatColor(t: number): string {
 
 /** Workload-intensity tier label for a normalized value t in [0,1]. */
 function workloadTier(t: number): string {
-  if (t < 1 / 3) return 'Lower workload'
+  if (t < 1 / 3) return 'Low workload'
   if (t < 2 / 3) return 'Medium workload'
-  return 'Higher workload'
+  return 'High workload'
 }
 
 function NYCWorkloadHeatMap({
@@ -234,7 +241,7 @@ function NYCWorkloadHeatMap({
       <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-sm font-semibold text-navy-900">Service request workload intensity</div>
-          <div className="text-xs text-ink-subtle">{adapter.headerSubtitle}</div>
+          <div className="text-xs text-ink-subtle">{adapter.helper}</div>
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-sky-800 sm:self-auto">
           <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
@@ -242,34 +249,23 @@ function NYCWorkloadHeatMap({
         </span>
       </div>
 
-      {/* Map mode toggle: ward-like council districts (default) vs broad boroughs. */}
-      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+      {/* Map mode toggle: council districts (default) vs boroughs. */}
+      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3.5">
         <div
           role="tablist"
-          aria-label="Map detail level"
-          className="inline-flex items-center gap-1 rounded-2xl bg-slate-100 p-1.5 shadow-inner ring-1 ring-slate-200"
+          aria-label="Geography level"
+          className="inline-flex items-center gap-1 self-start rounded-2xl bg-slate-100 p-1.5 shadow-inner ring-1 ring-slate-200"
         >
-          <ModeTab
-            label="Council district workload"
-            active={mode === 'district'}
-            onClick={() => onModeChange('district')}
-          />
-          <ModeTab label="Borough overview" active={mode === 'borough'} onClick={() => onModeChange('borough')} />
+          <ModeTab label={ADAPTERS.district.toggleLabel} active={mode === 'district'} onClick={() => onModeChange('district')} />
+          <ModeTab label={ADAPTERS.borough.toggleLabel} active={mode === 'borough'} onClick={() => onModeChange('borough')} />
         </div>
-        <span className="text-xs font-medium text-ink-muted">
-          {mode === 'district' ? 'Operational map view' : 'Executive overview'}
-        </span>
+        <span className="text-[11px] text-ink-subtle">{SCALE_NOTE}</span>
       </div>
 
-      {/* Required disclaimer */}
-      <div
-        role="note"
-        className="flex items-start gap-2 border-b border-sky-100 bg-sky-50/50 px-5 py-2.5 text-xs text-sky-900"
-      >
-        <span aria-hidden className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500" />
-        <span>
-          <span className="font-semibold">{WORKLOAD_DISCLAIMER}</span> {adapter.context}
-        </span>
+      {/* Short mode banner */}
+      <div className="flex items-center gap-2 border-b border-sky-100 bg-sky-50/50 px-5 py-2.5 text-xs text-sky-900">
+        <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500" />
+        {adapter.banner}
       </div>
 
       {unavailable && (
@@ -349,25 +345,28 @@ function NYCWorkloadHeatMap({
                 ))}
               </svg>
 
-              {/* Legend — lower workload → higher workload */}
+              {/* Legend — relative to the selected geography level */}
               <figcaption className="relative mt-3">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Workload intensity</div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Workload intensity</span>
+                  <span className="text-[10px] text-ink-subtle">Scale: relative to selected geography level</span>
+                </div>
                 <div
                   className="mt-1 h-2 rounded-full"
                   style={{ background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})` }}
                 />
                 <div className="mt-1 flex justify-between text-[11px] text-ink-subtle">
-                  <span>Lower workload</span>
-                  <span>Higher workload</span>
+                  <span>Low</span>
+                  <span>Medium</span>
+                  <span>High</span>
                 </div>
                 {hasWorkload && (
-                  <div className="mt-0.5 flex justify-between text-[10px] text-ink-subtle tabular-nums">
-                    <span>{num(min)} complaints</span>
-                    <span>{num(max)} complaints</span>
+                  <div className="mt-0.5 text-center text-[10px] text-ink-subtle tabular-nums">
+                    {num(min)} to {num(max)} complaints
                   </div>
                 )}
                 <div className="mt-2 text-[11px] text-ink-subtle">
-                  Hover or select a {adapter.unitLabel} to see its NYC 311 workload detail.
+                  Hover or select a {adapter.unitLabel} to see its workload detail.
                 </div>
               </figcaption>
             </figure>
@@ -382,6 +381,7 @@ function NYCWorkloadHeatMap({
         <div className="lg:col-span-2">
           <SelectedAreaPanel
             unitLabel={adapter.unitLabel}
+            cardLabel={adapter.cardLabel}
             volume={activeVolume}
             areaLabel={activeLabel}
             tier={activeVolume ? workloadTier(norm(activeVolume.volume)) : null}
@@ -392,13 +392,9 @@ function NYCWorkloadHeatMap({
         </div>
       </div>
 
-      {/* Supervisor decision-support framing. Deliberately not an enforcement
-          decision, does not direct officers, and is not a risk prediction. */}
-      <div className="border-t border-slate-100 px-5 py-3 text-[11px] leading-relaxed text-ink-subtle">
-        <span className="font-semibold text-ink-muted">Supervisor decision support.</span> These workload patterns help
-        supervisors see where complaint volume is concentrated, which {adapter.unitLabel}s are repeatedly busy, and where
-        service response pressure may be forming — input for reviewing staffing, patrol coverage, and supervisor review.
-        It does not tell staff where to enforce, does not decide where officers go, and is not a risk prediction.
+      <div className="border-t border-slate-100 px-5 py-3 text-[11px] text-ink-subtle">
+        <span className="font-semibold text-ink-muted">Supervisor decision support.</span> Where complaint volume is
+        concentrated by {adapter.unitLabel} — input for staffing and routing review. Not a risk prediction.
       </div>
     </section>
   )
@@ -433,9 +429,10 @@ function ModeTab({ label, active, onClick }: { label: string; active: boolean; o
   )
 }
 
-/** Detail panel for the hovered/selected area, showing its NYC 311 workload. */
+/** Detail panel for the hovered/selected area, or the highest area by default. */
 function SelectedAreaPanel({
   unitLabel,
+  cardLabel,
   volume,
   areaLabel,
   tier,
@@ -444,6 +441,7 @@ function SelectedAreaPanel({
   hasWorkload,
 }: {
   unitLabel: string
+  cardLabel: string
   volume: AreaVolume | undefined
   areaLabel: string | null
   tier: string | null
@@ -456,7 +454,7 @@ function SelectedAreaPanel({
   if (!hasWorkload) {
     return (
       <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
-        NYC 311 service request workload data is not available.
+        Workload data is not available.
       </div>
     )
   }
@@ -464,7 +462,7 @@ function SelectedAreaPanel({
   if (!volume) {
     return (
       <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
-        Hover or select a {unitLabel} on the map to see its NYC 311 workload.
+        Hover or select a {unitLabel} on the map to see its workload.
       </div>
     )
   }
@@ -474,9 +472,9 @@ function SelectedAreaPanel({
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-            {interactive ? `Selected ${unitLabel}` : `Busiest ${unitLabel} (NYC 311)`}
+            {interactive ? `Selected ${unitLabel}` : cardLabel}
           </div>
-          <div className="text-base font-semibold text-navy-900">{areaLabel || volume.label}</div>
+          <div className="text-2xl font-semibold text-navy-900">{areaLabel || volume.label}</div>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-ink-muted">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
@@ -484,11 +482,10 @@ function SelectedAreaPanel({
         </span>
       </div>
 
-      <div className="mt-3 text-2xl font-semibold text-navy-900 tabular-nums">{num(volume.volume)}</div>
-      <div className="text-[10px] uppercase tracking-wider text-ink-subtle">NYC 311 complaint volume</div>
+      <div className="mt-3 text-base font-semibold text-navy-900 tabular-nums">{num(volume.volume)} complaints</div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Live New York City 311 public service request volume — decision support only, not a risk prediction.
+        Live Supabase data — relative to the selected geography level.
       </p>
     </div>
   )
