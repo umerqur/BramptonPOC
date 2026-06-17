@@ -131,7 +131,7 @@ export function InsightsSourceBanner() {
         <SourceLine label="Date range" value={range} />
         <SourceLine label="Status" value={status} emphasis={error ? 'error' : 'ok'} />
       </div>
-      {error && <p className="mt-3 font-mono text-[11px] text-amber-800">Data error: {error}</p>}
+      {error && <p className="mt-3 font-mono text-[11px] text-amber-800">Data connection error: {error}</p>}
     </section>
   )
 }
@@ -162,10 +162,10 @@ export default function InsightsDashboard() {
 
   return (
     <div className="mt-6">
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
-        <TabButton label="Overview" active={tab === 'overview'} onClick={() => setTab('overview')} />
-        <TabButton label="Case Explorer" active={tab === 'explorer'} onClick={() => setTab('explorer')} />
-        <TabButton label="Open cases" active={tab === 'open'} onClick={() => setTab('open')} />
+      <div role="tablist" aria-label="Insights sections" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {INSIGHTS_TABS.map((t) => (
+          <InsightsTabCard key={t.id} tab={t} active={tab === t.id} onClick={() => setTab(t.id)} />
+        ))}
       </div>
 
       {tab === 'overview' && <Overview onExplore={explore} />}
@@ -175,16 +175,71 @@ export default function InsightsDashboard() {
   )
 }
 
-function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+type InsightsTab = { id: Tab; title: string; subtitle: string; icon: React.ReactNode }
+
+// Three distinct modes of the Insights workspace: aggregate intelligence,
+// historical drilldown, and the active review queue.
+const INSIGHTS_TABS: InsightsTab[] = [
+  {
+    id: 'overview',
+    title: 'Overview',
+    subtitle: 'Workload trends and map',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        <path d="M3 3v18h18" />
+        <path d="M7 14l3-3 3 3 4-5" />
+      </svg>
+    ),
+  },
+  {
+    id: 'explorer',
+    title: 'Case Explorer',
+    subtitle: 'Search historical cases',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        <circle cx="11" cy="11" r="7" />
+        <path d="M21 21l-4.3-4.3" />
+      </svg>
+    ),
+  },
+  {
+    id: 'open',
+    title: 'Open Cases',
+    subtitle: 'Active review queue',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        <path d="M4 13h4l2 3h4l2-3h4" />
+        <path d="M5 19h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2Z" />
+      </svg>
+    ),
+  },
+]
+
+/** Soft segmented tab-card: title + helper subtitle + icon, with a clear active state. */
+function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
-        active ? 'border-accent-600 text-navy-900' : 'border-transparent text-ink-subtle hover:text-navy-900'
+      className={`group relative flex min-w-[168px] flex-1 items-start gap-2.5 overflow-hidden rounded-xl border px-3.5 py-2.5 text-left transition ${
+        active
+          ? 'border-slate-200 bg-white shadow-sm ring-1 ring-slate-100'
+          : 'border-transparent bg-slate-50/70 hover:bg-slate-100'
       }`}
     >
-      {label}
+      {/* Accent top border marks the active mode. */}
+      {active && <span aria-hidden className="absolute inset-x-0 top-0 h-0.5 bg-accent-500" />}
+      <span className={`mt-0.5 shrink-0 ${active ? 'text-accent-600' : 'text-ink-subtle group-hover:text-navy-900'}`}>
+        {tab.icon}
+      </span>
+      <span className="min-w-0">
+        <span className={`block text-sm font-semibold ${active ? 'text-navy-900' : 'text-ink-muted group-hover:text-navy-900'}`}>
+          {tab.title}
+        </span>
+        <span className="block truncate text-[11px] text-ink-subtle">{tab.subtitle}</span>
+      </span>
     </button>
   )
 }
@@ -471,11 +526,27 @@ function Scatter({ points, onExplore }: { points: ClosureBottleneck[]; onExplore
 
 // --- Trend -----------------------------------------------------------------
 
+/** Date part (YYYY-MM-DD) of an ISO date/timestamp string, or null. */
+const isoDate = (v: string | null): string | null => {
+  if (!v) return null
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(v)
+  return m ? m[1] : null
+}
+
 function TrendSection({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<MonthlyTrendPoint[]>(() => getInsightsMonthlyTrend(24))
+  const meta = useLive<InsightsSourceMeta>(getInsightsSourceMeta)
+  const from = isoDate(meta.data?.earliest ?? null)
+  const to = isoDate(meta.data?.latest ?? null)
   return (
     <SectionShell name="the service request trend" title="Service request trend" subtitle="Monthly volume (bars) and average closure days (line). Select a month to explore it." loading={loading} error={error} empty={data?.length === 0}>
-      {data && data.length > 0 && <TrendChart points={data} onExplore={onExplore} />}
+      {data && data.length > 0 && (
+        <>
+          <TrendChart points={data} onExplore={onExplore} />
+          <p className="mt-2 text-[11px] text-ink-subtle">Trend uses complete calendar months only — partial boundary months are excluded.</p>
+          {from && to && <p className="mt-0.5 text-[11px] text-ink-subtle">Source range: {from} to {to}.</p>}
+        </>
+      )}
     </SectionShell>
   )
 }
