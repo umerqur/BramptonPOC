@@ -72,14 +72,14 @@ export default function AppClosureDraftsPage() {
       if (caseObj.id.startsWith('RSR-')) {
         if (!isSupabaseConfigured) {
           warning =
-            'The closure email may have been sent, but Supabase is not configured in this environment, so the resident request status could not be updated to closed.'
+            'The closure email may have been sent, but live data is not available in this environment, so the resident request status could not be updated to closed.'
         } else {
           try {
             await markResidentRequestClosedFromClosureReview(caseObj.id)
           } catch (err) {
             console.error('Failed to mark resident request closed in Supabase:', err)
             warning =
-              'The closure email may have been sent, but the resident request status could not be updated to closed in Supabase. You can close it from Resident Intake.'
+              'The closure email may have been sent, but the resident request status could not be updated to closed. You can close it from Resident Intake.'
           }
         }
       }

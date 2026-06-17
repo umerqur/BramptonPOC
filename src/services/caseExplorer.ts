@@ -175,12 +175,19 @@ export async function getCaseExplorerOptions(): Promise<CaseExplorerOptions> {
 // clear "not loaded yet" state.
 // ---------------------------------------------------------------------------
 
+// One row of the open review queue. Carries every field the open-case detail
+// drawer renders, so a click never needs a second round trip and the detail
+// always comes from the open dataset (v_nyc_open_review_queue) — never from the
+// historical municipal_complaints table.
 export type OpenReviewRow = {
   case_id: string
   complaint_type: string | null
+  descriptor: string | null
+  agency: string | null
   borough: string | null
   council_district: string | null
   status: string | null
+  source_channel: string | null
   priority_score: number | null
   priority_tier: string | null
   priority_reason: string | null
@@ -190,41 +197,203 @@ export type OpenReviewRow = {
   address_or_location: string | null
 }
 
+const OPEN_QUEUE_VIEW = 'v_nyc_open_review_queue'
+
 const numOrNull = (v: unknown): number | null => {
   if (v == null) return null
   const n = typeof v === 'string' ? Number(v) : (v as number)
   return Number.isFinite(n) ? n : null
 }
 
+const pick = (r: Record<string, unknown>, keys: string[]): unknown => {
+  for (const k of keys) if (r[k] != null) return r[k]
+  return null
+}
+
+/** Map a raw queue view row to an OpenReviewRow, reading field names defensively. */
+function mapOpenRow(r: Record<string, unknown>): OpenReviewRow {
+  return {
+    case_id: String(pick(r, ['case_id', 'unique_key', 'id']) ?? ''),
+    complaint_type: (pick(r, ['complaint_type', 'request_type']) as string | null) ?? null,
+    descriptor: (pick(r, ['descriptor', 'request_detail', 'request_detail_2']) as string | null) ?? null,
+    agency: (pick(r, ['agency_name', 'agency', 'assigned_department']) as string | null) ?? null,
+    borough: (r.borough as string | null) ?? null,
+    council_district: r.council_district == null ? null : String(r.council_district),
+    status: (r.status as string | null) ?? null,
+    source_channel:
+      (pick(r, ['source_channel', 'open_data_channel_type', 'channel', 'source']) as string | null) ?? null,
+    priority_score: numOrNull(pick(r, ['priority_score', 'review_priority_score', 'score'])),
+    priority_tier: (pick(r, ['priority_tier', 'review_priority_tier', 'tier']) as string | null) ?? null,
+    priority_reason: (pick(r, ['priority_reason', 'reason', 'review_reason']) as string | null) ?? null,
+    age_days: numOrNull(pick(r, ['age_days', 'age', 'days_open'])),
+    due_date: (pick(r, ['due_date', 'due_at']) as string | null) ?? null,
+    submitted_at: (pick(r, ['submitted_at', 'created_at', 'created_date']) as string | null) ?? null,
+    address_or_location: (pick(r, ['address_or_location', 'incident_address']) as string | null) ?? null,
+  }
+}
+
+export type OpenQueueFilters = {
+  priorityTier?: string
+  complaintType?: string
+  borough?: string
+  councilDistrict?: string
+  status?: string
+}
+
+export type OpenQueuePage = { rows: OpenReviewRow[]; total: number }
+
+/** Apply the shared open-queue filters to a PostgREST query builder. */
+function applyOpenFilters<T>(query: T, filters: OpenQueueFilters): T {
+  // The query builder is chainable; cast keeps this readable without pulling in
+  // the full Supabase generic types.
+  let q = query as unknown as {
+    eq: (c: string, v: unknown) => typeof q
+    ilike: (c: string, v: string) => typeof q
+    in: (c: string, v: unknown[]) => typeof q
+  }
+  if (filters.priorityTier) q = q.eq('priority_tier', filters.priorityTier)
+  if (filters.complaintType) q = q.eq('complaint_type', filters.complaintType)
+  if (filters.borough) q = q.ilike('borough', filters.borough)
+  if (filters.status) q = q.eq('status', filters.status)
+  if (filters.councilDistrict) {
+    const plain = String(Number(filters.councilDistrict))
+    const padded = plain.padStart(2, '0')
+    q = q.in('council_district', Array.from(new Set([plain, padded, filters.councilDistrict])))
+  }
+  return q as unknown as T
+}
+
 /**
- * Top open NYC cases by review priority, from public.v_nyc_open_review_queue.
- * Field names are read defensively so this works with reasonable variations of
- * the view. Throws if the view does not exist yet so the UI can show a clear
+ * One filtered, paginated page of the open NYC review queue, sorted by review
+ * priority (highest first), from public.v_nyc_open_review_queue. `page` is
+ * zero-based. Returns the rows plus the exact total matching the filters.
+ * Throws if the view does not exist yet so the UI can show a clear
  * "open cases not loaded" notice (no fake data).
  */
-export async function getNycOpenReviewQueue(limit = 100): Promise<OpenReviewRow[]> {
+export async function getNycOpenQueuePage(
+  filters: OpenQueueFilters = {},
+  page = 0,
+  pageSize = 25,
+): Promise<OpenQueuePage> {
   const client = requireClient()
-  const { data, error } = await client.from('v_nyc_open_review_queue').select('*').limit(limit)
+  let query = client.from(OPEN_QUEUE_VIEW).select('*', { count: 'exact' })
+  query = applyOpenFilters(query, filters)
+  const from = page * pageSize
+  const { data, error, count } = await query
+    .order('priority_score', { ascending: false, nullsFirst: false })
+    .range(from, from + pageSize - 1)
   if (error) throw error
-  const rows = (data ?? []) as Record<string, unknown>[]
-  const pick = (r: Record<string, unknown>, keys: string[]): unknown => {
-    for (const k of keys) if (r[k] != null) return r[k]
-    return null
+  const rows = ((data ?? []) as Record<string, unknown>[]).map(mapOpenRow)
+  return { rows, total: count ?? rows.length }
+}
+
+/**
+ * A diversified slice of the highest-priority open cases: still priority-ranked,
+ * but interleaved by complaint type so the first screen is not dominated by a
+ * single category (e.g. Graffiti). Pulls a bounded high-priority pool and
+ * round-robins across complaint types client-side. Raw priority order remains
+ * available via {@link getNycOpenQueuePage}.
+ */
+export async function getNycOpenQueueDiversified(
+  filters: OpenQueueFilters = {},
+  limit = 50,
+  poolSize = 400,
+): Promise<OpenReviewRow[]> {
+  const client = requireClient()
+  let query = client.from(OPEN_QUEUE_VIEW).select('*')
+  query = applyOpenFilters(query, filters)
+  const { data, error } = await query
+    .order('priority_score', { ascending: false, nullsFirst: false })
+    .limit(poolSize)
+  if (error) throw error
+  const pool = ((data ?? []) as Record<string, unknown>[]).map(mapOpenRow)
+
+  // Group by complaint type, each group already in priority order, then take one
+  // from each group per round so varied types surface near the top.
+  const groups = new Map<string, OpenReviewRow[]>()
+  for (const r of pool) {
+    const key = r.complaint_type ?? 'Uncategorized'
+    const g = groups.get(key)
+    if (g) g.push(r)
+    else groups.set(key, [r])
   }
-  return rows
+  // Order groups by their best (first) priority so the strongest type still leads.
+  const ordered = [...groups.values()].sort(
+    (a, b) => (b[0].priority_score ?? -Infinity) - (a[0].priority_score ?? -Infinity),
+  )
+  const out: OpenReviewRow[] = []
+  let round = 0
+  while (out.length < limit) {
+    let added = false
+    for (const g of ordered) {
+      if (g[round]) {
+        out.push(g[round])
+        added = true
+        if (out.length >= limit) break
+      }
+    }
+    if (!added) break
+    round += 1
+  }
+  return out
+}
+
+// --- Open-case aggregates (full population, not just the loaded page) --------
+
+export type OpenAgingBucket = { bucket: string; sort_order: number; total_cases: number }
+
+/** Open-case aging buckets across the full review queue (v_nyc_open_aging_buckets). */
+export async function getNycOpenAgingBuckets(): Promise<OpenAgingBucket[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_nyc_open_aging_buckets')
+    .select('bucket, sort_order, total_cases')
+    .order('sort_order', { ascending: true })
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[])
     .map((r) => ({
-      case_id: String(pick(r, ['case_id', 'unique_key', 'id']) ?? ''),
-      complaint_type: (pick(r, ['complaint_type', 'request_type']) as string | null) ?? null,
-      borough: (r.borough as string | null) ?? null,
-      council_district: r.council_district == null ? null : String(r.council_district),
-      status: (r.status as string | null) ?? null,
-      priority_score: numOrNull(pick(r, ['priority_score', 'review_priority_score', 'score'])),
-      priority_tier: (pick(r, ['priority_tier', 'review_priority_tier', 'tier']) as string | null) ?? null,
-      priority_reason: (pick(r, ['priority_reason', 'reason', 'review_reason']) as string | null) ?? null,
-      age_days: numOrNull(pick(r, ['age_days', 'age', 'days_open'])),
-      due_date: (pick(r, ['due_date', 'due_at']) as string | null) ?? null,
-      submitted_at: (pick(r, ['submitted_at', 'created_at', 'created_date']) as string | null) ?? null,
-      address_or_location: (pick(r, ['address_or_location', 'incident_address']) as string | null) ?? null,
+      bucket: String(r.bucket ?? ''),
+      sort_order: Number(r.sort_order ?? 0),
+      total_cases: Number(r.total_cases ?? 0),
     }))
-    .sort((a, b) => (b.priority_score ?? -Infinity) - (a.priority_score ?? -Infinity))
+    .filter((b) => b.sort_order <= 3)
+}
+
+export type OpenStatusMixRow = { status: string; total_cases: number }
+
+/** Open case status mix across the active review queue (v_nyc_open_status_mix). */
+export async function getNycOpenStatusMix(): Promise<OpenStatusMixRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_nyc_open_status_mix')
+    .select('status, total_cases')
+    .order('total_cases', { ascending: false })
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    status: (r.status as string) || 'Unknown',
+    total_cases: Number(r.total_cases ?? 0),
+  }))
+}
+
+export type OpenQueueOptions = {
+  priorityTiers: string[]
+  complaintTypes: string[]
+  boroughs: string[]
+  councilDistricts: string[]
+  statuses: string[]
+}
+
+/** Filter dropdown options for the Open-cases tab, from the small facet views. */
+export async function getOpenQueueOptions(): Promise<OpenQueueOptions> {
+  const [priorityTiers, complaintTypes, boroughs, councilDistricts, statuses] = await Promise.all([
+    pluck('v_nyc_open_tier_volume', 'priority_tier'),
+    pluck('v_nyc_open_complaint_type_volume', 'complaint_type'),
+    pluck('v_nyc_open_borough_volume', 'borough'),
+    pluck('v_nyc_open_council_district_volume', 'council_district'),
+    pluck('v_nyc_open_status_mix', 'status'),
+  ])
+  const districts = Array.from(new Set(councilDistricts.map((d) => String(Number(d))).filter((d) => d !== 'NaN'))).sort(
+    (a, b) => Number(a) - Number(b),
+  )
+  return { priorityTiers, complaintTypes, boroughs, councilDistricts: districts, statuses }
 }

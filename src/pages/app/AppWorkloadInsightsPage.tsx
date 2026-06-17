@@ -40,7 +40,7 @@ export default function AppWorkloadInsightsPage() {
     let active = true
 
     if (!isSupabaseConfigured) {
-      setQueueError('Supabase is not configured in this environment.')
+      setQueueError('Live data is not available in this environment.')
       setQueueLoading(false)
       return
     }
@@ -118,7 +118,7 @@ export default function AppWorkloadInsightsPage() {
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div>
               <h3 className="text-sm font-semibold text-navy-900">Top Review Attention cases</h3>
-              <p className="text-xs text-ink-subtle">Read live from Supabase — statistical attention rank.</p>
+              <p className="text-xs text-ink-subtle">Live data — statistical attention rank.</p>
             </div>
             <QueueBadge loading={queueLoading} error={queueError} count={queueRows.length} />
           </div>
@@ -129,7 +129,7 @@ export default function AppWorkloadInsightsPage() {
             </div>
           ) : queueError ? (
             <div className="px-5 py-6 text-sm text-ink-muted">
-              <div className="font-semibold text-navy-900">Statistical scores unavailable from Supabase.</div>
+              <div className="font-semibold text-navy-900">Statistical scores unavailable.</div>
               <p className="mt-1.5 text-xs text-ink-subtle">
                 The <code>v_statistical_attention_queue</code> view returned no data. Generate scores with{' '}
                 <code>scripts/build_statistical_attention_scores.py</code>, then reload.
@@ -277,7 +277,7 @@ function QueueBadge({ loading, error, count }: { loading: boolean; error: string
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
       <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-      Live Supabase · {count} cases
+      Live data · {count} cases
     </span>
   )
 }

@@ -180,7 +180,7 @@ export default function AppWorkflowPage() {
         <div className="flex flex-col items-start gap-3 sm:items-end">
           <div className="flex items-center gap-2 text-xs text-ink-subtle">
             <span className="h-2 w-2 rounded-full bg-accent-500" />
-            Live data · Supabase
+            Live data
           </div>
           <Link to={stageQueueHref(TRIAGE_STAGE)} className="btn-primary text-sm py-2 px-4">
             Open Needs review queue
@@ -568,7 +568,7 @@ function PriorityCard({
 function SectionError({ label, error, className = '' }: { label: string; error: string; className?: string }) {
   return (
     <div className={`rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800 ${className}`}>
-      <span className="font-semibold">Couldn’t load {label} from Supabase.</span>{' '}
+      <span className="font-semibold">Couldn’t load {label}.</span>{' '}
       <span className="text-rose-700">{error}</span>
     </div>
   )

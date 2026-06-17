@@ -282,9 +282,9 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
       <div className="flex items-start gap-3">
         <span aria-hidden className="mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" />
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-navy-900">Could not load the live case queue from Supabase.</div>
+          <div className="text-sm font-semibold text-navy-900">Could not load the live case queue.</div>
           <p className="mt-1 text-sm text-ink-muted">
-            The authenticated queue uses live Supabase data only and does not fall back to sample cases. Check the
+            The authenticated queue uses live data only and does not fall back to sample cases. Check the
             connection and try again.
           </p>
           <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-slate-50 px-3 py-2 font-mono text-xs text-rose-800">

@@ -258,7 +258,7 @@ function NYCWorkloadHeatMap({
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-sky-800 sm:self-auto">
           <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
-          {unavailable ? 'Live data unavailable' : 'Live Supabase data'}
+          {unavailable ? 'Live data unavailable' : 'Live data'}
         </span>
       </div>
 
@@ -300,7 +300,7 @@ function NYCWorkloadHeatMap({
       {unavailable && (
         <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-5 py-2 text-[11px] text-amber-900">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-          Live Supabase data unavailable. Unable to load the {adapter.unitLabel} workload aggregate.
+          Live data unavailable. Unable to load the {adapter.unitLabel} workload aggregate.
         </div>
       )}
 
@@ -535,7 +535,7 @@ function SelectedAreaPanel({
       <div className="mt-3 text-base font-semibold text-navy-900 tabular-nums">{num(volume.volume)} complaints</div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Live Supabase data — relative to the selected geography level.
+        Live data — relative to the selected geography level.
       </p>
     </div>
   )

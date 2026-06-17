@@ -140,7 +140,7 @@ export default function AppResidentIntakePage() {
 
         {state.error ? (
           <div className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800">
-            <span className="font-semibold">Couldn’t load resident requests from Supabase.</span>{' '}
+            <span className="font-semibold">Couldn’t load resident requests.</span>{' '}
             <span className="text-rose-700">{state.error}</span>
           </div>
         ) : state.loading ? (

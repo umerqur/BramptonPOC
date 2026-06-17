@@ -9,7 +9,6 @@ import {
   getInsightsDepartmentWorkload,
   getInsightsMonthlyTrend,
   getInsightsChannelMix,
-  getInsightsStatusMix,
   getInsightsSourceMeta,
   isChannelMixMeaningful,
   formatPlainDate,
@@ -21,18 +20,25 @@ import {
   type InsightsDepartmentWorkload,
   type MonthlyTrendPoint,
   type ChannelMixRow,
-  type StatusMixRow,
 } from '../../services/insightsDashboard'
 import {
   getNycCaseExplorerPage,
   getNycCaseDetail,
   getCaseExplorerOptions,
-  getNycOpenReviewQueue,
+  getNycOpenQueuePage,
+  getNycOpenQueueDiversified,
+  getNycOpenAgingBuckets,
+  getNycOpenStatusMix,
+  getOpenQueueOptions,
   closureDurationDays,
   type CaseExplorerFilters,
   type NycCaseRow,
   type CaseExplorerOptions,
   type OpenReviewRow,
+  type OpenQueueFilters,
+  type OpenQueueOptions,
+  type OpenAgingBucket,
+  type OpenStatusMixRow,
 } from '../../services/caseExplorer'
 
 // Insights — operational workload intelligence over the New York City 311 public
@@ -92,6 +98,17 @@ const fmtInt = (n: number) => n.toLocaleString()
 const fmtDays = (n: number | null) => (n == null ? '—' : `${n.toFixed(1)} d`)
 const fmtDate = (v: string | null) => formatPlainDate(v) ?? '—'
 
+/**
+ * Share as a percentage that never rounds a real, non-zero value down to "0%".
+ * A category with a handful of cases out of millions shows "<1%", not "0%".
+ */
+const fmtPct = (value: number, total: number): string => {
+  if (total <= 0 || value <= 0) return '0%'
+  const pct = (value / total) * 100
+  if (pct < 1) return '<1%'
+  return `${pct.toFixed(pct < 10 ? 1 : 0)}%`
+}
+
 const PALETTE = ['#2563eb', '#0ea5e9', '#7c3aed', '#f59e0b', '#10b981', '#94a3b8']
 
 // ---------------------------------------------------------------------------
@@ -104,7 +121,7 @@ export function InsightsSourceBanner() {
   const latest = formatPlainDate(data?.latest ?? null)
   const range = earliest && latest ? `${earliest} to ${latest}` : error ? 'Unavailable' : '—'
   const records = error ? 'Unavailable' : data ? data.record_count.toLocaleString() : '—'
-  const status = error ? 'Live Supabase data unavailable' : loading ? 'Connecting…' : 'Connected to Supabase'
+  const status = error ? 'Live data unavailable' : loading ? 'Connecting…' : 'Connected to live data'
 
   return (
     <section className="mt-6 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
@@ -114,7 +131,7 @@ export function InsightsSourceBanner() {
         <SourceLine label="Date range" value={range} />
         <SourceLine label="Status" value={status} emphasis={error ? 'error' : 'ok'} />
       </div>
-      {error && <p className="mt-3 font-mono text-[11px] text-amber-800">Supabase error: {error}</p>}
+      {error && <p className="mt-3 font-mono text-[11px] text-amber-800">Data error: {error}</p>}
     </section>
   )
 }
@@ -185,16 +202,13 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
         }
       />
       <KpiCards />
-      <div className="grid gap-6 lg:grid-cols-3">
-        <ComplaintShareDonut onExplore={onExplore} />
-        <StatusMixDonut onExplore={onExplore} />
+      <ComplaintTypeRanked onExplore={onExplore} />
+      <div className="grid gap-6 lg:grid-cols-2">
         <ChannelMixDonut />
+        <OpenStatusMixDonut />
       </div>
       <TrendSection onExplore={onExplore} />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ComplaintTypePressure onExplore={onExplore} />
-        <ClosureScatter onExplore={onExplore} />
-      </div>
+      <ClosureScatter onExplore={onExplore} />
       <ClosureBottlenecks onExplore={onExplore} />
       <AreaBottlenecks onExplore={onExplore} />
       <DepartmentWorkload onExplore={onExplore} />
@@ -237,7 +251,7 @@ function KpiCards() {
 
 type Slice = { label: string; value: number; color: string; onClick?: () => void }
 
-function Donut({ slices, size = 132 }: { slices: Slice[]; size?: number }) {
+function Donut({ slices, size = 132, showCounts = false }: { slices: Slice[]; size?: number; showCounts?: boolean }) {
   const total = slices.reduce((n, s) => n + s.value, 0)
   const stroke = 18
   const r = size / 2 - stroke / 2
@@ -265,7 +279,7 @@ function Donut({ slices, size = 132 }: { slices: Slice[]; size?: number }) {
                 className={s.onClick ? 'cursor-pointer' : ''}
                 onClick={s.onClick}
               >
-                <title>{`${s.label}: ${fmtInt(s.value)} (${((s.value / total) * 100).toFixed(0)}%)`}</title>
+                <title>{`${s.label}: ${fmtInt(s.value)} (${fmtPct(s.value, total)})`}</title>
               </circle>
             )
             offset += len
@@ -286,7 +300,7 @@ function Donut({ slices, size = 132 }: { slices: Slice[]; size?: number }) {
                 <span className="truncate text-ink">{s.label}</span>
               </span>
               <span className="shrink-0 tabular-nums text-ink-subtle">
-                {total > 0 ? `${((s.value / total) * 100).toFixed(0)}%` : '—'}
+                {total > 0 ? (showCounts ? `${fmtInt(s.value)} · ${fmtPct(s.value, total)}` : fmtPct(s.value, total)) : '—'}
               </span>
             </button>
           </li>
@@ -306,30 +320,70 @@ function topNplusOther<T>(rows: T[], label: (r: T) => string, value: (r: T) => n
   return slices
 }
 
-function ComplaintShareDonut({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
-  const { data, loading, error } = useLive<ComplaintTypeVolume[]>(() => getInsightsComplaintTypeVolume(50))
-  const slices = useMemo(
-    () =>
-      (data ?? []).length
-        ? topNplusOther(
-            data!,
-            (r) => r.complaint_type,
-            (r) => r.total_cases,
-          ).map((s) =>
-            s.label === 'Other' ? s : { ...s, onClick: () => onExplore({ complaintType: s.label }) },
-          )
-        : [],
-    [data, onExplore],
-  )
+const RANKED_TYPE_LIMIT = 15
+
+/**
+ * Ranked Top-N complaint types as a horizontal bar chart with counts and shares.
+ * Replaces the old donut, whose dominant slice was a meaningless "Other". Bars
+ * are clickable and drill into the Case Explorer filtered to that type. The share
+ * is computed against the full request total so it reads as the operational story.
+ */
+function ComplaintTypeRanked({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
+  // Pull the full type distribution so the percentage denominator is the real
+  // total; display only the Top N.
+  const { data, loading, error } = useLive<ComplaintTypeVolume[]>(() => getInsightsComplaintTypeVolume(500))
+  const { rows, total, max } = useMemo(() => {
+    const all = data ?? []
+    const grand = all.reduce((n, r) => n + r.total_cases, 0)
+    const top = all.slice(0, RANKED_TYPE_LIMIT)
+    return { rows: top, total: grand, max: Math.max(1, ...top.map((r) => r.total_cases)) }
+  }, [data])
   return (
-    <SectionShell name="complaint type share" title="Complaint type share" subtitle="Top 5 + Other." loading={loading} error={error} empty={data?.length === 0}>
-      {data && <Donut slices={slices} />}
+    <SectionShell
+      name="complaint type ranking"
+      title="Top complaint types"
+      subtitle={`Top ${RANKED_TYPE_LIMIT} by volume, with share of all requests. Select a type to explore its cases.`}
+      loading={loading}
+      error={error}
+      empty={data?.length === 0}
+    >
+      {data && (
+        <ul className="space-y-2.5">
+          {rows.map((row, i) => (
+            <li key={row.complaint_type}>
+              <button
+                type="button"
+                onClick={() => onExplore({ complaintType: row.complaint_type })}
+                className="group w-full rounded-md px-1.5 py-1 text-left transition hover:bg-slate-50"
+              >
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="w-5 shrink-0 text-right text-[11px] tabular-nums text-ink-subtle">{i + 1}</span>
+                    <span className="truncate text-ink group-hover:text-navy-900">{row.complaint_type}</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums text-ink-muted">
+                    {fmtInt(row.total_cases)} <span className="text-ink-subtle">· {fmtPct(row.total_cases, total)}</span>
+                  </span>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-accent-500" style={{ width: `${Math.max(2, (row.total_cases / max) * 100)}%` }} />
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </SectionShell>
   )
 }
 
-function StatusMixDonut({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
-  const { data, loading, error } = useLive<StatusMixRow[]>(getInsightsStatusMix)
+/**
+ * Open case status mix — the ACTIVE review queue (v_nyc_open_status_mix), not the
+ * historical source-label distribution. Shows counts and shares with no "0%" for
+ * non-zero categories.
+ */
+function OpenStatusMixDonut() {
+  const { data, loading, error } = useLive<OpenStatusMixRow[]>(getNycOpenStatusMix)
   const slices = useMemo(
     () =>
       (data ?? []).length
@@ -337,13 +391,20 @@ function StatusMixDonut({ onExplore }: { onExplore: (f: CaseExplorerFilters) => 
             data!,
             (r) => r.status,
             (r) => r.total_cases,
-          ).map((s) => (s.label === 'Other' ? s : { ...s, onClick: () => onExplore({ status: s.label }) }))
+          )
         : [],
-    [data, onExplore],
+    [data],
   )
   return (
-    <SectionShell name="the status mix" title="Status mix" subtitle="Where cases sit." loading={loading} error={error} empty={data?.length === 0}>
-      {data && <Donut slices={slices} />}
+    <SectionShell
+      name="the open case status mix"
+      title="Open case status mix"
+      subtitle="Active review queue — where open cases currently sit."
+      loading={loading}
+      error={error}
+      empty={data?.length === 0}
+    >
+      {data && <Donut slices={slices} showCounts />}
     </SectionShell>
   )
 }
@@ -363,34 +424,6 @@ function ChannelMixDonut() {
         </div>
       )}
       {data && meaningful && <Donut slices={slices} />}
-    </SectionShell>
-  )
-}
-
-// --- Complaint type pressure ----------------------------------------------
-
-function ComplaintTypePressure({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
-  const { data, loading, error } = useLive<ComplaintTypeVolume[]>(() => getInsightsComplaintTypeVolume(10))
-  const max = Math.max(1, ...(data ?? []).map((d) => d.total_cases))
-  return (
-    <SectionShell name="complaint type pressure" title="Complaint type pressure" subtitle="Volume by type. Select a type to explore its cases." loading={loading} error={error} empty={data?.length === 0}>
-      {data && (
-        <ul className="space-y-2">
-          {data.map((row) => (
-            <li key={row.complaint_type}>
-              <button type="button" onClick={() => onExplore({ complaintType: row.complaint_type })} className="group w-full rounded-md px-1.5 py-1 text-left transition hover:bg-slate-50">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="truncate text-ink group-hover:text-navy-900">{row.complaint_type}</span>
-                  <span className="shrink-0 tabular-nums text-ink-muted">{fmtInt(row.total_cases)}</span>
-                </div>
-                <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
-                  <div className="h-full rounded-full bg-accent-500" style={{ width: `${Math.max(2, (row.total_cases / max) * 100)}%` }} />
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
     </SectionShell>
   )
 }
@@ -650,7 +683,7 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
       <section className="card p-5">
         <div className="mb-3 flex items-center justify-between text-xs text-ink-subtle">
           <span>{error ? 'Live data unavailable' : loading ? 'Loading…' : `${fmtInt(from)}–${fmtInt(to)} of ${fmtInt(total)}`}</span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider">Live Supabase data</span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider">Live data</span>
         </div>
 
         {error ? (
@@ -695,7 +728,7 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
         )}
       </section>
 
-      <CaseDetailDrawer caseId={openCase} onClose={() => setOpenCase(null)} />
+      <CaseDetailDrawer historicalId={openCase} onClose={() => setOpenCase(null)} />
     </div>
   )
 }
@@ -736,79 +769,133 @@ function FilterDate({ label, value, onChange }: { label: string; value: string; 
 // Case detail drawer (shared by Explorer + Open queue)
 // ---------------------------------------------------------------------------
 
-function CaseDetailDrawer({ caseId, onClose }: { caseId: string | null; onClose: () => void }) {
+/**
+ * Case detail drawer. Two sources, never mixed:
+ *   * Historical Case Explorer rows → fetched from municipal_complaints by id.
+ *   * Open review-queue rows → rendered from the already-loaded open-case row
+ *     (sourced from v_nyc_open_review_queue), so the open detail never falls back
+ *     to the historical table and needs no second round trip.
+ */
+function CaseDetailDrawer({
+  historicalId,
+  openRow,
+  onClose,
+}: {
+  historicalId?: string | null
+  openRow?: OpenReviewRow | null
+  onClose: () => void
+}) {
+  const isOpen = openRow != null
+  const caseId = isOpen ? openRow!.case_id : historicalId ?? null
+  const active = isOpen || historicalId != null
+
   const [row, setRow] = useState<NycCaseRow | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!caseId) return
-    let active = true
+    // Only the historical Case Explorer fetches; open rows arrive fully loaded.
+    if (isOpen || !historicalId) return
+    let live = true
     setLoading(true)
     setError(null)
     setRow(null)
-    getNycCaseDetail(caseId)
-      .then((d) => active && setRow(d))
-      .catch((err: unknown) => active && setError(errorMessage(err)))
-      .finally(() => active && setLoading(false))
+    getNycCaseDetail(historicalId)
+      .then((d) => live && setRow(d))
+      .catch((err: unknown) => live && setError(errorMessage(err)))
+      .finally(() => live && setLoading(false))
     return () => {
-      active = false
+      live = false
     }
-  }, [caseId])
+  }, [historicalId, isOpen])
 
   useEffect(() => {
-    if (!caseId) return
+    if (!active) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [caseId, onClose])
+  }, [active, onClose])
 
-  if (!caseId) return null
-  const dur = row ? closureDurationDays(row) : null
-  const agency = row ? row.agency_name || row.agency || row.assigned_department || '—' : '—'
+  if (!active) return null
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-navy-900/40" role="dialog" aria-modal="true" aria-label={`Case ${caseId}`} onClick={onClose}>
       <div className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
           <div className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Case detail</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+              {isOpen ? 'Open case detail' : 'Case detail'}
+            </div>
             <h3 className="truncate text-sm font-semibold text-navy-900">{caseId}</h3>
           </div>
           <button type="button" onClick={onClose} className="btn-secondary text-xs py-1.5 px-3">Close</button>
         </div>
         <div className="overflow-y-auto px-5 py-4">
-          {loading ? (
+          {isOpen ? (
+            <OpenCaseDetailBody row={openRow!} />
+          ) : loading ? (
             <div className="py-10 text-center text-sm text-ink-subtle">Loading case…</div>
           ) : error ? (
             <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-900">Live data unavailable. {error}</div>
           ) : !row ? (
             <div className="py-10 text-center text-sm text-ink-subtle">Case not found.</div>
           ) : (
-            <dl className="space-y-2.5">
-              <DetailRow label="Submitted" value={fmtDate(row.submitted_at)} />
-              <DetailRow label="Closed" value={fmtDate(row.closed_at)} />
-              <DetailRow label="Closure duration" value={dur == null ? '—' : `${dur} days`} />
-              <DetailRow label="Status" value={row.status ?? '—'} />
-              <DetailRow label="Complaint type" value={row.complaint_type ?? '—'} />
-              <DetailRow label="Request detail" value={[row.request_detail, row.request_detail_2].filter(Boolean).join(' · ') || '—'} />
-              <DetailRow label="Agency" value={agency} />
-              <DetailRow label="Borough" value={row.borough ?? '—'} />
-              <DetailRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
-              <DetailRow label="Location" value={row.address_or_location || row.ward_or_area || '—'} />
-              <DetailRow label="Resolution" value={row.resolution_description ?? '—'} />
-              <DetailRow label="Dataset id" value={row.source_dataset_id ?? '—'} />
-              <div className="pt-2">
-                <Link to={`/app/cases/${encodeURIComponent(row.case_id)}`} className="text-xs font-medium text-accent-700 hover:text-accent-900">
-                  Open full case file →
-                </Link>
-              </div>
-            </dl>
+            <HistoricalCaseDetailBody row={row} />
           )}
         </div>
         <div className="border-t border-slate-100 px-5 py-2.5 text-[11px] text-ink-subtle">Source: New York City 311 public service requests.</div>
       </div>
     </div>
+  )
+}
+
+function HistoricalCaseDetailBody({ row }: { row: NycCaseRow }) {
+  const dur = closureDurationDays(row)
+  const agency = row.agency_name || row.agency || row.assigned_department || '—'
+  return (
+    <dl className="space-y-2.5">
+      <DetailRow label="Submitted" value={fmtDate(row.submitted_at)} />
+      <DetailRow label="Closed" value={fmtDate(row.closed_at)} />
+      <DetailRow label="Closure duration" value={dur == null ? '—' : `${dur} days`} />
+      <DetailRow label="Status" value={row.status ?? '—'} />
+      <DetailRow label="Complaint type" value={row.complaint_type ?? '—'} />
+      <DetailRow label="Request detail" value={[row.request_detail, row.request_detail_2].filter(Boolean).join(' · ') || '—'} />
+      <DetailRow label="Agency" value={agency} />
+      <DetailRow label="Borough" value={row.borough ?? '—'} />
+      <DetailRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
+      <DetailRow label="Location" value={row.address_or_location || row.ward_or_area || '—'} />
+      <DetailRow label="Resolution" value={row.resolution_description ?? '—'} />
+      <DetailRow label="Dataset id" value={row.source_dataset_id ?? '—'} />
+      <div className="pt-2">
+        <Link to={`/app/cases/${encodeURIComponent(row.case_id)}`} className="text-xs font-medium text-accent-700 hover:text-accent-900">
+          Open full case file →
+        </Link>
+      </div>
+    </dl>
+  )
+}
+
+function OpenCaseDetailBody({ row }: { row: OpenReviewRow }) {
+  return (
+    <dl className="space-y-2.5">
+      <DetailRow label="Submitted" value={fmtDate(row.submitted_at)} />
+      <DetailRow label="Status" value={row.status ?? '—'} />
+      <DetailRow label="Complaint type" value={row.complaint_type ?? '—'} />
+      <DetailRow label="Descriptor" value={row.descriptor ?? '—'} />
+      <DetailRow label="Agency" value={row.agency ?? '—'} />
+      <DetailRow label="Borough" value={row.borough ?? '—'} />
+      <DetailRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
+      <DetailRow label="Location" value={row.address_or_location ?? '—'} />
+      <DetailRow label="Due date" value={fmtDate(row.due_date)} />
+      <DetailRow label="Source channel" value={row.source_channel ?? '—'} />
+      <DetailRow label="Age" value={row.age_days == null ? '—' : `${row.age_days} days`} />
+      <DetailRow label="Review priority" value={row.priority_score == null ? '—' : row.priority_score.toFixed(0)} />
+      <DetailRow label="Priority tier" value={row.priority_tier ?? '—'} />
+      <DetailRow label="Priority reason" value={row.priority_reason ?? '—'} />
+      <p className="pt-1 text-[11px] leading-relaxed text-ink-subtle">
+        Decision support — staff review and decide. Review priority is a transparent ranking aid, not an automated decision.
+      </p>
+    </dl>
   )
 }
 
@@ -825,6 +912,8 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 // Open cases queue tab
 // ---------------------------------------------------------------------------
 
+// Fallback aging buckets, computed from loaded rows only when the full-population
+// aggregate view (v_nyc_open_aging_buckets) is unavailable.
 const AGING_BUCKETS: { label: string; test: (d: number) => boolean }[] = [
   { label: '0–2 days', test: (d) => d <= 2 },
   { label: '3–7 days', test: (d) => d >= 3 && d <= 7 },
@@ -832,46 +921,107 @@ const AGING_BUCKETS: { label: string; test: (d: number) => boolean }[] = [
   { label: '15+ days', test: (d) => d >= 15 },
 ]
 
-function OpenCasesQueue() {
-  const { data, loading, error } = useLive<OpenReviewRow[]>(() => getNycOpenReviewQueue(100))
-  const [openCase, setOpenCase] = useState<string | null>(null)
+const OPEN_PAGE_SIZE = 25
+const DIVERSIFIED_SIZE = 60
 
-  const buckets = useMemo(() => {
-    const rows = data ?? []
+type QueueMode = 'priority' | 'diversified'
+
+function OpenCasesQueue() {
+  const [filters, setFilters] = useState<OpenQueueFilters>({})
+  const [mode, setMode] = useState<QueueMode>('priority')
+  const [page, setPage] = useState(0)
+  const [rows, setRows] = useState<OpenReviewRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [options, setOptions] = useState<OpenQueueOptions | null>(null)
+  const [openRow, setOpenRow] = useState<OpenReviewRow | null>(null)
+
+  // Aging buckets across the FULL open population (not just the loaded page).
+  const aging = useLive<OpenAgingBucket[]>(getNycOpenAgingBuckets)
+
+  useEffect(() => {
+    getOpenQueueOptions()
+      .then(setOptions)
+      .catch((err) => console.error('Failed to load open-queue options:', err))
+  }, [])
+
+  // Reset paging when the filters or the queue mode change.
+  useEffect(() => {
+    setPage(0)
+  }, [filters, mode])
+
+  useEffect(() => {
+    let live = true
+    setLoading(true)
+    setError(null)
+    const load =
+      mode === 'diversified'
+        ? getNycOpenQueueDiversified(filters, DIVERSIFIED_SIZE).then((r) => ({ rows: r, total: r.length }))
+        : getNycOpenQueuePage(filters, page, OPEN_PAGE_SIZE)
+    load
+      .then((res) => {
+        if (!live) return
+        // Priority mode appends on "load more"; diversified replaces.
+        setRows((prev) => (mode === 'priority' && page > 0 ? [...prev, ...res.rows] : res.rows))
+        setTotal(res.total)
+      })
+      .catch((err: unknown) => {
+        if (!live) return
+        console.error('Open queue load failed:', err)
+        setError(errorMessage(err))
+        setRows([])
+        setTotal(0)
+      })
+      .finally(() => live && setLoading(false))
+    return () => {
+      live = false
+    }
+  }, [filters, mode, page])
+
+  const set = (patch: Partial<OpenQueueFilters>) => setFilters((f) => ({ ...f, ...patch }))
+
+  // Aging cards: prefer the full-population aggregate; fall back to the loaded
+  // rows (with a caveat) only if the aggregate view is not available yet.
+  const agingFallback = aging.error || (aging.data && aging.data.length === 0)
+  const agingCards = useMemo(() => {
+    if (aging.data && aging.data.length) return aging.data.map((b) => ({ label: b.bucket, count: b.total_cases }))
     return AGING_BUCKETS.map((b) => ({
       label: b.label,
       count: rows.filter((r) => r.age_days != null && b.test(r.age_days)).length,
     }))
-  }, [data])
+  }, [aging.data, rows])
 
-  if (loading) {
-    return <div className="mt-6 card p-8 text-center text-sm text-ink-subtle">Loading open cases…</div>
-  }
-
-  // The open dataset is loaded separately; until then (or on any read error) show
-  // a clear notice rather than fabricating a queue.
-  if (error || !data) {
+  // First load (no rows yet) and erroring before anything rendered → clear notice.
+  if (error && rows.length === 0) {
     return (
       <div className="mt-6 card p-6">
-        <h2 className="text-sm font-semibold text-navy-900">Open NYC cases not loaded yet</h2>
+        <h2 className="text-sm font-semibold text-navy-900">Open cases unavailable</h2>
         <p className="mt-1 text-sm text-ink-muted">
-          The review priority queue reads <code className="text-xs">v_nyc_open_review_queue</code>. Load the open NYC
-          311 dataset to enable review priority, aging buckets, and due-date pressure here.
+          The review priority queue reads the open NYC 311 review queue. It could not be loaded right now.
         </p>
-        {error && <p className="mt-2 font-mono text-[11px] text-ink-subtle">{error}</p>}
+        <p className="mt-2 font-mono text-[11px] text-ink-subtle">{error}</p>
       </div>
     )
   }
 
-  if (data.length === 0) {
-    return <div className="mt-6 card p-8 text-center text-sm text-ink-subtle">No open cases in the review queue right now.</div>
-  }
+  const hasMore = mode === 'priority' && rows.length < total
 
   return (
     <div className="mt-6 space-y-6">
-      <SectionShell name="open-case aging" title="Open-case aging" subtitle="How long open cases have been waiting." loading={false} error={null}>
+      <SectionShell
+        name="open-case aging"
+        title="Open-case aging"
+        subtitle={
+          agingFallback
+            ? 'How long open cases have been waiting (loaded sample — full aggregate unavailable).'
+            : 'How long open cases have been waiting, across all open cases.'
+        }
+        loading={aging.loading && !aging.data}
+        error={null}
+      >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {buckets.map((b) => (
+          {agingCards.map((b) => (
             <div key={b.label} className="rounded-lg border border-slate-200 bg-white p-3.5">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{b.label}</div>
               <div className="mt-1 text-xl font-semibold tabular-nums text-navy-900">{fmtInt(b.count)}</div>
@@ -880,28 +1030,93 @@ function OpenCasesQueue() {
         </div>
       </SectionShell>
 
-      <SectionShell name="the review priority queue" title="Review priority queue" subtitle="Highest review priority first. Decision support — staff review and decide." loading={false} error={null}>
-        <Table
-          head={['Priority', 'Tier', 'Reason', 'Age', 'Due', 'Complaint type', 'Borough / district']}
-          align={['right', 'left', 'left', 'right', 'left', 'left', 'left']}
-          rows={data.map((r) => ({
-            key: r.case_id,
-            onClick: () => setOpenCase(r.case_id),
-            cells: [
-              r.priority_score == null ? '—' : r.priority_score.toFixed(0),
-              r.priority_tier ?? '—',
-              r.priority_reason ?? '—',
-              r.age_days == null ? '—' : `${r.age_days} d`,
-              fmtDate(r.due_date),
-              r.complaint_type ?? '—',
-              [r.borough, r.council_district ? `D${Number(r.council_district)}` : null].filter(Boolean).join(' · ') || '—',
-            ],
-          }))}
-        />
+      <SectionShell
+        name="the review priority queue"
+        title="Review priority queue"
+        subtitle="Highest review priority first. Decision support — staff review and decide."
+        loading={false}
+        error={error && rows.length > 0 ? error : null}
+        action={
+          <div role="tablist" aria-label="Queue order" className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+            <QueueModeTab label="Priority order" active={mode === 'priority'} onClick={() => setMode('priority')} />
+            <QueueModeTab label="Diversified" active={mode === 'diversified'} onClick={() => setMode('diversified')} />
+          </div>
+        }
+      >
+        <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <FilterSelect label="Priority tier" value={filters.priorityTier ?? ''} options={options?.priorityTiers ?? []} onChange={(v) => set({ priorityTier: v || undefined })} />
+          <FilterSelect label="Complaint type" value={filters.complaintType ?? ''} options={options?.complaintTypes ?? []} onChange={(v) => set({ complaintType: v || undefined })} />
+          <FilterSelect label="Borough" value={filters.borough ?? ''} options={options?.boroughs ?? []} onChange={(v) => set({ borough: v || undefined })} />
+          <FilterSelect label="Council district" value={filters.councilDistrict ?? ''} options={options?.councilDistricts ?? []} onChange={(v) => set({ councilDistrict: v || undefined })} />
+          <FilterSelect label="Status" value={filters.status ?? ''} options={options?.statuses ?? []} onChange={(v) => set({ status: v || undefined })} />
+        </div>
+
+        <div className="mb-2 flex items-center justify-between text-[11px] text-ink-subtle">
+          <span>
+            {loading && rows.length === 0
+              ? 'Loading…'
+              : mode === 'diversified'
+                ? `Showing ${fmtInt(rows.length)} cases — varied complaint types, priority-ranked`
+                : `Showing ${fmtInt(rows.length)} of ${fmtInt(total)} open cases`}
+          </span>
+          {Object.keys(filters).length > 0 && (
+            <button type="button" onClick={() => setFilters({})} className="font-medium text-accent-700 hover:text-accent-900">
+              Clear filters
+            </button>
+          )}
+        </div>
+
+        {loading && rows.length === 0 ? (
+          <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
+        ) : rows.length === 0 ? (
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-ink-subtle">No open cases match these filters.</div>
+        ) : (
+          <Table
+            head={['Priority', 'Tier', 'Reason', 'Age', 'Due', 'Complaint type', 'Borough / district']}
+            align={['right', 'left', 'left', 'right', 'left', 'left', 'left']}
+            rows={rows.map((r) => ({
+              key: r.case_id,
+              onClick: () => setOpenRow(r),
+              cells: [
+                r.priority_score == null ? '—' : r.priority_score.toFixed(0),
+                r.priority_tier ?? '—',
+                r.priority_reason ?? '—',
+                r.age_days == null ? '—' : `${r.age_days} d`,
+                fmtDate(r.due_date),
+                r.complaint_type ?? '—',
+                [r.borough, r.council_district ? `D${Number(r.council_district)}` : null].filter(Boolean).join(' · ') || '—',
+              ],
+            }))}
+          />
+        )}
+
+        {hasMore && (
+          <div className="mt-4 flex justify-center">
+            <button type="button" disabled={loading} onClick={() => setPage((p) => p + 1)} className="btn-secondary text-xs py-1.5 px-4 disabled:opacity-50">
+              {loading ? 'Loading…' : 'Load more'}
+            </button>
+          </div>
+        )}
       </SectionShell>
 
-      <CaseDetailDrawer caseId={openCase} onClose={() => setOpenCase(null)} />
+      <CaseDetailDrawer openRow={openRow} onClose={() => setOpenRow(null)} />
     </div>
+  )
+}
+
+function QueueModeTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+        active ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'
+      }`}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -944,7 +1159,7 @@ function SectionShell({
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
-              Live Supabase data
+              Live data
             </span>
           )}
         </div>
@@ -967,7 +1182,7 @@ function SectionShell({
 function SectionError({ name, error }: { name: string; error: string }) {
   return (
     <div className="rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
-      <div className="font-semibold">Live Supabase data unavailable.</div>
+      <div className="font-semibold">Live data unavailable.</div>
       <div className="mt-0.5">Unable to load {name}.</div>
       <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] text-amber-800">{error}</pre>
     </div>

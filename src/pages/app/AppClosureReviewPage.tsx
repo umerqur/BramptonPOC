@@ -199,7 +199,7 @@ export default function AppClosureReviewPage() {
   useEffect(() => {
     let active = true
     if (!isSupabaseConfigured) {
-      setError('Supabase is not configured in this environment.')
+      setError('Live data is not available in this environment.')
       setLoading(false)
       return
     }
@@ -248,7 +248,7 @@ export default function AppClosureReviewPage() {
   )
 
   function handleControl(label: string) {
-    setControlNote(`${label} — POC mode: no action was submitted to Supabase.`)
+    setControlNote(`${label} — POC mode: no action was submitted.`)
   }
 
   // Selecting a case opens it as the active case file. The control note resets,
@@ -275,7 +275,7 @@ export default function AppClosureReviewPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Pill tone="emerald">Live Supabase</Pill>
+          <Pill tone="emerald">Live data</Pill>
           <Pill tone="navy">Staff approval required</Pill>
         </div>
       </div>
@@ -311,7 +311,7 @@ export default function AppClosureReviewPage() {
         </div>
       ) : error ? (
         <div className="mt-6 card px-5 py-6 text-sm text-ink-muted">
-          <div className="font-semibold text-navy-900">Cases unavailable from Supabase.</div>
+          <div className="font-semibold text-navy-900">Cases unavailable.</div>
           <pre className="mt-1.5 whitespace-pre-wrap break-words font-mono text-xs text-ink-subtle">{error}</pre>
         </div>
       ) : rows.length === 0 ? (

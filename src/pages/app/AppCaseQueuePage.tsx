@@ -169,14 +169,14 @@ function SourceBadge({ loading, error }: { loading: boolean; error: string | nul
     return (
       <div className="flex items-center gap-2 text-xs text-red-700">
         <span className="h-2 w-2 rounded-full bg-red-500" />
-        Supabase unavailable
+        Live data unavailable
       </div>
     )
   }
   return (
     <div className="flex items-center gap-2 text-xs text-ink-subtle">
       <span className="h-2 w-2 rounded-full bg-accent-500" />
-      {loading ? 'Loading…' : 'Live data · Supabase'}
+      {loading ? 'Loading…' : 'Live data'}
     </div>
   )
 }
