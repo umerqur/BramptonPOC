@@ -29,6 +29,7 @@ import {
   getNycOpenQueueDiversified,
   getNycOpenAgingBuckets,
   getNycOpenStatusMix,
+  getNycOpenQueueSummary,
   getOpenQueueOptions,
   closureDurationDays,
   type CaseExplorerFilters,
@@ -39,6 +40,7 @@ import {
   type OpenQueueOptions,
   type OpenAgingBucket,
   type OpenStatusMixRow,
+  type OpenQueueSummary,
 } from '../../services/caseExplorer'
 
 // Insights — operational workload intelligence over the New York City 311 public
@@ -251,12 +253,12 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
 function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   return (
     <div className="mt-6 space-y-6">
+      <OperationalSnapshot />
       <NYCWorkloadMapPanel
         onSelectArea={(mode, value) =>
           onExplore(mode === 'district' ? { councilDistrict: value } : { borough: value })
         }
       />
-      <KpiCards />
       <ComplaintTypeRanked onExplore={onExplore} />
       <div className="grid gap-6 lg:grid-cols-2">
         <ChannelMixDonut />
@@ -271,34 +273,136 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
   )
 }
 
-// --- KPI cards -------------------------------------------------------------
+// --- Operational snapshot --------------------------------------------------
 
-function KpiCards() {
-  const { data, loading, error } = useLive<InsightsKpis>(getInsightsKpis)
+/**
+ * Executive snapshot, directly below the source banner and above the map. Two
+ * clearly separated bands:
+ *
+ *   1. Active open-case review queue — the LIVE open NYC 311 queue
+ *      (v_nyc_open_tier_volume / v_nyc_open_review_queue). Visually prominent so
+ *      the UI never implies there are zero active cases. If the open dataset is
+ *      not loaded, this band says "Open queue not loaded" rather than showing a
+ *      misleading zero.
+ *   2. Historical workload intelligence — the closed-heavy NYC 311 history
+ *      (v_insights_kpis). This is completed workload, not the active queue, so
+ *      its "open in historical extract" figure is intentionally not surfaced here.
+ */
+function OperationalSnapshot() {
+  const hist = useLive<InsightsKpis>(getInsightsKpis)
+  const open = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
+
   return (
-    <SectionShell name="the operational snapshot" title="Operational snapshot" subtitle="Workload and closure pressure." loading={loading} error={error}>
-      {data && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {[
-            { label: 'Total requests', value: fmtInt(data.total_requests) },
-            { label: 'Open / active', value: fmtInt(data.open_requests) },
-            { label: 'Closed', value: fmtInt(data.closed_requests) },
-            { label: 'Avg closure', value: fmtDays(data.avg_closure_days) },
-            { label: 'Median closure', value: fmtDays(data.median_closure_days) },
-            { label: 'P90 closure', value: fmtDays(data.p90_closure_days) },
-            { label: 'Busiest district', value: data.busiest_council_district ? `District ${data.busiest_council_district}` : '—' },
-            { label: 'Top complaint type', value: data.top_complaint_type ?? '—' },
-          ].map((c) => (
-            <div key={c.label} className="rounded-lg border border-slate-200 bg-white p-3.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{c.label}</div>
-              <div className="mt-1 truncate text-xl font-semibold tabular-nums text-navy-900" title={c.value}>
-                {c.value}
-              </div>
-            </div>
-          ))}
+    <section className="card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
+          <p className="mt-0.5 text-xs text-ink-subtle">Active review queue and historical workload at a glance.</p>
         </div>
-      )}
-    </SectionShell>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+          Live data
+        </span>
+      </div>
+
+      <div className="mt-4 space-y-5">
+        <ActiveOpenQueueBand state={open} />
+        <HistoricalWorkloadBand state={hist} />
+      </div>
+    </section>
+  )
+}
+
+/** Small band header: a label, a one-line description, and a subtle divider. */
+function BandHeading({ label, hint }: { label: string; hint: string }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-slate-100 pb-2">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-navy-900">{label}</h3>
+      <span className="text-[11px] text-ink-subtle">{hint}</span>
+    </div>
+  )
+}
+
+/** A compact metric tile for the historical band. */
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-1 truncate text-xl font-semibold tabular-nums text-navy-900" title={value}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Active open-case review queue band. The headline "Active open queue" card is
+ * intentionally prominent (accent panel, large number). On a load failure or an
+ * unavailable open dataset it shows a clear "Open queue not loaded" notice — no
+ * fabricated zero.
+ */
+function ActiveOpenQueueBand({ state }: { state: LiveState<OpenQueueSummary> }) {
+  const { data, loading, error } = state
+  return (
+    <div>
+      <BandHeading label="Active open-case review queue" hint="Live open NYC 311 cases awaiting review." />
+      {error ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+          <div className="font-semibold">Open queue not loaded.</div>
+          <div className="mt-0.5 text-xs">
+            The active open NYC 311 review queue is not available yet. Load the open dataset to see live active cases.
+          </div>
+        </div>
+      ) : loading ? (
+        <div className="animate-pulse rounded-lg bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading live data…</div>
+      ) : data ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Prominent headline card. */}
+          <div className="relative overflow-hidden rounded-xl border border-accent-200 bg-gradient-to-br from-accent-50 to-white p-4 shadow-sm sm:col-span-2 lg:col-span-1">
+            <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-accent-500" />
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-accent-700">Active open queue</div>
+            <div className="mt-1 text-3xl font-bold tabular-nums text-navy-900">{fmtInt(data.total)}</div>
+            <div className="mt-0.5 text-[11px] text-ink-subtle">Open cases awaiting review · decision support</div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Open high-priority cases</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums text-navy-900">
+              {data.highPriority == null ? '—' : fmtInt(data.highPriority)}
+            </div>
+            <div className="mt-0.5 text-[11px] text-ink-subtle">
+              {data.highPriority == null ? 'Review-priority tiers not loaded' : 'High review-priority tier'}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Historical workload intelligence band — the closed-heavy NYC 311 history. This
+ * is completed workload data, NOT the active queue, so it never shows an
+ * "open / active" figure that would imply a live backlog of zero.
+ */
+function HistoricalWorkloadBand({ state }: { state: LiveState<InsightsKpis> }) {
+  const { data, loading, error } = state
+  return (
+    <div>
+      <BandHeading label="Historical workload intelligence" hint="Closed-heavy NYC 311 history — completed workload." />
+      {error ? (
+        <SectionError name="the historical workload snapshot" error={error} />
+      ) : loading ? (
+        <div className="animate-pulse rounded-lg bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading live data…</div>
+      ) : data ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <StatTile label="Historical records loaded" value={fmtInt(data.total_requests)} />
+          <StatTile label="Closed historical records" value={fmtInt(data.closed_requests)} />
+          <StatTile label="Avg historical closure" value={fmtDays(data.avg_closure_days)} />
+          <StatTile label="P90 historical closure" value={fmtDays(data.p90_closure_days)} />
+          <StatTile label="Busiest district" value={data.busiest_council_district ? `District ${data.busiest_council_district}` : '—'} />
+          <StatTile label="Top historical complaint type" value={data.top_complaint_type ?? '—'} />
+        </div>
+      ) : null}
+    </div>
   )
 }
 

@@ -375,6 +375,51 @@ export async function getNycOpenStatusMix(): Promise<OpenStatusMixRow[]> {
   }))
 }
 
+// --- Open-queue snapshot summary (total + high-priority tier) ----------------
+
+export type OpenQueueSummary = {
+  /** Total active open cases in the review queue. */
+  total: number
+  /** Open cases in the "High" priority tier, or null when no tier breakdown is available. */
+  highPriority: number | null
+}
+
+/**
+ * One-shot summary of the ACTIVE open review queue for the Insights snapshot:
+ * the total open-case count and the High-priority-tier count.
+ *
+ * Prefers the precomputed tier-volume aggregate (v_nyc_open_tier_volume, from
+ * migration 022) — a single tiny read yields both the total and the High count.
+ * If that view is not present yet, falls back to an exact head count over the
+ * open review queue (total only, no tier breakdown). If neither the tier view
+ * nor the queue view is available, this throws so the caller can show a clear
+ * "Open queue not loaded" state — never fabricated numbers.
+ */
+export async function getNycOpenQueueSummary(): Promise<OpenQueueSummary> {
+  const client = requireClient()
+
+  // Preferred path: the precomputed tier volume (migration 022).
+  try {
+    const { data, error } = await client.from('v_nyc_open_tier_volume').select('priority_tier, total_cases')
+    if (error) throw error
+    const rows = (data ?? []) as Record<string, unknown>[]
+    if (rows.length > 0) {
+      const total = rows.reduce((n, r) => n + Number(r.total_cases ?? 0), 0)
+      const high = rows
+        .filter((r) => String(r.priority_tier ?? '').trim().toLowerCase() === 'high')
+        .reduce((n, r) => n + Number(r.total_cases ?? 0), 0)
+      return { total, highPriority: high }
+    }
+  } catch {
+    // Tier view not applied yet — fall through to a plain count.
+  }
+
+  // Fallback: exact count over the open review queue (no tier breakdown).
+  const { count, error } = await client.from(OPEN_QUEUE_VIEW).select('*', { count: 'exact', head: true })
+  if (error) throw error
+  return { total: count ?? 0, highPriority: null }
+}
+
 export type OpenQueueOptions = {
   priorityTiers: string[]
   complaintTypes: string[]
