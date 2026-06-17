@@ -1,28 +1,18 @@
-import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import NYCWorkloadMapPanel from '../../components/app/NYCWorkloadMapPanel'
-import InsightsDashboard, {
-  DrilldownModal,
-  InsightsSourceBanner,
-  type Drilldown,
-} from '../../components/app/InsightsDashboard'
+import InsightsDashboard, { InsightsSourceBanner } from '../../components/app/InsightsDashboard'
 import { useWorkflow } from '../../lib/workflowStore'
 
-// Insights — the supervisor/coordinator operational workload intelligence
-// dashboard over the New York City 311 public service request dataset. It keeps
-// the council-district / borough workload map and adds supervisor-focused
-// sections: KPIs, complaint type pressure, closure and area bottlenecks,
-// department workload, trend, and channel mix. Every aggregate is read from a
-// server-side Supabase view (never the full table in the browser); clicking a map
-// area, a complaint type, or a bottleneck row opens the case records behind it.
+// Insights — supervisor/coordinator operational workload intelligence over the
+// New York City 311 public service request dataset. Three tabs: Overview (map,
+// KPIs, charts), Case Explorer (paginated, filtered case search + detail), and
+// Open cases (review priority queue when the open dataset is loaded). Aggregates
+// read small materialized views; the Case Explorer reads paginated, filtered
+// rows — never the full table.
 //
 // By-law Officers do not see supervisor Insights and are redirected to their
 // Officer Field Console. Decision support only — not a risk prediction.
 export default function AppInsightsPage() {
   const { role } = useWorkflow()
-  // Shared drilldown opened from the map, complaint types, or bottleneck rows.
-  const [drilldown, setDrilldown] = useState<Drilldown | null>(null)
-
   if (role === 'officer') return <Navigate to="/app/field" replace />
 
   return (
@@ -34,27 +24,15 @@ export default function AppInsightsPage() {
         </h1>
         <p className="mt-2 text-ink-muted">
           Where the service-request workload sits and where closure is under pressure across the New York City 311
-          public service request dataset. The council district view is the ward-like operational unit; the borough view
-          is the executive overview. These workload and closure patterns are supervisor decision support for reviewing
-          staffing, routing, and service response pressure — not an enforcement decision and not a risk prediction.
+          public service request dataset. Decision support for staffing and routing review — not a risk prediction.
         </p>
       </div>
 
-      {/* Data source banner — the real NYC 311 public dataset behind the dashboard. */}
+      {/* Data source banner — the live NYC 311 public dataset behind the dashboard. */}
       <InsightsSourceBanner />
 
-      {/* NYC 311 workload heat map — clicking a district opens its case drilldown. */}
-      <NYCWorkloadMapPanel
-        onSelectDistrict={(district) =>
-          setDrilldown({ title: `District ${district} — cases`, filter: { councilDistrict: district } })
-        }
-      />
-
-      {/* Supervisor-focused operational sections. */}
-      <InsightsDashboard onDrilldown={setDrilldown} />
-
-      {/* Case records behind a clicked aggregate. */}
-      <DrilldownModal drilldown={drilldown} onClose={() => setDrilldown(null)} />
+      {/* Overview · Case Explorer · Open cases. */}
+      <InsightsDashboard />
     </div>
   )
 }

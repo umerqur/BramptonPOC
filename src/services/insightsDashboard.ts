@@ -269,6 +269,28 @@ export async function getInsightsChannelMix(): Promise<ChannelMixRow[]> {
   return rows.sort((a, b) => CHANNEL_ORDER.indexOf(a.channel) - CHANNEL_ORDER.indexOf(b.channel))
 }
 
+// ---------------------------------------------------------------------------
+// 8. Status mix
+// ---------------------------------------------------------------------------
+
+export type StatusMixRow = {
+  status: string
+  total_cases: number
+}
+
+export async function getInsightsStatusMix(): Promise<StatusMixRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from('v_insights_status_mix')
+    .select('status, total_cases')
+    .order('total_cases', { ascending: false })
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    status: (r.status as string) || 'Unknown',
+    total_cases: num(r.total_cases),
+  }))
+}
+
 /**
  * Whether a channel mix is meaningful enough to chart. NYC 311 records often
  * lack a usable channel value; if the dataset is empty or overwhelmingly

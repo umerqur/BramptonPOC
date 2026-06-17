@@ -101,10 +101,11 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
  * renders an interactive choropleth shaded by workload intensity.
  */
 export default function NYCWorkloadMapPanel({
-  onSelectDistrict,
+  onSelectArea,
 }: {
-  /** Fired when a council district is clicked (district mode), for case drilldown. */
-  onSelectDistrict?: (district: string) => void
+  /** Fired when an area is clicked: district number (district mode) or borough
+   *  label (borough mode), for case drilldown into the Case Explorer. */
+  onSelectArea?: (mode: MapMode, value: string) => void
 } = {}) {
   const [mode, setMode] = useState<MapMode>('district')
   const [units, setUnits] = useState<AreaUnit[]>([])
@@ -158,7 +159,7 @@ export default function NYCWorkloadMapPanel({
       units={units}
       volumes={volumes}
       unavailable={unavailable}
-      onSelectDistrict={onSelectDistrict}
+      onSelectArea={onSelectArea}
     />
   )
 }
@@ -187,14 +188,14 @@ function NYCWorkloadHeatMap({
   units,
   volumes,
   unavailable,
-  onSelectDistrict,
+  onSelectArea,
 }: {
   mode: MapMode
   onModeChange: (mode: MapMode) => void
   units: AreaUnit[]
   volumes: AreaVolume[]
   unavailable: boolean
-  onSelectDistrict?: (district: string) => void
+  onSelectArea?: (mode: MapMode, value: string) => void
 }) {
   const adapter = ADAPTERS[mode]
   const map = useMemo(() => buildAreaMap(units), [units])
@@ -312,9 +313,9 @@ function NYCWorkloadHeatMap({
                       onMouseLeave={() => setHovered(null)}
                       onClick={() => {
                         setSelected(shape.key)
-                        // In the ward-like district view, a click also opens the
-                        // case drilldown for that council district.
-                        if (mode === 'district') onSelectDistrict?.(shape.key)
+                        // A click also opens the Case Explorer for that area:
+                        // district number in district mode, borough label in borough mode.
+                        onSelectArea?.(mode, mode === 'district' ? shape.key : shape.label)
                       }}
                     >
                       <title>
