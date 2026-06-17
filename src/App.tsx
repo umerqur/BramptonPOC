@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage'
 import HowItWorksPage from './pages/HowItWorksPage'
 import NotFoundPage from './pages/NotFoundPage'
 import AppCaseDetailPage from './pages/app/AppCaseDetailPage'
+import AppNycCasePage from './pages/app/AppNycCasePage'
 // Clean staff journey: Work Queue → Case Workbench → Closure Review, plus Insights.
 import AppStaffInboxPage from './pages/app/AppStaffInboxPage'
 import AppCaseWorkbenchPage from './pages/app/AppCaseWorkbenchPage'
@@ -67,6 +68,9 @@ export default function App() {
         <Route path="field/:caseId" element={<AppOfficerCasePage />} />
         {/* Case detail — internal drilldown, not in nav. */}
         <Route path="cases/:id" element={<AppCaseDetailPage />} />
+        {/* Full NYC 311 case page — opened from Insights Case Explorer + Open
+            cases rows (replaces the old side drawer). */}
+        <Route path="nyc_case/:caseId" element={<AppNycCasePage />} />
 
         {/* Removed demo-only routes — redirected so old links don't 404 and the
             product story stays focused. */}

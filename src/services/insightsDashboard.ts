@@ -10,7 +10,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 // filtered, limited slice).
 //
 // There is NO hardcoded fallback data here: when a live aggregate cannot be
-// loaded, the caller surfaces a clear "Live Supabase data unavailable" error for
+// loaded, the caller surfaces a clear "Live data unavailable" error for
 // that section rather than inventing numbers. This is supervisor decision support
 // over public, historical workload data — not a risk prediction and not an
 // automated enforcement decision. A human reviews and decides.
@@ -26,7 +26,7 @@ const INSIGHTS_CHANNEL_MIX_VIEW = 'v_insights_channel_mix'
 
 function requireClient() {
   if (!isSupabaseConfigured || !supabase) {
-    throw new Error('Supabase is not configured')
+    throw new Error('Live data service is not configured')
   }
   return supabase
 }
