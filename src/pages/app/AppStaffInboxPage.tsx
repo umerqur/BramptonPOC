@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { can, DEMO_OFFICER } from '../../lib/roles'
@@ -238,6 +238,16 @@ export default function AppStaffInboxPage() {
           <OpenBenchmarkView state={open} onView={(row) => row.open && setDrawerRow(row.open)} />
         ) : (
           <NormalizedListView
+            header={
+              tab === 'all' ? (
+                <SourceMixSummary
+                  residentIntakes={counts.resident}
+                  openBenchmark={open.error ? null : counts.open}
+                  assignedInProgress={counts.assigned}
+                  readyForClosure={counts.closure}
+                />
+              ) : null
+            }
             rows={tab === 'all' ? allActive : tab === 'assigned' ? assignedInProgress : readyForClosure}
             loading={loading}
             residentError={resident.error}
@@ -306,6 +316,7 @@ function NormalizedListView({
   residentError,
   openError,
   emptyLabel,
+  header,
   onOpen,
   onOpenClosureReview,
 }: {
@@ -314,6 +325,8 @@ function NormalizedListView({
   residentError: string | null
   openError: string | null
   emptyLabel: string
+  /** Optional summary rendered above the list (e.g. the All-active-work source mix). */
+  header?: ReactNode
   onOpen: (row: WorkQueueRow) => void
   onOpenClosureReview: (row: WorkQueueRow) => void
 }) {
@@ -322,6 +335,7 @@ function NormalizedListView({
   }
   return (
     <div className="space-y-4">
+      {header}
       {residentError && <SourceWarning label="resident intake requests" error={residentError} />}
       {openError && <SourceWarning label="NYC open benchmark cases" error={openError} />}
       {rows.length === 0 ? (
@@ -335,6 +349,45 @@ function NormalizedListView({
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+/**
+ * A compact operational read of what is in the All-active-work queue: where the
+ * work came from (resident intakes, NYC open benchmark) and where it sits in the
+ * resident workflow (assigned / in progress, ready for closure review). Plain
+ * counts, no scoring — just an at-a-glance sense of the queue. The open-benchmark
+ * count is null when that source failed to load, so it reads "—" rather than 0.
+ */
+function SourceMixSummary({
+  residentIntakes,
+  openBenchmark,
+  assignedInProgress,
+  readyForClosure,
+}: {
+  residentIntakes: number
+  openBenchmark: number | null
+  assignedInProgress: number
+  readyForClosure: number
+}) {
+  const items: { label: string; value: number | null }[] = [
+    { label: 'Resident intakes', value: residentIntakes },
+    { label: 'NYC open benchmark', value: openBenchmark },
+    { label: 'Assigned / in progress', value: assignedInProgress },
+    { label: 'Ready for closure review', value: readyForClosure },
+  ]
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">In the queue</div>
+      <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {items.map((item) => (
+          <div key={item.label}>
+            <dd className="text-xl font-semibold tabular-nums text-navy-900">{item.value == null ? '—' : item.value}</dd>
+            <dt className="mt-0.5 text-xs text-ink-muted">{item.label}</dt>
+          </div>
+        ))}
+      </dl>
     </div>
   )
 }
