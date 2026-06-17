@@ -16,6 +16,24 @@ function requireClient() {
 
 const COMPLAINTS_TABLE = 'municipal_complaints'
 
+/**
+ * Normalize a borough filter value to the stored canonical form for an INDEXED
+ * equality match.
+ *
+ * NYC 311 stores borough as a normalized UPPERCASE name (e.g. "BROOKLYN",
+ * "STATEN ISLAND"). The filter value can arrive two ways:
+ *   * a friendly title-case label clicked on the borough map ("Brooklyn"), or
+ *   * the stored value itself, picked from a dropdown facet ("BROOKLYN").
+ * Folding both to a single uppercase form lets us use a plain equality match
+ * instead of ILIKE. Equality can be served by the borough btree index
+ * (idx_mc_nyc_borough_submitted); a case-insensitive ILIKE could not, and risked
+ * a full scan / statement timeout on the ~3.4M-row complaints table. UI labels
+ * stay friendly — this normalization happens only at query time.
+ */
+export function normalizeBoroughFilter(borough: string): string {
+  return borough.trim().toUpperCase()
+}
+
 // ---------------------------------------------------------------------------
 // Case Explorer
 // ---------------------------------------------------------------------------
@@ -110,9 +128,10 @@ export async function getNycCaseExplorerPage(
     )
   }
   if (filters.complaintType) query = query.eq('complaint_type', filters.complaintType)
-  // Case-insensitive exact match so a borough label from the map ("Brooklyn")
-  // matches stored values ("BROOKLYN").
-  if (filters.borough) query = query.ilike('borough', filters.borough)
+  // Indexed equality on the normalized (uppercase) borough name, so a map label
+  // ("Brooklyn") and a stored value ("BROOKLYN") both match and the borough btree
+  // index can serve the filter. See normalizeBoroughFilter.
+  if (filters.borough) query = query.eq('borough', normalizeBoroughFilter(filters.borough))
   if (filters.councilDistrict) {
     const plain = String(Number(filters.councilDistrict))
     const padded = plain.padStart(2, '0')
@@ -318,12 +337,13 @@ function applyOpenFilters<T>(query: T, filters: OpenQueueFilters): T {
   // the full Supabase generic types.
   let q = query as unknown as {
     eq: (c: string, v: unknown) => typeof q
-    ilike: (c: string, v: string) => typeof q
     in: (c: string, v: unknown[]) => typeof q
   }
   if (filters.priorityTier) q = q.eq('priority_tier', filters.priorityTier)
   if (filters.complaintType) q = q.eq('complaint_type', filters.complaintType)
-  if (filters.borough) q = q.ilike('borough', filters.borough)
+  // Indexed equality on the normalized (uppercase) borough name — see
+  // normalizeBoroughFilter. Replaces ILIKE so the match is index-friendly.
+  if (filters.borough) q = q.eq('borough', normalizeBoroughFilter(filters.borough))
   if (filters.status) q = q.eq('status', filters.status)
   if (filters.councilDistrict) {
     const plain = String(Number(filters.councilDistrict))
