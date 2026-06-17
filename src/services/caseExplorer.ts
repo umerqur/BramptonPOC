@@ -55,7 +55,13 @@ export type NycCaseRow = {
 const EXPLORER_COLUMNS =
   'case_id, source_dataset_id, submitted_at, closed_at, status, complaint_type, request_detail, request_detail_2, agency, agency_name, assigned_department, borough, council_district, address_or_location, ward_or_area, resolution_description'
 
-export type CaseExplorerPage = { rows: NycCaseRow[]; total: number }
+export type CaseExplorerPage = {
+  rows: NycCaseRow[]
+  /** Whether more rows exist beyond this page — computed WITHOUT an exact count. */
+  hasMore: boolean
+  /** Cheap planner estimate of total matching rows. Approximate; may be null. */
+  estimatedTotal: number | null
+}
 
 /** Closure duration in whole days, or null when the case is not closed cleanly. */
 export function closureDurationDays(row: { submitted_at: string | null; closed_at: string | null }): number | null {
@@ -67,8 +73,18 @@ export function closureDurationDays(row: { submitted_at: string | null; closed_a
 }
 
 /**
- * One filtered, paginated page of NYC 311 cases. `page` is zero-based. Returns
- * the rows and the exact total matching the filters (for pagination).
+ * One filtered page of NYC 311 cases for the Case Explorer drilldowns. `page` is
+ * zero-based and pages are meant to accumulate ("Load more"), never to drive an
+ * exact page count.
+ *
+ * IMPORTANT — no exact counts. Counting 3.4M rows filtered by a high-volume
+ * complaint type (e.g. Illegal Parking) and ordered by submitted_at was blowing
+ * the Postgres statement timeout (57014). Instead we:
+ *   * fetch pageSize + 1 rows so we know if there is a next page without a count, and
+ *   * ask only for a cheap PLANNED count (planner estimate) for an approximate
+ *     "Approx. X matching cases" hint.
+ * Combined with the partial indexes in migration 024, the ordered, limited slice
+ * uses an index and returns quickly. We never load the full result set.
  */
 export async function getNycCaseExplorerPage(
   filters: CaseExplorerFilters,
@@ -78,7 +94,7 @@ export async function getNycCaseExplorerPage(
   const client = requireClient()
   let query = client
     .from(COMPLAINTS_TABLE)
-    .select(EXPLORER_COLUMNS, { count: 'exact' })
+    .select(EXPLORER_COLUMNS, { count: 'planned' })
     .eq('source_city', 'NYC')
 
   const term = filters.search?.trim().replace(/[,()*%]/g, ' ').trim()
@@ -115,14 +131,17 @@ export async function getNycCaseExplorerPage(
   if (filters.dateFrom) query = query.gte('submitted_at', filters.dateFrom)
   if (filters.dateTo) query = query.lte('submitted_at', `${filters.dateTo}T23:59:59`)
 
+  // Fetch one extra row to detect a next page without an exact count.
   const from = page * pageSize
   const { data, error, count } = await query
     .order('submitted_at', { ascending: false, nullsFirst: false })
-    .range(from, from + pageSize - 1)
+    .range(from, from + pageSize)
 
   if (error) throw error
-  const rows = (data ?? []) as NycCaseRow[]
-  return { rows, total: count ?? rows.length }
+  const all = (data ?? []) as NycCaseRow[]
+  const hasMore = all.length > pageSize
+  const rows = hasMore ? all.slice(0, pageSize) : all
+  return { rows, hasMore, estimatedTotal: count ?? null }
 }
 
 /** Full detail for one case (all columns), or null if not found. */
