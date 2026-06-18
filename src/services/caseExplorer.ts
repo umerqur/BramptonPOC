@@ -225,10 +225,14 @@ export type UnifiedNycCaseDetail = {
   council_district: string | null
   address_or_location: string | null
   resolution_description: string | null
+  /** Intake channel the request came in on (phone, online, mobile, …) — a NYC source field. */
+  source_channel: string | null
   priority_score: number | null
   priority_tier: string | null
   priority_reason: string | null
   age_days: number | null
+  /** Verbatim public 311 source-record fields (location, coordinates, resolution metadata). */
+  source: OpenSourceRecord
   raw: Record<string, unknown>
 }
 
@@ -264,10 +268,12 @@ export async function getUnifiedNycCaseDetail(caseId: string): Promise<UnifiedNy
       council_district: r.council_district == null ? null : String(r.council_district),
       address_or_location: r.address_or_location == null ? null : String(r.address_or_location),
       resolution_description: r.resolution_description == null ? null : String(r.resolution_description),
+      source_channel: strOrNull(pick(r, ['source_channel', 'open_data_channel_type', 'channel', 'source'])),
       priority_score: null,
       priority_tier: null,
       priority_reason: null,
       age_days: null,
+      source: mapOpenSource(r),
       raw: r,
     }
   }
@@ -285,7 +291,11 @@ export async function getUnifiedNycCaseDetail(caseId: string): Promise<UnifiedNy
     case_id: String(r.case_id ?? id),
     source_dataset_id: r.source_dataset_id == null ? null : String(r.source_dataset_id),
     submitted_at: r.submitted_at == null ? null : String(r.submitted_at),
-    closed_at: null,
+    // The open review queue / nyc_open_service_requests can carry a closure
+    // timestamp under closed_at OR closed_date — a Closed case is no longer
+    // "open" even though it lives in the open-review source view. Mapping it
+    // (instead of hardcoding null) lets the case page render a closed timeline.
+    closed_at: strOrNull(pick(r, ['closed_at', 'closed_date'])),
     due_date: r.due_date == null ? null : String(r.due_date),
     status: r.status == null ? null : String(r.status),
     complaint_type: r.complaint_type == null ? null : String(r.complaint_type),
@@ -298,10 +308,12 @@ export async function getUnifiedNycCaseDetail(caseId: string): Promise<UnifiedNy
     council_district: r.council_district == null ? null : String(r.council_district),
     address_or_location: r.address_or_location == null ? null : String(r.address_or_location),
     resolution_description: r.resolution_description == null ? null : String(r.resolution_description),
+    source_channel: strOrNull(pick(r, ['source_channel', 'open_data_channel_type', 'channel', 'source'])),
     priority_score: r.priority_score == null ? null : Number(r.priority_score),
     priority_tier: r.priority_tier == null ? null : String(r.priority_tier),
     priority_reason: r.priority_reason == null ? null : String(r.priority_reason),
     age_days: r.age_days == null ? null : Number(r.age_days),
+    source: mapOpenSource(r),
     raw: r,
   }
 }

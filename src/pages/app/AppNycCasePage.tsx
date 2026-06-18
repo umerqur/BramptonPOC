@@ -81,6 +81,17 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
   const agency = detail.agency_name || detail.agency || detail.assigned_department || '—'
   const requestDetail = joinParts([detail.request_detail, detail.request_detail_2]) ?? '—'
   const closure = closureDurationDays(detail.submitted_at, detail.closed_at)
+  // A case is closed when the source record carries a closure timestamp OR the
+  // status is terminal — NOT based on which source view it came from. The open
+  // review queue can still hold Closed cases, so sourceType must not drive this.
+  const isClosed = !!detail.closed_at || isTerminalStatus(detail.status)
+  const coordinates = fmtCoordinates(detail.source.latitude, detail.source.longitude)
+  const crossStreets = joinParts([
+    detail.source.cross_street_1,
+    detail.source.cross_street_2,
+    detail.source.intersection_street_1,
+    detail.source.intersection_street_2,
+  ])
 
   return (
     <div className="container-page py-10">
@@ -124,6 +135,7 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
               <Field label="Status" value={detail.status} />
               <Field label="Complaint type" value={detail.complaint_type} />
               <Field label="Submitted" value={fmtDateTime(detail.submitted_at)} />
+              <Field label="Source channel" value={detail.source_channel} />
             </dl>
           </Card>
 
@@ -143,18 +155,31 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
           <Card title="Location and agency">
             <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <Field label="Location" value={detail.address_or_location} className="sm:col-span-2" />
+              <Field label="Cross streets" value={crossStreets} className="sm:col-span-2" />
+              <Field label="Location type" value={detail.source.location_type} />
+              <Field label="Address type" value={detail.source.address_type} />
+              <Field label="City" value={detail.source.city} />
+              <Field label="ZIP" value={detail.source.incident_zip} />
               <Field label="Borough" value={detail.borough} />
               <Field label="Council district" value={fmtDistrict(detail.council_district)} />
+              <Field label="Coordinates" value={coordinates} mono />
               <Field label="Agency" value={agency} />
               <Field label="Agency code" value={detail.agency} />
               <Field label="Assigned department" value={detail.assigned_department} />
             </dl>
           </Card>
 
-          {/* Resolution — only when the source record carries one. */}
-          {detail.resolution_description && (
+          {/* Resolution — only when the source record carries a description or an
+              action-update date. */}
+          {(detail.resolution_description || detail.source.resolution_action_updated_date) && (
             <Card title="Resolution">
-              <p className="text-sm leading-relaxed text-ink">{detail.resolution_description}</p>
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm">
+                <Field
+                  label="Resolution action updated"
+                  value={fmtDateTime(detail.source.resolution_action_updated_date)}
+                />
+                <Field label="Resolution description" value={detail.resolution_description} />
+              </dl>
             </Card>
           )}
         </div>
@@ -163,32 +188,34 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
         <div className="space-y-6">
           {/* Review priority — open review queue only. */}
           {isOpen && (
-            <Card title="Review priority" hint="decision support">
+            <Card title="Review priority" hint="internal decision support">
               <dl className="space-y-3 text-sm">
                 <Field label="Priority score" value={detail.priority_score == null ? null : detail.priority_score.toFixed(0)} />
                 <Field label="Priority tier" value={detail.priority_tier} />
                 <Field label="Priority reason" value={detail.priority_reason} />
               </dl>
               <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
-                Review priority is a transparent ranking aid to help staff decide what to look at first. It is not an
-                automated decision, risk prediction, or enforcement action.
+                Review priority is an internal ranking we compute to help staff decide what to look at first — it is{' '}
+                <span className="font-semibold">not</span> a field from the NYC 311 source record. It is not an automated
+                decision, risk prediction, or enforcement action.
               </p>
             </Card>
           )}
 
-          {/* Timeline */}
+          {/* Timeline — open vs. closed is decided by closure date / terminal
+              status, never by which source view the case came from. */}
           <Card title="Timeline">
             <dl className="space-y-3 text-sm">
               <Field label="Submitted" value={fmtDateTime(detail.submitted_at)} />
-              {isOpen ? (
-                <>
-                  <Field label="Due date" value={fmtDateTime(detail.due_date)} />
-                  <Field label="Age" value={detail.age_days == null ? null : `${detail.age_days} days open`} />
-                </>
-              ) : (
+              {isClosed ? (
                 <>
                   <Field label="Closed" value={fmtDateTime(detail.closed_at)} />
                   <Field label="Closure duration" value={closure == null ? null : `${closure} days`} />
+                </>
+              ) : (
+                <>
+                  <Field label="Due date" value={fmtDateTime(detail.due_date)} />
+                  <Field label="Age" value={detail.age_days == null ? null : `${detail.age_days} days open`} />
                 </>
               )}
             </dl>
@@ -351,6 +378,21 @@ function fmtDateTime(value: string | null): string | null {
   if (!value) return null
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+/** Terminal (closed-equivalent) NYC 311 statuses, lower-cased for comparison. */
+const TERMINAL_STATUSES = new Set(['closed', 'resolved', 'completed', 'cancelled', 'canceled'])
+
+/** Whether a status means the case is no longer open. */
+function isTerminalStatus(status: string | null): boolean {
+  if (!status) return false
+  return TERMINAL_STATUSES.has(status.trim().toLowerCase())
+}
+
+/** Format a lat/long pair as "lat, long", or null when either is missing. */
+function fmtCoordinates(lat: number | null, long: number | null): string | null {
+  if (lat == null || long == null) return null
+  return `${lat.toFixed(5)}, ${long.toFixed(5)}`
 }
 
 function fmtDistrict(value: string | null): string | null {
