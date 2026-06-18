@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { can, rolesAllowed } from '../../lib/roles'
-import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
+import { FIELD_OUTCOME_LABELS, formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import {
   AutomationBadge,
@@ -14,7 +14,7 @@ import {
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
-import type { DemoCase, FieldVisitOutcome, Priority } from '../../data/demoWorkflowTypes'
+import type { DemoCase, FieldVisitOutcome, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
 
 // Demo roster of by-law officers a supervisor/CSR can assign a case to.
 const DEMO_OFFICERS = [
@@ -82,6 +82,8 @@ export default function AppCaseWorkbenchPage() {
   const summary = c.summary
   const effectivePriority = c.priorityOverride ?? c.triage.recommendedPriority
   const isClosed = c.stage === 'closed'
+  const nyc = c.source.kind === 'nyc_open' ? c.source.nyc : undefined
+  const isBenchmark = c.source.kind === 'nyc_open'
 
   function note(msg: string) {
     setFlash(msg)
@@ -91,6 +93,16 @@ export default function AppCaseWorkbenchPage() {
   return (
     <div className="container-page py-10">
       <Header cases={cases} activeId={c.id} onPick={setActiveCase} />
+
+      <CaseSourceBar c={c} />
+
+      {isBenchmark && (
+        <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs leading-relaxed text-teal-900">
+          This is an <span className="font-semibold">NYC open benchmark</span> case worked through the same operational
+          lifecycle as resident intake. Source record remains unchanged. Any closure here is recorded in the Brampton POC
+          workflow layer — it does not update NYC data.
+        </div>
+      )}
 
       {isClosed && (
         <div className="mt-6 flex items-start gap-2.5 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-navy-900">
@@ -115,7 +127,14 @@ export default function AppCaseWorkbenchPage() {
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
         {/* Left: enforcement context */}
         <div className="space-y-6 lg:col-span-2">
-          <Panel title="Resident complaint" subtitle="The resident's own description of the issue, in their words">
+          <Panel
+            title={isBenchmark ? 'Reported issue' : 'Resident complaint'}
+            subtitle={
+              isBenchmark
+                ? 'Complaint type and descriptor from the NYC 311 open benchmark source record'
+                : "The resident's own description of the issue, in their words"
+            }
+          >
             {c.input.description.trim() ? (
               <p className="whitespace-pre-line text-sm leading-relaxed text-ink">{c.input.description.trim()}</p>
             ) : (
@@ -125,7 +144,11 @@ export default function AppCaseWorkbenchPage() {
             )}
           </Panel>
 
-          <ResidentAttachments caseId={c.id} variant="full" />
+          {nyc && <NycSourceRecordPanel nyc={nyc} />}
+
+          <NormalizedRecordPanel c={c} />
+
+          {!isBenchmark && <ResidentAttachments caseId={c.id} variant="full" />}
 
           <Panel title="Case summary" subtitle="Decision support for staff review">
             <p className="text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
@@ -213,6 +236,8 @@ export default function AppCaseWorkbenchPage() {
 
         {/* Right: confidence gate + staff actions */}
         <div className="space-y-6">
+          {nyc && <NycReviewPriorityPanel nyc={nyc} />}
+
           <Panel title="Review readiness" subtitle="Is the file ready for staff review?">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />
             <div
@@ -330,6 +355,11 @@ export default function AppCaseWorkbenchPage() {
                   No field visit recorded — the closure letter will be review-only and won’t claim an officer attended.
                 </p>
               )}
+              {isBenchmark && (
+                <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-[11px] leading-relaxed text-teal-800">
+                  Source record remains unchanged. This closure is recorded in the Brampton POC workflow layer.
+                </p>
+              )}
             </div>
 
             {flash && (
@@ -343,6 +373,8 @@ export default function AppCaseWorkbenchPage() {
           <FieldInvestigationPanel c={c} readOnly={isClosed} />
         </div>
       </div>
+
+      <ActionLogPanel c={c} />
 
       {isClosed ? (
         <div className="mt-6">
@@ -573,6 +605,186 @@ function Row({ label, value }: { label: string; value: string }) {
       <dt className="text-ink-subtle">{label}</dt>
       <dd className="text-right font-medium text-navy-900">{value}</dd>
     </div>
+  )
+}
+
+// Source badge styles for the three operational sources.
+const SOURCE_BADGE_STYLES: Record<DemoCase['source']['kind'], string> = {
+  resident: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200',
+  nyc_open: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200',
+  historical: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200',
+}
+
+/** A clear, source-labelled bar under the workbench header. */
+function CaseSourceBar({ c }: { c: DemoCase }) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      <span className="font-mono text-sm font-semibold text-navy-900">{c.id}</span>
+      <span className={`badge ${SOURCE_BADGE_STYLES[c.source.kind]}`}>{c.source.label}</span>
+      <span className="badge bg-slate-100 text-slate-700">{c.normalized.complaint_type ?? '—'}</span>
+      <span className="text-xs text-ink-subtle">
+        One operational workflow — resident intake and NYC open benchmark cases share this lifecycle.
+      </span>
+    </div>
+  )
+}
+
+/** Verbatim NYC 311 source record for an open benchmark case (collapsible). */
+function NycSourceRecordPanel({ nyc }: { nyc: NycBenchmarkSource }) {
+  const coords =
+    nyc.latitude != null && nyc.longitude != null ? `${nyc.latitude.toFixed(5)}, ${nyc.longitude.toFixed(5)}` : null
+  const rows: { label: string; value: string | null }[] = [
+    { label: 'Status', value: nyc.status },
+    { label: 'Complaint type', value: nyc.complaintType },
+    { label: 'Descriptor', value: nyc.descriptor },
+    { label: 'Agency', value: nyc.agency },
+    { label: 'Source channel', value: nyc.sourceChannel },
+    { label: 'Borough', value: nyc.borough },
+    { label: 'Council district', value: nyc.councilDistrict ? String(Number(nyc.councilDistrict)) : null },
+    { label: 'Location', value: nyc.location },
+    { label: 'Location type', value: nyc.locationType },
+    { label: 'Address type', value: nyc.addressType },
+    { label: 'Incident address', value: nyc.incidentAddress },
+    { label: 'Cross streets', value: nyc.crossStreets },
+    { label: 'City', value: nyc.city },
+    { label: 'ZIP', value: nyc.incidentZip },
+    { label: 'Coordinates', value: coords },
+    { label: 'Submitted', value: nyc.submittedAt ? formatDate(nyc.submittedAt) : null },
+    { label: 'Due date', value: nyc.dueDate ? formatDate(nyc.dueDate) : null },
+    { label: 'Age', value: nyc.ageDays == null ? null : `${nyc.ageDays} days` },
+    { label: 'Resolution action updated', value: nyc.resolutionActionUpdatedDate ? formatDate(nyc.resolutionActionUpdatedDate) : null },
+    { label: 'Resolution description', value: nyc.resolutionDescription },
+    { label: 'Source dataset ID / unique key', value: nyc.uniqueKey },
+  ].filter((r) => r.value != null)
+
+  return (
+    <section className="card p-5">
+      <h3 className="text-sm font-semibold text-navy-900">Source record details</h3>
+      <p className="text-xs text-ink-subtle">Verbatim public NYC 311 source record — unchanged by this workflow.</p>
+      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
+        {rows.map((r) => (
+          <div key={r.label} className="min-w-0">
+            <dt className="text-[10px] uppercase tracking-wider text-ink-subtle">{r.label}</dt>
+            <dd className="mt-0.5 break-words text-sm text-ink">{r.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+/** Review-priority signal for an NYC open benchmark case — internal decision support. */
+function NycReviewPriorityPanel({ nyc }: { nyc: NycBenchmarkSource }) {
+  return (
+    <Panel title="Review priority" subtitle="Internal decision support — not a NYC source field">
+      <dl className="space-y-1.5 text-sm">
+        <Row label="Score" value={nyc.priorityScore == null ? '—' : nyc.priorityScore.toFixed(0)} />
+        <Row label="Tier" value={nyc.priorityTier ?? '—'} />
+      </dl>
+      {nyc.priorityReason && <p className="mt-2 text-xs text-ink-muted">{nyc.priorityReason}</p>}
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+        Review priority is an internal ranking we compute to help staff decide what to look at first. It is{' '}
+        <span className="font-semibold">not</span> a field from the NYC 311 source record, and not an automated decision.
+      </p>
+    </Panel>
+  )
+}
+
+/** The shared normalized service-request record (collapsible) — same schema for every source. */
+function NormalizedRecordPanel({ c }: { c: DemoCase }) {
+  const n = c.normalized
+  const closureStatus = c.stage === 'closed' ? 'closed' : n.closure_status
+  const rows: { label: string; value: string | null }[] = [
+    { label: 'case_id', value: n.case_id },
+    { label: 'source', value: n.source },
+    { label: 'submitted_at', value: n.submitted_at ? formatDate(n.submitted_at) : null },
+    { label: 'status', value: n.status },
+    { label: 'complaint_type', value: n.complaint_type },
+    { label: 'request_detail', value: n.request_detail },
+    { label: 'location_type', value: n.location_type },
+    { label: 'address_or_location', value: n.address_or_location },
+    { label: 'ward_or_area', value: n.ward_or_area },
+    { label: 'assigned_department', value: n.assigned_department },
+    { label: 'priority_score', value: n.priority_score == null ? null : String(n.priority_score) },
+    { label: 'priority_reason', value: n.priority_reason },
+    { label: 'resolution_description', value: n.resolution_description },
+    { label: 'closure_status', value: closureStatus },
+  ]
+  return (
+    <details className="group card p-0">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-4">
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-navy-900">Normalized service request</span>
+          <span className="block text-xs text-ink-subtle">
+            The shared internal schema every source maps to — resident intake and NYC benchmark alike.
+          </span>
+        </span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </summary>
+      <div className="border-t border-slate-100 px-5 py-4">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
+          {rows.map((r) => (
+            <div key={r.label} className="min-w-0">
+              <dt className="font-mono text-[10px] uppercase tracking-wider text-ink-subtle">{r.label}</dt>
+              <dd className="mt-0.5 break-words text-sm text-ink">{r.value ?? '—'}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </details>
+  )
+}
+
+// Audit-actor badge tints for the action log.
+const ACTOR_STYLES: Record<string, string> = {
+  ai: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
+  staff: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200',
+  officer: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200',
+  resident: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
+  system: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200',
+}
+
+/** Full, chronological action log (audit trail) for the case. */
+function ActionLogPanel({ c }: { c: DemoCase }) {
+  const events = [...c.audit].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+  return (
+    <details className="group mt-6 card p-0" open>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-4">
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-navy-900">Action log</span>
+          <span className="block text-xs text-ink-subtle">
+            Every workflow action on this case, in order — decision support and human decisions alike.
+          </span>
+        </span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </summary>
+      <div className="border-t border-slate-100 px-5 py-4">
+        {events.length === 0 ? (
+          <p className="text-sm text-ink-subtle">No actions recorded yet.</p>
+        ) : (
+          <ol className="space-y-3">
+            {events.map((e) => (
+              <li key={e.id} className="flex gap-3">
+                <div className="mt-0.5 shrink-0">
+                  <span className={`badge ${ACTOR_STYLES[e.actor] ?? ACTOR_STYLES.system}`}>{e.actorLabel}</span>
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-sm font-medium text-navy-900">{e.type}</span>
+                    <span className="text-[11px] tabular-nums text-ink-subtle">{formatDateTime(e.at)}</span>
+                  </div>
+                  <p className="text-sm text-ink-muted">{e.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </details>
   )
 }
 

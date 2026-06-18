@@ -22,6 +22,7 @@ import type {
   ContactPreference,
 } from '../data/demoWorkflowTypes'
 import { runWorkflow, buildClosureDraft } from './demoWorkflowService'
+import { residentRowToNormalized } from './serviceRequest'
 import type { ResidentRequestRow } from './residentRequests'
 
 /**
@@ -129,6 +130,10 @@ export function residentRowToCase(row: ResidentRequestRow): DemoCase {
     forcedCategory: categoryForRequestType(row.request_type),
     caseId: row.case_id,
   })
+
+  // Map the resident submission onto the shared normalized service-request
+  // schema (the resident form stays friendly; the record is normalized here).
+  demoCase.normalized = residentRowToNormalized(row, demoCase.triage.recommendedDepartment)
 
   if (row.assigned_officer_name) demoCase.assignedOfficer = row.assigned_officer_name
 

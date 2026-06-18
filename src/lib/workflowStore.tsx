@@ -32,12 +32,15 @@ import {
   runWorkflow,
 } from '../services/demoWorkflowService'
 import { residentRowToCase } from '../services/residentCaseBridge'
+import { openRowToCase } from '../services/openCaseBridge'
 import type { ResidentRequestRow } from '../services/residentRequests'
+import type { OpenReviewRow } from '../services/caseExplorer'
 import { ROLE_ACTOR_NAME, canSwitchRoleForEmail, roleForEmail, type StaffRole } from './roles'
 
-// Bumped to v2 when the officer field-action model landed, so older persisted
-// cases (with the previous canned officer-claim closure drafts) are reseeded.
-const STORAGE_KEY = 'brampton-demo-workflow-v2'
+// Bumped to v3 when cases gained a `source` + normalized service-request shape
+// (unified resident intake + NYC open benchmark lifecycle), so older persisted
+// cases without those fields are reseeded rather than rendered half-populated.
+const STORAGE_KEY = 'brampton-demo-workflow-v3'
 const STAFF_NAME = 'M. Okafor (By-law Officer)'
 
 /** What an officer enters when recording a field investigation. */
@@ -69,6 +72,7 @@ type WorkflowContextValue = {
   canSwitchRole: boolean
   submitComplaint: (input: ResidentComplaintInput) => string
   ingestResidentCase: (row: ResidentRequestRow) => string
+  ingestOpenCase: (row: OpenReviewRow) => string
   setActiveCase: (id: string | null) => void
   approveRouting: (id: string) => void
   requestMoreInfo: (id: string, note?: string) => void
@@ -193,6 +197,20 @@ export function WorkflowProvider({
         }
       }
       const next = residentRowToCase(row)
+      return { ...s, cases: [next, ...s.cases], activeCaseId: row.case_id }
+    })
+    return row.case_id
+  }, [])
+
+  // Bridge an NYC open benchmark case into the workbench. Reuses the case if it
+  // has already been opened (so staff actions / closure decisions are preserved),
+  // otherwise converts the public 311 source record into a workbench case. The
+  // verbatim NYC record is carried on the case; nothing is written back to NYC.
+  const ingestOpenCase = useCallback((row: OpenReviewRow): string => {
+    setState((s) => {
+      const existing = s.cases.find((c) => c.id === row.case_id)
+      if (existing) return { ...s, activeCaseId: row.case_id }
+      const next = openRowToCase(row)
       return { ...s, cases: [next, ...s.cases], activeCaseId: row.case_id }
     })
     return row.case_id
@@ -408,6 +426,7 @@ export function WorkflowProvider({
     canSwitchRole,
     submitComplaint,
     ingestResidentCase,
+    ingestOpenCase,
     setActiveCase,
     approveRouting,
     requestMoreInfo,

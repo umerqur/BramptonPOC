@@ -29,6 +29,7 @@ import type {
   SupervisorMetrics,
   WorkflowStage,
 } from '../data/demoWorkflowTypes'
+import { CASE_SOURCE_LABELS } from '../data/demoWorkflowTypes'
 
 // ---------------------------------------------------------------------------
 // Small deterministic helpers
@@ -519,6 +520,25 @@ export function runWorkflow(
     id,
     createdAt: now,
     stage: triage.recommendedStage,
+    // Synthetic / resident-intake origin by default. The NYC open-benchmark
+    // bridge overrides `source` and `normalized` for benchmark cases.
+    source: { kind: 'resident', label: CASE_SOURCE_LABELS.resident },
+    normalized: {
+      case_id: id,
+      source: 'resident_intake',
+      submitted_at: input.submittedAt,
+      status: triage.recommendedStage,
+      complaint_type: triage.category,
+      request_detail: input.description.trim() || null,
+      location_type: null,
+      address_or_location: input.location.trim() || null,
+      ward_or_area: null,
+      assigned_department: triage.recommendedDepartment,
+      priority_score: null,
+      priority_reason: null,
+      resolution_description: null,
+      closure_status: triage.recommendedStage === 'closed' ? 'closed' : 'open',
+    },
     input,
     triage,
     context,

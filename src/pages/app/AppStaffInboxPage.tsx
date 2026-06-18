@@ -77,7 +77,7 @@ type OpenState = { rows: WorkQueueRow[]; hasMore: boolean; loading: boolean; err
 const OPEN_BENCHMARK_LIMIT = 50
 
 export default function AppStaffInboxPage() {
-  const { ingestResidentCase, role } = useWorkflow()
+  const { ingestResidentCase, ingestOpenCase, role } = useWorkflow()
   const navigate = useNavigate()
 
   const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
@@ -85,7 +85,6 @@ export default function AppStaffInboxPage() {
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
   const [tab, setTab] = useState<WorkTab>('all')
   const [assigningId, setAssigningId] = useState<string | null>(null)
-  const [drawerRow, setDrawerRow] = useState<OpenReviewRow | null>(null)
   const canAssign = can(role, 'assignOfficer')
 
   const load = useCallback(() => {
@@ -157,6 +156,14 @@ export default function AppStaffInboxPage() {
     navigate(`/app/closure?case=${encodeURIComponent(row.case_id)}`)
   }
 
+  // NYC open benchmark cases enter the SAME workbench lifecycle as resident
+  // intake — no dead-end side panel. We bridge the public 311 source record into
+  // a workbench case, then open the Case Workbench route.
+  function openBenchmarkCase(row: OpenReviewRow) {
+    ingestOpenCase(row)
+    navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
+  }
+
   // Supervisor/coordinator action: explicit human assignment to the By-law
   // Officer (never automated).
   async function assignToOfficer(row: ResidentRequestRow) {
@@ -172,11 +179,11 @@ export default function AppStaffInboxPage() {
     }
   }
 
-  // Open a normalized row: resident rows go into the workbench; NYC benchmark
-  // rows open a read-only review drawer (deep analytics stay in Insights).
+  // Open a normalized row into the unified workbench — resident intake and NYC
+  // open benchmark cases both enter the same Case Workbench lifecycle.
   function openWorkRow(row: WorkQueueRow) {
     if (row.source_type === 'resident' && row.resident) openResidentCase(row.resident)
-    else if (row.source_type === 'nyc_open' && row.open) setDrawerRow(row.open)
+    else if (row.source_type === 'nyc_open' && row.open) openBenchmarkCase(row.open)
   }
 
   // By-law Officers do not see the citywide Work Queue — send them to their console.
@@ -235,7 +242,7 @@ export default function AppStaffInboxPage() {
             onOpenClosureReview={openClosureReview}
           />
         ) : tab === 'open' ? (
-          <OpenBenchmarkView state={open} onView={(row) => row.open && setDrawerRow(row.open)} />
+          <OpenBenchmarkView state={open} onView={(row) => row.open && openBenchmarkCase(row.open)} />
         ) : (
           <NormalizedListView
             header={
@@ -264,8 +271,6 @@ export default function AppStaffInboxPage() {
           />
         )}
       </div>
-
-      <OpenBenchmarkDrawer row={drawerRow} onClose={() => setDrawerRow(null)} />
 
       <GuardrailFooter />
     </div>
@@ -444,7 +449,7 @@ function WorkRowCard({
             </button>
           )}
           <button onClick={onOpen} className="btn-primary text-sm py-1.5 px-3">
-            {isResident ? 'Open case →' : 'View details'}
+            Open case →
           </button>
         </div>
       </div>
@@ -493,110 +498,6 @@ function OpenBenchmarkView({ state, onView }: { state: OpenState; onView: (row: 
           </li>
         ))}
       </ul>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// NYC open benchmark detail drawer (read-only review)
-// ---------------------------------------------------------------------------
-
-function OpenBenchmarkDrawer({ row, onClose }: { row: OpenReviewRow | null; onClose: () => void }) {
-  useEffect(() => {
-    if (!row) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [row, onClose])
-
-  if (!row) return null
-
-  const src = row.source
-  const latLng =
-    src.latitude != null && src.longitude != null ? `${src.latitude.toFixed(5)}, ${src.longitude.toFixed(5)}` : null
-  const sourceRows: { label: string; value: string | null }[] = [
-    { label: 'Source dataset ID / unique key', value: src.unique_key },
-    { label: 'Location type', value: src.location_type },
-    { label: 'ZIP', value: src.incident_zip },
-    { label: 'Incident address', value: src.incident_address },
-    { label: 'City', value: src.city },
-    { label: 'Resolution description', value: src.resolution_description },
-    { label: 'Latitude / longitude', value: latLng },
-  ].filter((r) => r.value != null)
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-navy-900/40" role="dialog" aria-modal="true" aria-label={`Open benchmark case ${row.case_id}`} onClick={onClose}>
-      <div className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
-          <div className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">NYC open benchmark case</div>
-            <h3 className="truncate text-sm font-semibold text-navy-900">{row.case_id}</h3>
-          </div>
-          <button type="button" onClick={onClose} className="btn-secondary text-xs py-1.5 px-3">Close</button>
-        </div>
-
-        <div className="overflow-y-auto px-5 py-4 space-y-4">
-          <dl className="space-y-2.5">
-            <DrawerRow label="Submitted" value={row.submitted_at ? formatDate(row.submitted_at) : '—'} />
-            <DrawerRow label="Status" value={row.status ?? '—'} />
-            <DrawerRow label="Complaint type" value={row.complaint_type ?? '—'} />
-            <DrawerRow label="Descriptor" value={row.descriptor ?? '—'} />
-            <DrawerRow label="Agency" value={row.agency ?? '—'} />
-            <DrawerRow label="Borough" value={row.borough ?? '—'} />
-            <DrawerRow label="Council district" value={row.council_district ? String(Number(row.council_district)) : '—'} />
-            <DrawerRow label="Location" value={row.address_or_location ?? '—'} />
-            <DrawerRow label="Due date" value={row.due_date ? formatDate(row.due_date) : '—'} />
-            <DrawerRow label="Age" value={row.age_days == null ? '—' : `${row.age_days} days`} />
-          </dl>
-
-          {/* Review priority — decision support, not an automated decision. */}
-          <div className="rounded-lg border border-accent-200 bg-accent-50/50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-wide text-accent-800">Review priority</div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-              <DrawerRow label="Score" value={row.priority_score == null ? '—' : row.priority_score.toFixed(0)} />
-              <DrawerRow label="Tier" value={row.priority_tier ?? '—'} />
-            </div>
-            {row.priority_reason && <DrawerRow label="Reason" value={row.priority_reason} />}
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
-              {REVIEW_PRIORITY_EXPLAINER} Decision support — staff review and decide.
-            </p>
-          </div>
-
-          {sourceRows.length > 0 && (
-            <details className="group rounded-lg border border-slate-200 bg-slate-50/60">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-2.5">
-                <span className="min-w-0">
-                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-navy-900">Source record details</span>
-                  <span className="block text-[11px] text-ink-subtle">Public service request source data</span>
-                </span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180">
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </summary>
-              <div className="border-t border-slate-200 px-3.5 py-3">
-                <dl className="space-y-2.5">
-                  {sourceRows.map((r) => (
-                    <DrawerRow key={r.label} label={r.label} value={r.value as string} />
-                  ))}
-                </dl>
-              </div>
-            </details>
-          )}
-        </div>
-
-        <div className="border-t border-slate-100 px-5 py-2.5 text-[11px] text-ink-subtle">
-          NYC open benchmark — analytics drilldown lives in Insights · Open Cases.
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function DrawerRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 break-words text-sm text-ink">{value}</dd>
     </div>
   )
 }

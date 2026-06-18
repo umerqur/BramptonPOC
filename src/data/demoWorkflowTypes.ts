@@ -155,6 +155,10 @@ export type DemoCase = {
   id: string
   createdAt: string
   stage: WorkflowStage
+  /** Where this case came from (resident intake vs. NYC open benchmark). */
+  source: CaseSource
+  /** The case projected onto the shared normalized service-request schema. */
+  normalized: NormalizedServiceRequest
   input: ResidentComplaintInput
   triage: AiTriageResult
   context: EnforcementContext
@@ -170,6 +174,95 @@ export type DemoCase = {
   closureMessage: string | null
   approvedBy: string | null
   approvedAt: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Case source + normalized service-request schema
+// ---------------------------------------------------------------------------
+//
+// The Work Queue runs ONE operational lifecycle over two live sources. Every
+// case carries a `source` so the workbench can label it honestly, and a
+// `normalized` projection so resident intake and NYC open benchmark cases share
+// the same internal service-request shape regardless of where they came from.
+
+/** Where an operational case originated. */
+export type CaseSourceKind = 'resident' | 'nyc_open' | 'historical'
+
+/** Plain, operator-facing source labels (also used as the source badge text). */
+export const CASE_SOURCE_LABELS: Record<CaseSourceKind, string> = {
+  resident: 'Resident intake',
+  nyc_open: 'NYC open benchmark',
+  historical: 'Historical NYC source',
+}
+
+/**
+ * Verbatim public NYC 311 source-record fields for an open benchmark case, plus
+ * the queue's review-priority signal. Review priority is INTERNAL decision
+ * support, not a field of the NYC source record.
+ */
+export type NycBenchmarkSource = {
+  caseId: string
+  status: string | null
+  complaintType: string | null
+  descriptor: string | null
+  agency: string | null
+  borough: string | null
+  councilDistrict: string | null
+  location: string | null
+  submittedAt: string | null
+  dueDate: string | null
+  ageDays: number | null
+  sourceChannel: string | null
+  // Internal decision support (NOT a NYC source field).
+  priorityScore: number | null
+  priorityTier: string | null
+  priorityReason: string | null
+  // Verbatim source record.
+  uniqueKey: string | null
+  locationType: string | null
+  incidentZip: string | null
+  incidentAddress: string | null
+  city: string | null
+  addressType: string | null
+  crossStreets: string | null
+  resolutionDescription: string | null
+  resolutionActionUpdatedDate: string | null
+  latitude: number | null
+  longitude: number | null
+}
+
+/** The source a case came from, with the verbatim record for NYC benchmark cases. */
+export type CaseSource = {
+  kind: CaseSourceKind
+  label: string
+  /** Present only for NYC open benchmark cases. */
+  nyc?: NycBenchmarkSource
+}
+
+/** Whether a normalized service request is still open or has been closed. */
+export type ClosureStatus = 'open' | 'closed'
+
+/**
+ * The single normalized service-request schema every operational case maps to,
+ * regardless of source. Resident intake is mapped into this shape internally
+ * (the resident form stays resident-friendly); NYC open benchmark and historical
+ * NYC records map into the same fields.
+ */
+export type NormalizedServiceRequest = {
+  case_id: string
+  source: 'resident_intake' | 'nyc_open_benchmark' | 'historical_nyc'
+  submitted_at: string | null
+  status: string | null
+  complaint_type: string | null
+  request_detail: string | null
+  location_type: string | null
+  address_or_location: string | null
+  ward_or_area: string | null
+  assigned_department: string | null
+  priority_score: number | null
+  priority_reason: string | null
+  resolution_description: string | null
+  closure_status: ClosureStatus
 }
 
 /** A ready-to-load realistic sample complaint for the intake demo. */

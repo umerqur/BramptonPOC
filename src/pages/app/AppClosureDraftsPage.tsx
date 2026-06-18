@@ -143,10 +143,20 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <AutomationBadge kind="review" />
         <AutomationBadge kind="approval" />
+        <span className={`badge ${c.source.kind === 'nyc_open' ? 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200' : 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200'}`}>
+          {c.source.label}
+        </span>
         <span className="text-xs text-ink-subtle">
           Assembled from approved templates and the recorded case facts. Staff review, edit, and approve.
         </span>
       </div>
+
+      {c.source.kind === 'nyc_open' && (
+        <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-2.5 text-xs text-teal-900">
+          <span className="font-semibold">NYC open benchmark closure.</span> Source record remains unchanged. This
+          closure is recorded in the Brampton POC workflow layer — it does not update NYC data.
+        </div>
+      )}
 
       {/* What the letter is actually based on — a recorded field outcome, or a
           review-only closure with no officer claim. */}
@@ -300,6 +310,13 @@ function ResidentUpdateView({
             : 'Approved by a human. Case closed and recorded in the audit trail.'}
         </span>
       </div>
+
+      {c.source.kind === 'nyc_open' && (
+        <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-2.5 text-xs text-teal-900">
+          <span className="font-semibold">NYC open benchmark closure.</span> Source record remains unchanged. This
+          closure is recorded in the Brampton POC workflow layer — it does not update NYC data.
+        </div>
+      )}
 
       <ResidentEmailNotice sendResult={sendResult} />
 
