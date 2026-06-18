@@ -72,7 +72,7 @@ const TIER_STYLES: Record<ReviewPriorityTier, string> = {
 }
 
 type ResidentState = { rows: ResidentRequestRow[]; loading: boolean; error: string | null }
-type OpenState = { rows: WorkQueueRow[]; total: number; loading: boolean; error: string | null }
+type OpenState = { rows: WorkQueueRow[]; hasMore: boolean; loading: boolean; error: string | null }
 
 const OPEN_BENCHMARK_LIMIT = 50
 
@@ -81,7 +81,7 @@ export default function AppStaffInboxPage() {
   const navigate = useNavigate()
 
   const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
-  const [open, setOpen] = useState<OpenState>({ rows: [], total: 0, loading: true, error: null })
+  const [open, setOpen] = useState<OpenState>({ rows: [], hasMore: false, loading: true, error: null })
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
   const [tab, setTab] = useState<WorkTab>('all')
   const [assigningId, setAssigningId] = useState<string | null>(null)
@@ -114,10 +114,10 @@ export default function AppStaffInboxPage() {
     // NYC open benchmark cases — graceful "not loaded" if the open view is absent.
     setOpen((s) => ({ ...s, loading: true, error: null }))
     loadOpenBenchmarkWorkRows(OPEN_BENCHMARK_LIMIT)
-      .then(({ rows, total }) => setOpen({ rows, total, loading: false, error: null }))
+      .then(({ rows, hasMore }) => setOpen({ rows, hasMore, loading: false, error: null }))
       .catch((err: unknown) => {
         console.error('Failed to load NYC open benchmark cases:', err)
-        setOpen({ rows: [], total: 0, loading: false, error: sectionError(err) })
+        setOpen({ rows: [], hasMore: false, loading: false, error: sectionError(err) })
       })
   }, [])
 
@@ -479,7 +479,8 @@ function OpenBenchmarkView({ state, onView }: { state: OpenState; onView: (row: 
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-subtle">
         <span>
-          Showing the top {state.rows.length} of {state.total.toLocaleString()} open benchmark cases by review priority.
+          Showing the top {state.rows.length}
+          {state.hasMore ? '+' : ''} open benchmark cases by review priority.
         </span>
         <Link to="/app/insights" className="font-medium text-accent-700 hover:text-accent-900">
           Open in Insights · Open Cases →

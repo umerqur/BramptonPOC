@@ -986,7 +986,7 @@ function OpenCasesQueue() {
   const [mode, setMode] = useState<QueueMode>('priority')
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<OpenReviewRow[]>([])
-  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [options, setOptions] = useState<OpenQueueOptions | null>(null)
@@ -1011,21 +1011,21 @@ function OpenCasesQueue() {
     setError(null)
     const load =
       mode === 'diversified'
-        ? getNycOpenQueueDiversified(filters, DIVERSIFIED_SIZE).then((r) => ({ rows: r, total: r.length }))
+        ? getNycOpenQueueDiversified(filters, DIVERSIFIED_SIZE).then((r) => ({ rows: r, hasMore: false }))
         : getNycOpenQueuePage(filters, page, OPEN_PAGE_SIZE)
     load
       .then((res) => {
         if (!live) return
         // Priority mode appends on "load more"; diversified replaces.
         setRows((prev) => (mode === 'priority' && page > 0 ? [...prev, ...res.rows] : res.rows))
-        setTotal(res.total)
+        setHasMore(res.hasMore)
       })
       .catch((err: unknown) => {
         if (!live) return
         console.error('Open queue load failed:', err)
         setError(errorMessage(err))
         setRows([])
-        setTotal(0)
+        setHasMore(false)
       })
       .finally(() => live && setLoading(false))
     return () => {
@@ -1059,7 +1059,7 @@ function OpenCasesQueue() {
     )
   }
 
-  const hasMore = mode === 'priority' && rows.length < total
+  const showLoadMore = mode === 'priority' && hasMore
 
   return (
     <div className="mt-6 space-y-6">
@@ -1111,7 +1111,7 @@ function OpenCasesQueue() {
               ? 'Loading…'
               : mode === 'diversified'
                 ? `Showing ${fmtInt(rows.length)} cases — varied complaint types, priority-ranked`
-                : `Showing ${fmtInt(rows.length)} of ${fmtInt(total)} open cases`}
+                : `Showing ${fmtInt(rows.length)} open cases${hasMore ? '+' : ''}`}
           </span>
           {Object.keys(filters).length > 0 && (
             <button type="button" onClick={() => setFilters({})} className="font-medium text-accent-700 hover:text-accent-900">
@@ -1144,7 +1144,7 @@ function OpenCasesQueue() {
           />
         )}
 
-        {hasMore && (
+        {showLoadMore && (
           <div className="mt-4 flex justify-center">
             <button type="button" disabled={loading} onClick={() => setPage((p) => p + 1)} className="btn-secondary text-xs py-1.5 px-4 disabled:opacity-50">
               {loading ? 'Loading…' : 'Load more'}
