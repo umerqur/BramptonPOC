@@ -169,19 +169,55 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
             </dl>
           </Card>
 
-          {/* Resolution — only when the source record carries a description or an
-              action-update date. */}
-          {(detail.resolution_description || detail.source.resolution_action_updated_date) && (
-            <Card title="Resolution">
-              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm">
-                <Field
-                  label="Resolution action updated"
-                  value={fmtDateTime(detail.source.resolution_action_updated_date)}
-                />
-                <Field label="Resolution description" value={detail.resolution_description} />
-              </dl>
-            </Card>
-          )}
+          {/* NYC source response — only when the source record carries a response
+              text or an action-update date. resolution_description is NOT a
+              reliable closure indicator in the open NYC dataset (most OPEN cases
+              also carry one), so it is framed as a source response / agency
+              update — never as closure evidence. The terminal/closed branch
+              below frames it as the final source response and shows the closed
+              date; closure of a POC workflow case is tracked separately. */}
+          {(detail.resolution_description || detail.source.resolution_action_updated_date) &&
+            (isClosed ? (
+              <Card title="Closure outcome">
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                  <Field
+                    label="Final source response"
+                    value={detail.resolution_description}
+                    className="sm:col-span-2"
+                  />
+                  <Field
+                    label="Closed date"
+                    value={
+                      detail.closed_at
+                        ? fmtDateTime(detail.closed_at)
+                        : 'Closed date not provided by source record.'
+                    }
+                  />
+                  <Field
+                    label="Resolution action updated"
+                    value={fmtDateTime(detail.source.resolution_action_updated_date)}
+                  />
+                </dl>
+              </Card>
+            ) : (
+              <Card title="NYC source response">
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                  <Field
+                    label="Source response text"
+                    value={detail.resolution_description}
+                    className="sm:col-span-2"
+                  />
+                  <Field
+                    label="Resolution action updated"
+                    value={fmtDateTime(detail.source.resolution_action_updated_date)}
+                  />
+                </dl>
+                <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
+                  This is the public response or agency update from the NYC 311 source record. It does not mean the case
+                  is closed.
+                </p>
+              </Card>
+            ))}
         </div>
 
         {/* Right column */}
