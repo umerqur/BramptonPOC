@@ -223,9 +223,9 @@ export function mapOpenToWorkRow(row: OpenReviewRow): WorkQueueRow {
  * Reads public.v_nyc_open_review_queue; throws if that view is not loaded so the
  * caller can show a clear "Open benchmark queue not loaded" state — never fake data.
  */
-export async function loadOpenBenchmarkWorkRows(limit = 50): Promise<{ rows: WorkQueueRow[]; total: number }> {
+export async function loadOpenBenchmarkWorkRows(limit = 50): Promise<{ rows: WorkQueueRow[]; hasMore: boolean }> {
   const page = await getNycOpenQueuePage({}, 0, limit)
-  return { rows: page.rows.map(mapOpenToWorkRow), total: page.total }
+  return { rows: page.rows.map(mapOpenToWorkRow), hasMore: page.hasMore }
 }
 
 /**

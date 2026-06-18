@@ -486,7 +486,7 @@ export type OpenQueueFilters = {
   status?: string
 }
 
-export type OpenQueuePage = { rows: OpenReviewRow[]; total: number }
+export type OpenQueuePage = { rows: OpenReviewRow[]; hasMore: boolean }
 
 /** Apply the shared open-queue filters to a PostgREST query builder. */
 function applyOpenFilters<T>(query: T, filters: OpenQueueFilters): T {
@@ -513,9 +513,14 @@ function applyOpenFilters<T>(query: T, filters: OpenQueueFilters): T {
 /**
  * One filtered, paginated page of the open NYC review queue, sorted by review
  * priority (highest first), from public.v_nyc_open_review_queue. `page` is
- * zero-based. Returns the rows plus the exact total matching the filters.
- * Throws if the view does not exist yet so the UI can show a clear
- * "open cases not loaded" notice (no fake data).
+ * zero-based.
+ *
+ * IMPORTANT — no row count. Asking PostgREST for `count: 'exact'` forces a full
+ * count over the filtered queue on every page load, which (like the Case
+ * Explorer) can blow the Postgres statement timeout (57014). Instead we fetch
+ * pageSize + 1 rows so we know whether another page exists, then trim back to
+ * pageSize — mirroring getNycCaseExplorerPage. Throws if the view does not exist
+ * yet so the UI can show a clear "open cases not loaded" notice (no fake data).
  */
 export async function getNycOpenQueuePage(
   filters: OpenQueueFilters = {},
@@ -523,15 +528,23 @@ export async function getNycOpenQueuePage(
   pageSize = 25,
 ): Promise<OpenQueuePage> {
   const client = requireClient()
-  let query = client.from(OPEN_QUEUE_VIEW).select('*', { count: 'exact' })
+  let query = client.from(OPEN_QUEUE_VIEW).select('*')
   query = applyOpenFilters(query, filters)
+
   const from = page * pageSize
-  const { data, error, count } = await query
+  const to = from + pageSize
+
+  const { data, error } = await query
     .order('priority_score', { ascending: false, nullsFirst: false })
-    .range(from, from + pageSize - 1)
+    .range(from, to)
+
   if (error) throw error
-  const rows = ((data ?? []) as Record<string, unknown>[]).map(mapOpenRow)
-  return { rows, total: count ?? rows.length }
+
+  const raw = (data ?? []) as Record<string, unknown>[]
+  return {
+    rows: raw.slice(0, pageSize).map(mapOpenRow),
+    hasMore: raw.length > pageSize,
+  }
 }
 
 /**
