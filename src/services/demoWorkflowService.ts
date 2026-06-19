@@ -30,6 +30,7 @@ import type {
   WorkflowStage,
 } from '../data/demoWorkflowTypes'
 import { CASE_SOURCE_LABELS } from '../data/demoWorkflowTypes'
+import { DEMO_OFFICER } from '../lib/roles'
 
 // ---------------------------------------------------------------------------
 // Small deterministic helpers
@@ -684,7 +685,7 @@ export function buildSeedCases(): DemoCase[] {
   //    closure response approved that reflects what the officer actually did.
   const closed = runWorkflowAt(SEED_CLOSED_INPUT, daysAgo(2))
   if (closed.draft) {
-    const officerName = 'R. Singh (By-law Officer)'
+    const officerName = DEMO_OFFICER.name
     const assignedAt = addSeconds(closed.createdAt, 200)
     const visitedAt = addSeconds(closed.createdAt, 480)
     const fieldAction: OfficerFieldAction = {

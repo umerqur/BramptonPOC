@@ -8,12 +8,64 @@ import {
   getResidentRequests,
   type ResidentRequestRow,
 } from '../../services/residentRequests'
+import type { DemoCase } from '../../data/demoWorkflowTypes'
 
 // Officer Field Console — the By-law Officer's only landing surface. It shows
 // ONLY cases a supervisor has assigned to this officer (never the citywide Work
-// Queue and never supervisor Insights). Cases and field outcomes are read from
-// the shared Supabase resident_service_requests table so the supervisor's
-// assignment is visible to the officer.
+// Queue and never supervisor Insights). It draws from BOTH:
+//   a. Supabase resident_service_requests assigned to DEMO_OFFICER.email
+//      (resident intake — the existing flow, unchanged), and
+//   b. Local workflow DemoCase records assigned to DEMO_OFFICER.name, which is
+//      how NYC open benchmark cases assigned in the Workbench reach the officer
+//      (they live only in the local workflow store, not in Supabase).
+
+// One normalized officer work item, regardless of which source it came from.
+type OfficerItem = {
+  caseId: string
+  complaintType: string
+  location: string
+  statusLabel: string
+  assignedAt: string | null
+  fieldVisitCompleted: boolean
+  followUpRequired: boolean
+  isClosed: boolean
+  /** Field outcome recorded and awaiting supervisor closure review. */
+  inReview: boolean
+  source: 'resident' | 'nyc_open'
+}
+
+function residentToItem(row: ResidentRequestRow): OfficerItem {
+  return {
+    caseId: row.case_id,
+    complaintType: row.request_type,
+    location: [row.location, row.city].filter(Boolean).join(', '),
+    statusLabel: STATUS_LABELS[row.status],
+    assignedAt: row.assigned_at,
+    fieldVisitCompleted: row.field_visit_completed,
+    followUpRequired: row.field_follow_up_required,
+    isClosed: row.status === 'closed',
+    inReview: row.field_visit_completed && row.status === 'in_review',
+    source: 'resident',
+  }
+}
+
+function localCaseToItem(c: DemoCase): OfficerItem {
+  const recorded = Boolean(c.fieldAction)
+  const isClosed = c.stage === 'closed'
+  const assignedAt = c.decisions.find((d) => d.action.startsWith('Assigned'))?.at ?? null
+  return {
+    caseId: c.id,
+    complaintType: c.normalized.complaint_type ?? c.triage.category,
+    location: c.input.location,
+    statusLabel: isClosed ? 'Closed' : recorded ? 'Field outcome recorded' : 'Assigned',
+    assignedAt,
+    fieldVisitCompleted: recorded,
+    followUpRequired: c.fieldAction?.followUpRequired ?? false,
+    isClosed,
+    inReview: recorded && !isClosed,
+    source: 'nyc_open',
+  }
+}
 
 type OfficerTab = 'assigned' | 'due_today' | 'in_review' | 'follow_up' | 'completed'
 
@@ -35,7 +87,7 @@ function isToday(iso: string | null): boolean {
 }
 
 export default function AppOfficerConsolePage() {
-  const { role, userEmail } = useWorkflow()
+  const { role, userEmail, cases } = useWorkflow()
   const [rows, setRows] = useState<ResidentRequestRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<OfficerTab>('assigned')
@@ -60,17 +112,28 @@ export default function AppOfficerConsolePage() {
     load()
   }, [load])
 
+  // NYC open benchmark cases assigned to Officer Oakley live only in the local
+  // workflow store — surface them alongside the Supabase resident cases.
+  const localItems = useMemo(
+    () =>
+      cases
+        .filter((c) => c.source.kind === 'nyc_open' && c.assignedOfficer === DEMO_OFFICER.name)
+        .map(localCaseToItem),
+    [cases],
+  )
+
+  const items = useMemo(() => [...(rows ?? []).map(residentToItem), ...localItems], [rows, localItems])
+
   const groups = useMemo(() => {
-    const mine = rows ?? []
-    const open = mine.filter((r) => r.status !== 'closed')
+    const open = items.filter((i) => !i.isClosed)
     return {
-      assigned: open.filter((r) => !r.field_visit_completed),
-      due_today: open.filter((r) => !r.field_visit_completed && isToday(r.assigned_at)),
-      in_review: mine.filter((r) => r.field_visit_completed && r.status === 'in_review'),
-      follow_up: mine.filter((r) => r.field_follow_up_required),
-      completed: mine.filter((r) => r.field_visit_completed),
-    } satisfies Record<OfficerTab, ResidentRequestRow[]>
-  }, [rows])
+      assigned: open.filter((i) => !i.fieldVisitCompleted),
+      due_today: open.filter((i) => !i.fieldVisitCompleted && isToday(i.assignedAt)),
+      in_review: items.filter((i) => i.inReview),
+      follow_up: items.filter((i) => i.followUpRequired),
+      completed: items.filter((i) => i.fieldVisitCompleted),
+    } satisfies Record<OfficerTab, OfficerItem[]>
+  }, [items])
 
   // Supervisors/coordinators are not meant to live here; send them to the queue.
   if (role !== 'officer') return <Navigate to="/app" replace />
@@ -122,15 +185,15 @@ export default function AppOfficerConsolePage() {
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">{error}</div>
         ) : rows === null ? (
           <div className="card p-8 text-center text-sm text-ink-subtle">Loading your assigned cases…</div>
-        ) : (rows ?? []).length === 0 ? (
+        ) : items.length === 0 ? (
           <EmptyState />
         ) : visible.length === 0 ? (
           <div className="card p-8 text-center text-sm text-ink-subtle">No cases in this list right now.</div>
         ) : (
           <ul className="space-y-4">
-            {visible.map((row) => (
-              <li key={row.case_id}>
-                <OfficerCaseCard row={row} />
+            {visible.map((item) => (
+              <li key={item.caseId}>
+                <OfficerCaseCard item={item} />
               </li>
             ))}
           </ul>
@@ -140,35 +203,38 @@ export default function AppOfficerConsolePage() {
   )
 }
 
-function OfficerCaseCard({ row }: { row: ResidentRequestRow }) {
+function OfficerCaseCard({ item }: { item: OfficerItem }) {
   return (
     <Link
-      to={`/app/field/${encodeURIComponent(row.case_id)}`}
+      to={`/app/field/${encodeURIComponent(item.caseId)}`}
       className="card block p-5 transition hover:border-accent-300 hover:shadow-sm"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-navy-900">{row.case_id}</span>
-            <span className="badge bg-slate-100 text-slate-700">{STATUS_LABELS[row.status]}</span>
-            <span className="badge bg-slate-100 text-slate-700">{row.request_type}</span>
-            {row.field_follow_up_required && (
+            <span className="font-semibold text-navy-900">{item.caseId}</span>
+            <span className="badge bg-slate-100 text-slate-700">{item.statusLabel}</span>
+            <span className="badge bg-slate-100 text-slate-700">{item.complaintType}</span>
+            {item.source === 'nyc_open' && (
+              <span className="badge bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200">NYC open benchmark</span>
+            )}
+            {item.followUpRequired && (
               <span className="badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200">Follow-up</span>
             )}
-            {row.field_visit_completed && (
+            {item.fieldVisitCompleted && (
               <span className="badge bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200">
                 Field outcome recorded
               </span>
             )}
           </div>
-          <div className="mt-1 text-sm text-ink-muted">{[row.location, row.city].filter(Boolean).join(', ')}</div>
+          <div className="mt-1 text-sm text-ink-muted">{item.location || 'Location not provided'}</div>
         </div>
         <span className="shrink-0 text-xs text-ink-subtle tabular-nums">
-          Assigned {row.assigned_at ? formatDateTime(row.assigned_at) : '—'}
+          Assigned {item.assignedAt ? formatDateTime(item.assignedAt) : '—'}
         </span>
       </div>
       <div className="mt-3 text-sm font-semibold text-accent-600">
-        {row.field_visit_completed ? 'View field outcome →' : 'Open case & record field outcome →'}
+        {item.fieldVisitCompleted ? 'View field outcome →' : 'Open case & record field outcome →'}
       </div>
     </Link>
   )

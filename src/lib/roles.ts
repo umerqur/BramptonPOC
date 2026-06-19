@@ -83,7 +83,10 @@ const PERMISSIONS: Record<RoleAction, StaffRole[]> = {
   // override priority, prepare the closure draft. Officers cannot do these.
   manageCase: ['supervisor', 'csr'],
   assignOfficer: ['supervisor', 'csr'],
-  recordFieldAction: ['officer', 'supervisor'],
+  // Recording a field outcome is the By-law Officer's job only. A supervisor
+  // assigns and approves closure — they never record field outcomes as the
+  // officer. The officer records from the Officer Field Console.
+  recordFieldAction: ['officer'],
   approveClosure: ['supervisor'],
 }
 

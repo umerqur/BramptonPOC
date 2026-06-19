@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
-import { useWorkflow } from '../../lib/workflowStore'
-import { formatDateTime } from '../../services/demoWorkflowService'
+import { useWorkflow, type FieldActionInput } from '../../lib/workflowStore'
+import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import type { DemoCase, FieldVisitOutcome } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
   getResidentRequestByCaseId,
@@ -12,15 +13,41 @@ import {
   type ResidentRequestRow,
 } from '../../services/residentRequests'
 
-// Officer Case — the focused, officer-only view of one assigned case. Read-only
-// context the officer needs (address, resident complaint, attachments, complaint
-// type, assignment notes, routing recommendation, priority) plus the field
-// outcome the officer records. Recording the outcome feeds closure review; a
-// supervisor still approves the final closure. Closed cases are read only.
+// Officer Case — the focused, officer-only view of one assigned case. It supports
+// BOTH sources the officer can be assigned:
+//   * Local workflow DemoCase records (NYC open benchmark cases assigned in the
+//     Workbench) — checked first; the officer records the field outcome via the
+//     in-browser workflow store (recordFieldAction).
+//   * Supabase resident_service_requests — the existing resident intake flow,
+//     unchanged: the officer records the outcome via recordResidentFieldOutcome.
+// Recording the outcome feeds closure review; a supervisor still approves the
+// final closure. Closed cases are read only.
+
+// Field outcomes the officer can record on a local (NYC benchmark) case, with
+// which ones issue a reference number.
+const OUTCOME_ORDER: FieldVisitOutcome[] = ['no_violation', 'notice_issued', 'ticket_issued', 'resolved']
+const OUTCOME_NEEDS_REFERENCE: Record<FieldVisitOutcome, boolean> = {
+  no_violation: false,
+  notice_issued: true,
+  ticket_issued: true,
+  resolved: false,
+}
 
 export default function AppOfficerCasePage() {
   const { caseId = '' } = useParams()
-  const { role } = useWorkflow()
+  const { role, cases } = useWorkflow()
+
+  // Officers only.
+  if (role !== 'officer') return <Navigate to="/app" replace />
+
+  // Local-first: NYC open benchmark cases live only in the workflow store and are
+  // recorded through it. Everything else falls back to the Supabase resident flow.
+  const localCase = cases.find((c) => c.id === caseId && c.source.kind === 'nyc_open')
+  if (localCase) return <LocalOfficerCaseView caseId={caseId} />
+  return <SupabaseOfficerCaseView caseId={caseId} />
+}
+
+function SupabaseOfficerCaseView({ caseId }: { caseId: string }) {
   const [row, setRow] = useState<ResidentRequestRow | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   // True only right after the officer records the outcome this session, so we can
@@ -48,8 +75,6 @@ export default function AppOfficerCasePage() {
   // Decision support derived deterministically from the request (no automated
   // enforcement decision) — routing recommendation, classification, priority.
   const support = useMemo(() => (row ? residentRowToCase(row) : null), [row])
-
-  if (role !== 'officer') return <Navigate to="/app" replace />
 
   if (row === undefined) {
     return <div className="container-page py-10 text-sm text-ink-subtle">Loading case…</div>
@@ -356,6 +381,256 @@ function FieldOutcomeForm({
 
 const fieldClass =
   'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none'
+
+// ---------------------------------------------------------------------------
+// Local (NYC open benchmark) officer case view — records the field outcome
+// through the in-browser workflow store (recordFieldAction).
+// ---------------------------------------------------------------------------
+
+function LocalOfficerCaseView({ caseId }: { caseId: string }) {
+  const { cases } = useWorkflow()
+  const c = cases.find((x) => x.id === caseId)
+  const [justRecorded, setJustRecorded] = useState(false)
+
+  if (!c) {
+    return (
+      <div className="container-page py-10">
+        <BackLink />
+        <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">
+          This case could not be found or is no longer assigned to you.
+        </div>
+      </div>
+    )
+  }
+
+  if (justRecorded) {
+    return (
+      <div className="container-page py-10">
+        <BackLink />
+        <div className="mx-auto mt-6 max-w-xl card p-8 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </div>
+          <h1 className="mt-4 text-xl font-semibold text-navy-900">Field outcome recorded</h1>
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-900">
+            <div>
+              <span className="font-semibold">Status:</span> Ready for supervisor closure review
+            </div>
+            <div className="mt-1">
+              <span className="font-semibold">Next step:</span> Supervisor reviews the field outcome and approves the
+              closure response.
+            </div>
+          </div>
+          <div className="mt-6">
+            <Link to="/app/field" className="btn-primary">
+              Back to Officer Field Console
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const isClosed = c.stage === 'closed'
+  const complaintType = c.normalized.complaint_type ?? c.triage.category
+
+  return (
+    <div className="container-page py-10">
+      <BackLink />
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight text-navy-900">{c.id}</h1>
+        <span className="badge bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200">NYC open benchmark</span>
+        <span className="badge bg-slate-100 text-slate-700">{complaintType}</span>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-2.5 text-xs leading-relaxed text-teal-900">
+        Source record remains unchanged. This closure is recorded in the Brampton POC workflow layer.
+      </div>
+
+      {isClosed && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-navy-900">
+          <span className="font-medium">This case is closed. The record is read only.</span>
+        </div>
+      )}
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <Panel title="Case details">
+            <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              <Detail label="Location" value={c.input.location || '—'} />
+              <Detail label="Complaint type" value={complaintType} />
+              <Detail label="Assigned officer" value={c.assignedOfficer ?? '—'} />
+              <Detail label="Source" value={c.source.label} />
+            </dl>
+          </Panel>
+
+          <Panel title="Reported issue" subtitle="From the NYC 311 open benchmark source record">
+            {c.input.description.trim() ? (
+              <p className="whitespace-pre-line text-sm leading-relaxed text-ink">{c.input.description.trim()}</p>
+            ) : (
+              <p className="text-sm italic text-ink-subtle">No descriptor was provided in the source record.</p>
+            )}
+          </Panel>
+
+          <LocalFieldOutcomeSection c={c} isClosed={isClosed} onRecorded={() => setJustRecorded(true)} />
+        </div>
+
+        <div className="space-y-6">
+          <details className="card p-5">
+            <summary className="cursor-pointer select-none text-sm font-semibold text-navy-900">
+              Decision support summary
+              <span className="ml-1 font-normal text-ink-subtle">(suggestions — staff decide)</span>
+            </summary>
+            <dl className="mt-3 space-y-2">
+              <Detail label="Routing recommendation" value={c.triage.recommendedDepartment} />
+              <Detail label="Classification" value={c.triage.category} />
+              <Detail label="Priority" value={c.priorityOverride ?? c.triage.recommendedPriority} />
+            </dl>
+          </details>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LocalFieldOutcomeSection({
+  c,
+  isClosed,
+  onRecorded,
+}: {
+  c: DemoCase
+  isClosed: boolean
+  onRecorded: () => void
+}) {
+  if (c.fieldAction) {
+    const fa = c.fieldAction
+    return (
+      <Panel title="Field outcome" subtitle="Field outcome recorded">
+        <span className="badge bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200">
+          {FIELD_OUTCOME_LABELS[fa.outcome]}
+        </span>
+        <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          <Detail label="Officer" value={fa.officerName} />
+          <Detail label="Recorded" value={formatDateTime(fa.recordedAt)} />
+          {fa.referenceNumber && <Detail label="Reference" value={fa.referenceNumber} />}
+          <Detail label="Follow-up required" value={fa.followUpRequired ? 'Yes' : 'No'} />
+        </dl>
+        {fa.observations && (
+          <div className="mt-3">
+            <div className="stat-label">Observations</div>
+            <p className="mt-1 text-sm text-ink">{fa.observations}</p>
+          </div>
+        )}
+        <p className="mt-3 text-[11px] text-emerald-700">
+          Next step: a supervisor reviews this field outcome and approves the closure response.
+        </p>
+      </Panel>
+    )
+  }
+
+  if (isClosed) {
+    return (
+      <Panel title="Field outcome">
+        <p className="text-sm text-ink-subtle">This case is closed. No field outcome can be recorded.</p>
+      </Panel>
+    )
+  }
+
+  return <LocalFieldOutcomeForm caseId={c.id} onRecorded={onRecorded} />
+}
+
+function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecorded: () => void }) {
+  const { recordFieldAction } = useWorkflow()
+  const [outcome, setOutcome] = useState<FieldVisitOutcome>('no_violation')
+  const [observations, setObservations] = useState('')
+  const [reference, setReference] = useState('')
+  const [followUpRequired, setFollowUpRequired] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const needsReference = OUTCOME_NEEDS_REFERENCE[outcome]
+
+  function submit() {
+    if (!observations.trim()) {
+      setError('Describe what you observed on site before recording the outcome.')
+      return
+    }
+    setError(null)
+    const input: FieldActionInput = {
+      outcome,
+      observations: observations.trim(),
+      referenceNumber: needsReference ? reference.trim() || null : null,
+      followUpRequired,
+    }
+    recordFieldAction(caseId, input)
+    onRecorded()
+  }
+
+  return (
+    <Panel title="Record field outcome" subtitle="Your on-site findings — feeds closure review readiness">
+      <div className="space-y-4">
+        <label className="block">
+          <span className="stat-label">Outcome</span>
+          <select
+            value={outcome}
+            onChange={(e) => setOutcome(e.target.value as FieldVisitOutcome)}
+            className={fieldClass}
+          >
+            {OUTCOME_ORDER.map((o) => (
+              <option key={o} value={o}>{FIELD_OUTCOME_LABELS[o]}</option>
+            ))}
+          </select>
+        </label>
+
+        {needsReference && (
+          <label className="block">
+            <span className="stat-label">{outcome === 'ticket_issued' ? 'Ticket number' : 'Notice number'}</span>
+            <input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={outcome === 'ticket_issued' ? 'e.g. TKT-20260616-014' : 'e.g. NTC-20260616-007'}
+              className={fieldClass}
+            />
+          </label>
+        )}
+
+        <label className="block">
+          <span className="stat-label">Observations</span>
+          <textarea
+            value={observations}
+            onChange={(e) => setObservations(e.target.value)}
+            rows={3}
+            placeholder="What you observed on site…"
+            className={fieldClass}
+          />
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-ink-muted">
+          <input
+            type="checkbox"
+            checked={followUpRequired}
+            onChange={(e) => setFollowUpRequired(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Follow-up / re-inspection required
+        </label>
+
+        {error && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
+        )}
+
+        <button onClick={submit} className="btn-primary text-sm">
+          Record field outcome
+        </button>
+        <p className="text-[11px] text-ink-subtle">
+          Recording the outcome moves the case to closure review readiness. A supervisor approves the closure.
+        </p>
+      </div>
+    </Panel>
+  )
+}
 
 function BackLink() {
   return (

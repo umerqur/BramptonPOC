@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
-import { can, rolesAllowed } from '../../lib/roles'
+import { can, rolesAllowed, DEMO_OFFICER } from '../../lib/roles'
 import { FIELD_OUTCOME_LABELS, formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import {
@@ -14,39 +14,7 @@ import {
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
-import type { DemoCase, FieldVisitOutcome, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
-
-// Demo roster of by-law officers a supervisor/CSR can assign a case to.
-const DEMO_OFFICERS = [
-  'R. Singh (By-law Officer)',
-  'L. Tremblay (By-law Officer)',
-  'D. Owens (By-law Officer)',
-]
-
-// Field outcomes in the order officers see them, with which ones issue a number.
-const OUTCOME_ORDER: FieldVisitOutcome[] = ['no_violation', 'notice_issued', 'ticket_issued', 'resolved']
-const OUTCOME_NEEDS_REFERENCE: Record<FieldVisitOutcome, boolean> = {
-  no_violation: false,
-  notice_issued: true,
-  ticket_issued: true,
-  resolved: false,
-}
-
-// Resident-safe field-visit message: tells the resident an officer attended,
-// without exposing internal observations, ticket numbers, or fines (those stay
-// in the staff file; specifics go in the final closure letter).
-const FIELD_MESSAGE_TAIL: Record<FieldVisitOutcome, string> = {
-  no_violation: ' At the time of the visit, no violation was observed.',
-  notice_issued: ' The officer addressed the matter and enforcement action has been taken.',
-  ticket_issued: ' The officer addressed the matter and enforcement action has been taken.',
-  resolved: ' The issue appears to have been resolved.',
-}
-
-function residentFieldMessage(outcome: FieldVisitOutcome, followUp: boolean): string {
-  const base = 'A by-law enforcement officer attended the location to investigate your request.'
-  const fu = followUp ? ' A follow-up inspection has been scheduled.' : ''
-  return `${base}${FIELD_MESSAGE_TAIL[outcome]}${fu} We will send you a final update once the file is reviewed and closed.`
-}
+import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
 // summary in one place, plus the review-readiness gate. Staff act here: approve
@@ -150,7 +118,7 @@ export default function AppCaseWorkbenchPage() {
 
           {!isBenchmark && <ResidentAttachments caseId={c.id} variant="full" />}
 
-          <Panel title="Case summary" subtitle="Decision support for staff review">
+          <Panel title="Case summary" subtitle="AI assisted summary, staff review required">
             <p className="text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
             <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2">
               {summary.structuredFacts.map((f) => (
@@ -238,7 +206,7 @@ export default function AppCaseWorkbenchPage() {
         <div className="space-y-6">
           {nyc && <NycReviewPriorityPanel nyc={nyc} />}
 
-          <Panel title="Review readiness" subtitle="Is the file ready for staff review?">
+          <Panel title="AI review readiness" subtitle="AI assisted file readiness, staff confirm and decide">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />
             <div
               className={`mt-3 rounded-lg px-3 py-2 text-xs ${
@@ -395,31 +363,25 @@ export default function AppCaseWorkbenchPage() {
   )
 }
 
-// Officer field-investigation panel — the real-world step a standard city
-// enforcement model has between triage and closure. A supervisor/CSR assigns the
-// case to an officer; the officer (role) attends and records the actual outcome,
-// which is what the closure letter is then allowed to state.
+// Officer field-investigation panel — the real-world step between triage and
+// closure. The supervisor/CSR assigns the case to the single demo By-law Officer
+// (Officer Oakley); the officer records the actual on-site outcome from their
+// own Officer Field Console. The supervisor never records a field outcome here.
 function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnly?: boolean }) {
-  const { role, assignToOfficer, recordFieldAction } = useWorkflow()
+  const { role, assignToOfficer } = useWorkflow()
   const canAssign = !readOnly && can(role, 'assignOfficer')
-  const canRecord = !readOnly && can(role, 'recordFieldAction')
+  const assigned = Boolean(c.assignedOfficer)
 
-  const [officer, setOfficer] = useState(c.assignedOfficer ?? DEMO_OFFICERS[0])
-  const [outcome, setOutcome] = useState<FieldVisitOutcome>('no_violation')
-  const [observations, setObservations] = useState('')
-  const [reference, setReference] = useState('')
-  const [followUp, setFollowUp] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const needsReference = OUTCOME_NEEDS_REFERENCE[outcome]
-
-  // Best-effort resident email for a milestone; returns the suffix to append to
-  // the staff flash so the reviewer sees whether the resident was notified.
+  // Best-effort resident email for the assignment milestone; returns a suffix for
+  // the staff flash so the reviewer sees whether the resident was notified. NYC
+  // benchmark cases carry no resident email, so nothing is sent for them.
   async function emailResident(
     payload: Parameters<typeof sendResidentEmail>[0],
   ): Promise<string> {
-    if (!isSendableEmail(payload.to)) return ' (No deliverable resident email — demo address.)'
+    if (!isSendableEmail(payload.to)) return ''
     const sent = await sendResidentEmail(payload)
     return sent
       ? ` Resident emailed at ${payload.to}.`
@@ -428,7 +390,8 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
 
   async function handleAssign() {
     setBusy(true)
-    assignToOfficer(c.id, officer)
+    // One demo officer: always Officer Oakley. No invented officer identities.
+    assignToOfficer(c.id, DEMO_OFFICER.name)
     const suffix = await emailResident({
       type: 'status_update',
       status: 'assigned',
@@ -438,7 +401,7 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
       requestType: c.triage.category,
       location: c.input.location,
     })
-    setFlash(`Assigned to ${officer}.${suffix}`)
+    setFlash(`Assigned to ${DEMO_OFFICER.name}.${suffix}`)
     setBusy(false)
   }
 
@@ -479,116 +442,29 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
     )
   }
 
-  async function handleRecord() {
-    if (!observations.trim()) {
-      setFlash('Add a short observation before recording the outcome.')
-      return
-    }
-    setBusy(true)
-    recordFieldAction(c.id, {
-      outcome,
-      observations: observations.trim(),
-      referenceNumber: needsReference ? reference.trim() || null : null,
-      followUpRequired: followUp,
-    })
-    const suffix = await emailResident({
-      type: 'field_update',
-      to: c.input.residentEmail.trim(),
-      residentName: c.input.residentName,
-      caseId: c.id,
-      requestType: c.triage.category,
-      location: c.input.location,
-      message: residentFieldMessage(outcome, followUp),
-    })
-    setFlash(`Field outcome recorded. The closure draft has been updated to match.${suffix}`)
-    setBusy(false)
-  }
-
   return (
-    <Panel title="Field investigation" subtitle="Assign an officer, then record the on-site outcome">
-      {/* Assignment */}
-      <div>
-        <div className="text-xs text-ink-subtle">
-          {c.assignedOfficer ? (
-            <>Assigned to <span className="font-medium text-navy-900">{c.assignedOfficer}</span></>
-          ) : (
-            'Not yet assigned to an officer.'
-          )}
-        </div>
-        {canAssign ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <select
-              value={officer}
-              onChange={(e) => setOfficer(e.target.value)}
-              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
-            >
-              {DEMO_OFFICERS.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
-            </select>
-            <button onClick={handleAssign} disabled={busy} className="btn-secondary text-sm disabled:opacity-60">
-              {c.assignedOfficer ? 'Reassign' : 'Assign to officer'}
-            </button>
-          </div>
-        ) : (
-          <p className="mt-1 text-[11px] text-ink-subtle">Assigning is restricted to {rolesAllowed('assignOfficer')}.</p>
-        )}
-      </div>
+    <Panel title="Field investigation" subtitle="Supervisor assigns; the officer records the on-site outcome">
+      <dl className="space-y-1.5 text-sm">
+        <Row label="Assigned officer" value={DEMO_OFFICER.name} />
+      </dl>
 
-      {/* Record outcome — only once assigned */}
-      <div className="mt-4 border-t border-slate-100 pt-4">
-        {!c.assignedOfficer ? (
-          <p className="text-xs text-ink-subtle">Assign an officer first, then the officer records the field outcome.</p>
-        ) : !canRecord ? (
-          <p className="text-xs text-ink-subtle">
-            Recording a field visit is restricted to {rolesAllowed('recordFieldAction')}. Switch role to “By-law Officer”.
+      {assigned ? (
+        <p className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+          Assigned to {DEMO_OFFICER.name}. Officer can record the field outcome from the Officer Field Console.
+        </p>
+      ) : canAssign ? (
+        <div className="mt-3">
+          <button onClick={handleAssign} disabled={busy} className="btn-primary text-sm disabled:opacity-60">
+            {busy ? 'Assigning…' : `Assign to ${DEMO_OFFICER.name}`}
+          </button>
+          <p className="mt-2 text-[11px] text-ink-subtle">
+            The supervisor assigns the case; {DEMO_OFFICER.name} records the field outcome from the Officer Field
+            Console. Supervisors do not record field outcomes here.
           </p>
-        ) : (
-          <div className="space-y-3">
-            <div className="text-xs font-medium text-navy-900">Record field visit outcome</div>
-            <label className="block">
-              <span className="stat-label">Outcome</span>
-              <select
-                value={outcome}
-                onChange={(e) => setOutcome(e.target.value as FieldVisitOutcome)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
-              >
-                {OUTCOME_ORDER.map((o) => (
-                  <option key={o} value={o}>{FIELD_OUTCOME_LABELS[o]}</option>
-                ))}
-              </select>
-            </label>
-            {needsReference && (
-              <label className="block">
-                <span className="stat-label">{outcome === 'ticket_issued' ? 'Ticket number' : 'Notice number'}</span>
-                <input
-                  value={reference}
-                  onChange={(e) => setReference(e.target.value)}
-                  placeholder={outcome === 'ticket_issued' ? 'e.g. TKT-20260616-014' : 'e.g. NTC-20260616-007'}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
-                />
-              </label>
-            )}
-            <label className="block">
-              <span className="stat-label">Observations</span>
-              <textarea
-                value={observations}
-                onChange={(e) => setObservations(e.target.value)}
-                rows={3}
-                placeholder="What the officer observed on site…"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-ink-muted">
-              <input type="checkbox" checked={followUp} onChange={(e) => setFollowUp(e.target.checked)} className="h-4 w-4" />
-              Follow-up / re-inspection required
-            </label>
-            <button onClick={handleRecord} disabled={busy} className="btn-primary text-sm disabled:opacity-60">
-              {busy ? 'Recording…' : 'Record field outcome'}
-            </button>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <p className="mt-3 text-[11px] text-ink-subtle">Assigning is restricted to {rolesAllowed('assignOfficer')}.</p>
+      )}
 
       {flash && (
         <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
@@ -653,7 +529,10 @@ function NycSourceRecordPanel({ nyc }: { nyc: NycBenchmarkSource }) {
     { label: 'Due date', value: nyc.dueDate ? formatDate(nyc.dueDate) : null },
     { label: 'Age', value: nyc.ageDays == null ? null : `${nyc.ageDays} days` },
     { label: 'Resolution action updated', value: nyc.resolutionActionUpdatedDate ? formatDate(nyc.resolutionActionUpdatedDate) : null },
-    { label: 'Resolution description', value: nyc.resolutionDescription },
+    // resolution_description is NOT a reliable closure indicator in the open NYC
+    // dataset, so it is shown as the public source response — never the raw
+    // "Resolution description" label, which stays in the raw record view only.
+    { label: 'NYC source response', value: nyc.resolutionDescription },
     { label: 'Source dataset ID / unique key', value: nyc.uniqueKey },
   ].filter((r) => r.value != null)
 
@@ -673,18 +552,18 @@ function NycSourceRecordPanel({ nyc }: { nyc: NycBenchmarkSource }) {
   )
 }
 
-/** Review-priority signal for an NYC open benchmark case — internal decision support. */
+/** Review-priority signal for an NYC open benchmark case — rules based, not AI generated. */
 function NycReviewPriorityPanel({ nyc }: { nyc: NycBenchmarkSource }) {
   return (
-    <Panel title="Review priority" subtitle="Internal decision support — not a NYC source field">
+    <Panel title="Review priority" subtitle="Rules based internal priority, not AI generated">
       <dl className="space-y-1.5 text-sm">
         <Row label="Score" value={nyc.priorityScore == null ? '—' : nyc.priorityScore.toFixed(0)} />
         <Row label="Tier" value={nyc.priorityTier ?? '—'} />
       </dl>
       {nyc.priorityReason && <p className="mt-2 text-xs text-ink-muted">{nyc.priorityReason}</p>}
       <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
-        Review priority is an internal ranking we compute to help staff decide what to look at first. It is{' '}
-        <span className="font-semibold">not</span> a field from the NYC 311 source record, and not an automated decision.
+        Review priority is a rules based internal ranking that helps staff decide what to look at first. It is{' '}
+        <span className="font-semibold">not</span> a field from the NYC 311 source record, and not AI generated.
       </p>
     </Panel>
   )
