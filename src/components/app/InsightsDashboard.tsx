@@ -296,7 +296,10 @@ function OperationalSnapshot() {
     metrics.aiSummariesGenerated > 0
       ? Math.round((metrics.closureDraftsPrepared / metrics.aiSummariesGenerated) * 100)
       : null
-  const approvedClosures = cases.filter((c) => c.stage === 'closed').length
+  // Closure drafts waiting on a supervisor decision (staff-review) plus any
+  // approved-but-not-yet-closed cases. This reads the active human-approval
+  // backlog rather than a cumulative closed count (which can look weak at 0/1).
+  const approvalsPending = cases.filter((c) => c.stage === 'staff-review' || c.stage === 'approved').length
 
   // Open-queue value cells degrade to "—" with a clear note when not loaded.
   const openValue = open.loading ? '…' : open.error ? '—' : fmtInt(open.data?.total ?? 0)
@@ -360,12 +363,12 @@ function OperationalSnapshot() {
           helper="Research and drafting effort avoided"
         />
         <KpiCard
-          title="Staff approved closures"
-          value={fmtInt(approvedClosures)}
-          direction="higher"
-          status="good"
-          benchmark="Track vs. previous period"
-          helper="Staff approved closure responses"
+          title="Human approvals pending"
+          value={fmtInt(approvalsPending)}
+          direction="lower"
+          status={approvalsPending === 0 ? 'good' : 'neutral'}
+          benchmark="Target 0 pending overnight"
+          helper="Closure drafts waiting for supervisor decision"
         />
       </div>
 
