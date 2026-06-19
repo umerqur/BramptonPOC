@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { can, rolesAllowed, DEMO_OFFICER } from '../../lib/roles'
 import { FIELD_OUTCOME_LABELS, formatDate, formatDateTime } from '../../services/demoWorkflowService'
-import { isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
+import { getResidentRequestAttachmentsForCases, isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
+import { computeResidentPriority, normalizeTier } from '../../services/workQueue'
+import DecisionLogicPanel, { type DecisionLogicData } from '../../components/app/DecisionLogicPanel'
 import {
   AutomationBadge,
   CaseSwitcher,
@@ -23,12 +25,39 @@ import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWork
 
 const PRIORITIES: Priority[] = ['P1', 'P2', 'P3', 'P4']
 
+/** Whole days since an ISO timestamp (0 when missing/unparseable). */
+function daysSince(iso: string | null): number {
+  if (!iso) return 0
+  const ms = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(ms)) return 0
+  return Math.max(0, Math.floor(ms / 86_400_000))
+}
+
 export default function AppCaseWorkbenchPage() {
   const { cases, activeCase, setActiveCase, approveRouting, requestMoreInfo, overridePriority, sendToStaffReview, role } =
     useWorkflow()
   const c = useDemoCase()
   const navigate = useNavigate()
   const [flash, setFlash] = useState<string | null>(null)
+
+  // Resident evidence count — feeds the deterministic decision-logic breakdown so
+  // the workbench shows the same rules-based score as the Work Queue row.
+  const [residentAttachmentCount, setResidentAttachmentCount] = useState<number | null>(null)
+  const caseId = c?.id ?? null
+  const sourceKind = c?.source.kind ?? null
+  useEffect(() => {
+    if (!caseId || sourceKind !== 'resident') {
+      setResidentAttachmentCount(null)
+      return
+    }
+    let active = true
+    getResidentRequestAttachmentsForCases([caseId])
+      .then((atts) => active && setResidentAttachmentCount(atts.length))
+      .catch(() => active && setResidentAttachmentCount(0))
+    return () => {
+      active = false
+    }
+  }, [caseId, sourceKind])
 
   // The Case Workbench is a supervisor/coordinator surface. Officers work from
   // their Officer Field Console instead.
@@ -52,6 +81,43 @@ export default function AppCaseWorkbenchPage() {
   const isClosed = c.stage === 'closed'
   const nyc = c.source.kind === 'nyc_open' ? c.source.nyc : undefined
   const isBenchmark = c.source.kind === 'nyc_open'
+
+  // Rules-based decision logic for this case. NYC open benchmark cases carry a
+  // precomputed queue score (no exposed component weights), so we show the
+  // available source fields; resident intakes are fully decomposable.
+  const decisionLogic: DecisionLogicData = nyc
+    ? {
+        score: nyc.priorityScore,
+        tier: normalizeTier(nyc.priorityTier),
+        reason: nyc.priorityReason,
+        sourceFields: [
+          { label: 'Priority score', value: nyc.priorityScore == null ? '—' : nyc.priorityScore.toFixed(0) },
+          { label: 'Priority tier', value: nyc.priorityTier ?? '—' },
+          { label: 'Complaint type', value: nyc.complaintType ?? '—' },
+          { label: 'Age in queue', value: nyc.ageDays == null ? '—' : `${nyc.ageDays} day${nyc.ageDays === 1 ? '' : 's'}` },
+          { label: 'Due date', value: nyc.dueDate ? formatDate(nyc.dueDate) : '—' },
+          {
+            label: 'Borough / district',
+            value:
+              [nyc.borough, nyc.councilDistrict ? `District ${Number(nyc.councilDistrict)}` : null]
+                .filter(Boolean)
+                .join(' · ') || '—',
+          },
+        ],
+      }
+    : (() => {
+        const readyForClosure = Boolean(c.fieldAction) && c.stage !== 'closed'
+        const inProgress = Boolean(c.assignedOfficer) && !readyForClosure && c.stage !== 'closed'
+        const r = computeResidentPriority({
+          priority: c.triage.recommendedPriority,
+          category: c.triage.category,
+          ageDays: daysSince(c.normalized.submitted_at ?? c.createdAt),
+          attachmentCount: residentAttachmentCount ?? 0,
+          readyForClosure,
+          inProgress,
+        })
+        return { score: r.score, tier: r.tier, reason: r.reason, components: r.components }
+      })()
 
   function note(msg: string) {
     setFlash(msg)
@@ -205,6 +271,8 @@ export default function AppCaseWorkbenchPage() {
         {/* Right: confidence gate + staff actions */}
         <div className="space-y-6">
           {nyc && <NycReviewPriorityPanel nyc={nyc} />}
+
+          <DecisionLogicPanel data={decisionLogic} />
 
           <Panel title="AI review readiness" subtitle="AI assisted file readiness, staff confirm and decide">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />

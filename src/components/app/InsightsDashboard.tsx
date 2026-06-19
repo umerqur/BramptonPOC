@@ -42,6 +42,7 @@ import {
   type OpenStatusMixRow,
   type OpenQueueSummary,
 } from '../../services/caseExplorer'
+import { getNYCWorkloadByBorough, type NYCBoroughWorkload } from '../../services/municipalServiceRequests'
 
 // Insights — operational workload intelligence over the New York City 311 public
 // service request dataset. Three tabs: Overview (map, KPIs, charts), Case
@@ -50,7 +51,10 @@ import {
 // materialized view; the Case Explorer reads paginated, filtered rows — never the
 // full table. No fake placeholder values: a failed live read shows a clear error.
 
-type Tab = 'overview' | 'explorer' | 'open'
+type Tab = 'overview' | 'explorer' | 'open' | 'simulations'
+
+/** A geographic area selected on the workload map, for the bottleneck drilldown. */
+type SelectedArea = { mode: 'district' | 'borough'; value: string }
 
 // ---------------------------------------------------------------------------
 // Live-data hook (aggregates) — on failure expose a dev-friendly error.
@@ -173,6 +177,7 @@ export default function InsightsDashboard() {
       {tab === 'overview' && <Overview onExplore={explore} />}
       {tab === 'explorer' && <CaseExplorer filters={filters} onFiltersChange={setFilters} />}
       {tab === 'open' && <OpenCasesQueue />}
+      {tab === 'simulations' && <SimulationLab />}
     </div>
   )
 }
@@ -215,6 +220,18 @@ const INSIGHTS_TABS: InsightsTab[] = [
       </svg>
     ),
   },
+  {
+    id: 'simulations',
+    title: 'Simulations',
+    subtitle: 'Capacity and backlog stress test',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        <path d="M3 3v18h18" />
+        <path d="M7 16l3-4 3 2 4-6" />
+        <path d="M17 8h2v2" />
+      </svg>
+    ),
+  },
 ]
 
 /** Soft segmented tab-card: title + helper subtitle + icon, with a clear active state. */
@@ -251,14 +268,15 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
 // ---------------------------------------------------------------------------
 
 function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
+  // A map click updates the Bottleneck Drilldown panel below the map (it does NOT
+  // jump straight to the Case Explorer) so staff see the diagnosis first; the
+  // panel's own button opens the matching cases.
+  const [selectedArea, setSelectedArea] = useState<SelectedArea | null>(null)
   return (
     <div className="mt-6 space-y-6">
       <OperationalSnapshot />
-      <NYCWorkloadMapPanel
-        onSelectArea={(mode, value) =>
-          onExplore(mode === 'district' ? { councilDistrict: value } : { borough: value })
-        }
-      />
+      <NYCWorkloadMapPanel onSelectArea={(mode, value) => setSelectedArea({ mode, value })} />
+      <BottleneckDrilldownPanel selectedArea={selectedArea} onExplore={onExplore} />
       <ComplaintTypeRanked onExplore={onExplore} />
       <div className="grid gap-6 lg:grid-cols-2">
         <ChannelMixDonut />
@@ -889,6 +907,437 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
         />
       )}
     </SectionShell>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Bottleneck drilldown (Overview) — diagnose a map-selected area
+// ---------------------------------------------------------------------------
+
+/** Normalize a council-district value to a plain number string ("05" → "5"). */
+const districtKey = (v: string | null): string => {
+  if (v == null) return ''
+  const n = Number(v)
+  return Number.isFinite(n) ? String(n) : String(v).trim()
+}
+
+/**
+ * Operational read for a council district — plain-language diagnosis derived from
+ * the area's volume, long-tail closure time, and top complaint type, RELATIVE to
+ * the other areas in the current benchmark view. This is decision support, not a
+ * recommendation engine: it says "Operational read", never "AI recommends".
+ */
+function districtOperationalRead(row: AreaBottleneck, areas: AreaBottleneck[]): string[] {
+  const reads: string[] = []
+  const maxTotal = Math.max(0, ...areas.map((a) => a.total_cases))
+  if (maxTotal > 0 && row.total_cases >= 0.66 * maxTotal) {
+    reads.push(
+      'This area has a heavier complaint load than most areas in the current benchmark view. Supervisor action could include earlier review sequencing or temporary reassignment.',
+    )
+  }
+  const p90s = areas
+    .map((a) => a.p90_closure_days)
+    .filter((v): v is number => v != null)
+    .sort((a, b) => a - b)
+  const medianP90 = p90s.length ? p90s[Math.floor(p90s.length / 2)] : null
+  if (row.p90_closure_days != null && medianP90 != null && row.p90_closure_days >= medianP90 * 1.25) {
+    reads.push('Long tail closure time is elevated. This points to complex or stale files rather than only volume.')
+  }
+  if (row.top_complaint_type) {
+    reads.push(
+      `Most pressure is concentrated in ${row.top_complaint_type}, so routing and template review can focus there first.`,
+    )
+  }
+  if (reads.length === 0) {
+    reads.push('Workload here is close to the benchmark average for this view. No single pressure signal stands out.')
+  }
+  return reads
+}
+
+function BottleneckDrilldownPanel({
+  selectedArea,
+  onExplore,
+}: {
+  selectedArea: SelectedArea | null
+  onExplore: (f: CaseExplorerFilters) => void
+}) {
+  // Small materialized aggregates — never a full-table scan. Pull enough council
+  // districts to cover any selected one (NYC has 51).
+  const areas = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(60))
+  const boroughVolumes = useLive<NYCBoroughWorkload[]>(getNYCWorkloadByBorough)
+
+  return (
+    <section className="card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-navy-900">Bottleneck drilldown</h2>
+          <p className="mt-0.5 text-xs text-ink-subtle">What is driving workload in the selected area.</p>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+          Live data
+        </span>
+      </div>
+
+      <div className="mt-4">
+        {!selectedArea ? (
+          <div className="rounded-md border border-dashed border-slate-300 bg-slate-50/70 px-4 py-6 text-center text-sm text-ink-subtle">
+            Select a council district or borough on the map above to see what is driving its workload.
+          </div>
+        ) : selectedArea.mode === 'district' ? (
+          <DistrictBottleneck area={areas} value={selectedArea.value} onExplore={onExplore} />
+        ) : (
+          <BoroughBottleneck volumes={boroughVolumes} value={selectedArea.value} onExplore={onExplore} />
+        )}
+      </div>
+    </section>
+  )
+}
+
+function DistrictBottleneck({
+  area,
+  value,
+  onExplore,
+}: {
+  area: LiveState<AreaBottleneck[]>
+  value: string
+  onExplore: (f: CaseExplorerFilters) => void
+}) {
+  const { data, loading, error } = area
+  if (loading) return <div className="animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading live data…</div>
+  if (error) return <SectionError name="the area bottleneck aggregate" error={error} />
+
+  const rows = data ?? []
+  const row = rows.find((r) => districtKey(r.council_district) === districtKey(value))
+  const openCases = () => onExplore({ councilDistrict: districtKey(value) })
+
+  if (!row) {
+    return (
+      <div className="space-y-3">
+        <AreaHeading label={`District ${districtKey(value)}`} sub="Selected council district" />
+        <p className="text-sm text-ink-muted">
+          No bottleneck aggregate is available for this district in the current benchmark view. You can still open its
+          cases directly.
+        </p>
+        <OpenCasesButton onClick={openCases} />
+      </div>
+    )
+  }
+
+  const reads = districtOperationalRead(row, rows)
+  return (
+    <div className="space-y-4">
+      <AreaHeading label={`District ${districtKey(row.council_district)}`} sub="Selected council district" />
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric label="Total cases" value={fmtInt(row.total_cases)} />
+        <Metric label="Avg closure" value={fmtDays(row.avg_closure_days)} />
+        <Metric label="Slow case (P90)" value={fmtDays(row.p90_closure_days)} />
+        <Metric label="Top complaint type" value={row.top_complaint_type ?? '—'} />
+      </dl>
+      <OperationalRead reads={reads} />
+      <OpenCasesButton onClick={openCases} />
+    </div>
+  )
+}
+
+function BoroughBottleneck({
+  volumes,
+  value,
+  onExplore,
+}: {
+  volumes: LiveState<NYCBoroughWorkload[]>
+  value: string
+  onExplore: (f: CaseExplorerFilters) => void
+}) {
+  const { data, loading, error } = volumes
+  const openCases = () => onExplore({ borough: value })
+
+  const match = (data ?? []).find((b) => b.borough.trim().toLowerCase() === value.trim().toLowerCase())
+
+  return (
+    <div className="space-y-4">
+      <AreaHeading label={value} sub="Selected borough" />
+      {loading ? (
+        <div className="animate-pulse rounded-md bg-slate-100/70 py-6 text-center text-sm text-ink-subtle">Loading live data…</div>
+      ) : error ? (
+        <p className="text-sm text-ink-muted">Borough workload volume is unavailable right now.</p>
+      ) : match ? (
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Metric label="Complaint volume" value={fmtInt(match.complaint_volume)} />
+        </dl>
+      ) : (
+        <p className="text-sm text-ink-muted">No borough-level workload volume is available for {value}.</p>
+      )}
+      <div className="rounded-md border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs leading-relaxed text-ink-muted">
+        <span className="font-semibold text-ink">Operational read:</span> Borough is the broad executive view. Council
+        district carries deeper bottleneck metrics right now (average and long-tail closure time, top complaint type), so
+        drill into a council district for a sharper diagnosis. Use the button below to review this borough's cases.
+      </div>
+      <OpenCasesButton onClick={openCases} />
+    </div>
+  )
+}
+
+function AreaHeading({ label, sub }: { label: string; sub: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{sub}</div>
+      <div className="text-2xl font-semibold text-navy-900">{label}</div>
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-1 truncate text-base font-semibold tabular-nums text-navy-900">{value}</div>
+    </div>
+  )
+}
+
+function OperationalRead({ reads }: { reads: string[] }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/70 px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Operational read</div>
+      <ul className="mt-1.5 space-y-1.5 text-sm text-ink-muted">
+        {reads.map((r) => (
+          <li key={r} className="flex gap-2">
+            <span aria-hidden className="mt-0.5 text-accent-500">•</span>
+            <span>{r}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function OpenCasesButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="btn-primary text-sm py-2 px-4">
+      Open matching cases in Case Explorer →
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Simulations tab — capacity and backlog stress test
+// ---------------------------------------------------------------------------
+
+type Scenario = 'current' | 'reduced' | 'surge'
+
+const SCENARIO_LABEL: Record<Scenario, string> = {
+  current: 'Current capacity',
+  reduced: 'Reduced capacity',
+  surge: 'Surge week',
+}
+
+const SCENARIO_NOTE: Record<Scenario, string> = {
+  current: 'Baseline staffing assumption.',
+  reduced: 'Shows impact if fewer staff are available.',
+  surge: 'Shows effect of increased incoming workload. Uses a simple 1.25× multiplier on open cases.',
+}
+
+const SURGE_MULTIPLIER = 1.25
+
+/** True when a tier string is the High review-priority tier. */
+const isHighTier = (tier: string | null) => (tier ?? '').trim().toLowerCase() === 'high'
+
+/**
+ * SimulationLab — an operations-style capacity stress test over the live open
+ * review queue summary plus user-controlled planning assumptions. This is
+ * scenario math, not a forecast: it helps staff reason about capacity, backlog,
+ * and review sequencing. It never predicts enforcement outcomes.
+ */
+function SimulationLab() {
+  const summary = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
+  const aging = useLive<OpenAgingBucket[]>(getNycOpenAgingBuckets)
+  // A bounded, diversified sample — used as an honest fallback for the open/high
+  // counts if the summary aggregate is unavailable, and for the main pressure type.
+  const sample = useLive<OpenReviewRow[]>(() => getNycOpenQueueDiversified({}, 60))
+
+  const [staff, setStaff] = useState(3)
+  const [perStaff, setPerStaff] = useState(25)
+  const [highFocus, setHighFocus] = useState(100)
+  const [scenario, setScenario] = useState<Scenario>('current')
+
+  const sampleRows = sample.data ?? []
+  const summaryOk = !!summary.data
+  // Prefer the precomputed summary; fall back to the loaded sample (labeled).
+  const baseOpen = summary.data?.total ?? (sample.data ? sampleRows.length : null)
+  const baseHigh =
+    summary.data?.highPriority ?? (sample.data ? sampleRows.filter((r) => isHighTier(r.priority_tier)).length : null)
+  const sampled = !summaryOk && sample.data != null
+
+  const topPressure = useMemo(() => {
+    const rows = sample.data ?? []
+    if (!rows.length) return null
+    const counts = new Map<string, number>()
+    for (const r of rows) {
+      const k = r.complaint_type ?? 'Uncategorized'
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+    let top: string | null = null
+    let max = 0
+    for (const [k, v] of counts) if (v > max) { max = v; top = k }
+    return top
+  }, [sample.data])
+
+  const topAging = useMemo(() => {
+    const b = aging.data ?? []
+    if (!b.length) return null
+    return [...b].sort((x, y) => y.total_cases - x.total_cases)[0]
+  }, [aging.data])
+
+  // Scenario adjustments — deterministic planning assumptions, not predictions.
+  const effectiveStaff = scenario === 'reduced' ? Math.max(1, Math.ceil(staff * 0.66)) : staff
+  const openCases = baseOpen == null ? null : scenario === 'surge' ? Math.ceil(baseOpen * SURGE_MULTIPLIER) : baseOpen
+  const high = baseHigh
+
+  const dailyCapacity = Math.max(0, effectiveStaff) * Math.max(0, perStaff)
+  const highCapacity = dailyCapacity * (Math.max(0, Math.min(100, highFocus)) / 100)
+  const daysHigh = high != null && highCapacity > 0 ? Math.ceil(high / highCapacity) : null
+  const daysAll = openCases != null && dailyCapacity > 0 ? Math.ceil(openCases / dailyCapacity) : null
+  const capacityGap = openCases == null ? null : openCases - dailyCapacity
+
+  const dataUnavailable = baseOpen == null && !summary.loading && !sample.loading
+  const loading = summary.loading && sample.loading
+
+  return (
+    <div className="mt-6 space-y-6">
+      <section className="card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-navy-900">Simulations</h2>
+            <p className="mt-0.5 text-xs text-ink-subtle">Capacity and backlog stress test — scenario math, not a forecast.</p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+            Planning assumption
+          </span>
+        </div>
+
+        {/* Inputs */}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <NumberInput label="Staff available" value={staff} min={1} max={50} onChange={setStaff} />
+          <NumberInput label="Cases reviewed / staff / day" value={perStaff} min={1} max={200} onChange={setPerStaff} />
+          <NumberInput label="High priority focus (%)" value={highFocus} min={0} max={100} onChange={setHighFocus} />
+          <div>
+            <span className="text-[11px] font-medium text-ink-subtle">Scenario</span>
+            <div className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-1">
+              {(['current', 'reduced', 'surge'] as Scenario[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScenario(s)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                    scenario === s ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'
+                  }`}
+                >
+                  {SCENARIO_LABEL[s]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-xs text-ink-muted">
+          <span className="font-semibold text-ink">{SCENARIO_LABEL[scenario]}:</span> {SCENARIO_NOTE[scenario]}
+          {scenario === 'reduced' && (
+            <span className="text-ink-subtle"> Effective staff this scenario: {effectiveStaff}.</span>
+          )}
+        </div>
+
+        {dataUnavailable ? (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">Open queue data unavailable.</div>
+            <div className="mt-0.5">
+              The open review queue summary could not be loaded, so the scenario math has no live open-case counts to work
+              from. Capacity inputs above still apply once the open dataset is available.
+            </div>
+          </div>
+        ) : loading ? (
+          <div className="mt-4 animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
+        ) : (
+          <>
+            {sampled && (
+              <p className="mt-4 text-[11px] text-amber-800">
+                Open-case counts are sampled from the open review queue (the full-population summary is unavailable), so
+                these figures are a limited sample, not the full queue total.
+              </p>
+            )}
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <SimCard label="Daily review capacity" value={fmtInt(dailyCapacity)} helper={`${effectiveStaff} staff × ${perStaff} cases/day`} />
+              <SimCard label="High priority cases" value={high == null ? '—' : fmtInt(high)} helper={high == null ? 'Tier breakdown unavailable' : `${highFocus}% of capacity directed here first`} />
+              <SimCard label="Days to clear high priority" value={daysHigh == null ? '—' : fmtInt(daysHigh)} helper="At current high-priority focus" />
+              <SimCard label="Days to clear open queue" value={daysAll == null ? '—' : fmtInt(daysAll)} helper={openCases == null ? '—' : `${fmtInt(openCases)} open cases this scenario`} />
+              <SimCard
+                label="Capacity gap (day 1)"
+                value={capacityGap == null ? '—' : `${capacityGap > 0 ? '+' : ''}${fmtInt(capacityGap)}`}
+                helper={capacityGap == null ? '—' : capacityGap > 0 ? 'Open cases beyond one day of capacity' : 'Capacity covers the open queue in a day'}
+              />
+              <SimCard
+                label="Main pressure"
+                value={topPressure ?? '—'}
+                helper={topPressure ? 'Most common type in the open sample' : 'Sample unavailable'}
+              />
+            </div>
+
+            {topAging && (
+              <p className="mt-3 text-[11px] text-ink-subtle">
+                Main aging bucket: <span className="font-medium text-ink-muted">{topAging.bucket}</span> ({fmtInt(topAging.total_cases)} open cases).
+              </p>
+            )}
+          </>
+        )}
+
+        <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
+          This tab does not predict enforcement outcomes. It helps staff reason about capacity, backlog, and review
+          sequencing. Queue pressure shown here is scenario math on live open-case counts — a planning assumption, not a
+          forecast.
+        </p>
+      </section>
+    </div>
+  )
+}
+
+function NumberInput({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="block">
+      <span className="text-[11px] font-medium text-ink-subtle">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          if (!Number.isFinite(n)) return
+          onChange(Math.max(min, Math.min(max, Math.round(n))))
+        }}
+        className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm tabular-nums focus:border-accent-500 focus:outline-none"
+      />
+    </label>
+  )
+}
+
+function SimCard({ label, value, helper }: { label: string; value: string; helper: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-1.5 truncate text-2xl font-bold tabular-nums text-navy-900">{value}</div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
   )
 }
 

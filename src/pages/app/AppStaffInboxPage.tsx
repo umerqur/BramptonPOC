@@ -25,6 +25,7 @@ import {
 } from '../../services/workQueue'
 import type { OpenReviewRow } from '../../services/caseExplorer'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import { DecisionLogicDisclosure, decisionLogicFromWorkRow } from '../../components/app/DecisionLogicPanel'
 
 // Work Queue — the unified, active review surface staff land on first. It brings
 // together two LIVE sources of active work, with clear source labels on every row:
@@ -436,6 +437,8 @@ function WorkRowCard({
           <span className="font-medium text-ink">Why review:</span> {row.priority_reason}
         </p>
       )}
+
+      <DecisionLogicDisclosure data={decisionLogicFromWorkRow(row)} />
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] text-ink-subtle">
