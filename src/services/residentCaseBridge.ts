@@ -75,14 +75,31 @@ function deriveFieldOutcome(
 
   if (violation === 'no') return 'no_violation'
 
-  if (/ticket|fine|citation|penalt/.test(action)) return 'ticket_issued'
-  if (/notice|order|warn|comply|compliance/.test(action)) return 'notice_issued'
+  // A ticket is only ever claimed when the recorded action EXPLICITLY says so.
+  // A "yes" violation alone never implies a ticket.
+  if (/ticket|fine|citation|summons|penalt/.test(action)) return 'ticket_issued'
+
+  // Education / warning / advisory → a warning-or-education record (non-ticket).
+  if (/educat|warn|advisor|verbal/.test(action)) return 'warning_education'
+
+  // Formal notice / order to comply (non-ticket enforcement step).
+  if (/notice|order|comply|compliance/.test(action)) return 'notice_issued'
+
+  // Resolved / complied / cleared on site.
   if (/resolv|complied|cleared|cleaned|removed|fixed|corrected|no further|no action/.test(action))
     return 'resolved'
 
-  // Violation seen but the action wording is generic → treat as a notice; if the
-  // visit was inconclusive (unclear) with no clear action, treat as no violation.
-  return violation === 'yes' ? 'notice_issued' : 'no_violation'
+  // Violation seen but the action wording is generic → record it as a
+  // warning/education (the safest non-ticket disposition, with the recorded
+  // action text carried into the letter); unclear with no clear action → no
+  // violation. Never assume a ticket.
+  return violation === 'yes' ? 'warning_education' : 'no_violation'
+}
+
+/** Normalize a stored violation-observed value to the recorded union, or null. */
+function normalizeViolation(value: string | null): 'yes' | 'no' | 'unclear' | null {
+  const v = (value ?? '').trim().toLowerCase()
+  return v === 'yes' || v === 'no' || v === 'unclear' ? v : null
 }
 
 /**
@@ -96,6 +113,10 @@ function fieldActionFromRow(row: ResidentRequestRow): OfficerFieldAction | null 
   const internalObservation = [row.field_observed_condition, row.field_officer_notes]
     .filter((s): s is string => Boolean(s && s.trim()))
     .join(' — ')
+  const clean = (s: string | null): string | null => {
+    const t = (s ?? '').trim()
+    return t.length > 0 ? t : null
+  }
   return {
     officerName: row.assigned_officer_name ?? 'Officer Oakley',
     visitedAt: recordedAt,
@@ -104,6 +125,11 @@ function fieldActionFromRow(row: ResidentRequestRow): OfficerFieldAction | null 
     observations: internalObservation,
     referenceNumber: null,
     followUpRequired: row.field_follow_up_required,
+    // Verbatim recorded fields, so the closure draft reflects the real action.
+    violationObserved: normalizeViolation(row.field_violation_observed),
+    actionTaken: clean(row.field_action_taken),
+    observedCondition: clean(row.field_observed_condition),
+    officerNotes: clean(row.field_officer_notes),
   }
 }
 

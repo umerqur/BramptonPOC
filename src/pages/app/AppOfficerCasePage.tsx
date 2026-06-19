@@ -25,9 +25,16 @@ import {
 
 // Field outcomes the officer can record on a local (NYC benchmark) case, with
 // which ones issue a reference number.
-const OUTCOME_ORDER: FieldVisitOutcome[] = ['no_violation', 'notice_issued', 'ticket_issued', 'resolved']
+const OUTCOME_ORDER: FieldVisitOutcome[] = [
+  'no_violation',
+  'warning_education',
+  'notice_issued',
+  'ticket_issued',
+  'resolved',
+]
 const OUTCOME_NEEDS_REFERENCE: Record<FieldVisitOutcome, boolean> = {
   no_violation: false,
+  warning_education: false,
   notice_issued: true,
   ticket_issued: true,
   resolved: false,

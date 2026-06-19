@@ -370,6 +370,7 @@ export const FIELD_OUTCOME_LABELS: Record<FieldVisitOutcome, string> = {
   notice_issued: 'Notice to comply issued',
   ticket_issued: 'Ticket issued',
   resolved: 'Resolved on site',
+  warning_education: 'Warning or education provided',
 }
 
 function fieldVisitDateLabel(action: OfficerFieldAction): string {
@@ -401,31 +402,55 @@ function closureOutcomeParagraph(
 
   const date = fieldVisitDateLabel(fieldAction)
   const ref = fieldAction.referenceNumber ? ` (${fieldAction.referenceNumber})` : ''
+  // A plain version of the officer's recorded action, appended where it adds
+  // detail so the letter reflects what the officer actually did.
+  const action = plainAction(fieldAction.actionTaken)
+  const recordedActionSentence = action ? ` The officer's recorded action was: ${action}.` : ''
+
   switch (fieldAction.outcome) {
     case 'no_violation':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} to investigate. ` +
         `At the time of inspection, no violation of ${policy} was observed. ` +
-        `Based on that inspection, this file has been closed. If the issue recurs, please submit a new request so we can schedule a follow-up.`
+        `Based on that inspection, this file has been closed.${recordedActionSentence} ` +
+        `If the issue recurs, please submit a new request so we can schedule a follow-up.`
+      )
+    case 'warning_education':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date} and ` +
+        `${fieldAction.violationObserved === 'yes' ? `observed a concern related to ${policy}` : `reviewed the reported concern`}. ` +
+        `The officer addressed the matter by providing education or a warning to the responsible party rather than issuing a ticket.` +
+        `${recordedActionSentence} Your service request has been closed.`
       )
     case 'notice_issued':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
-        `A notice to comply${ref} was issued to the responsible party, and the location will be re-inspected after the compliance period. ` +
-        `Your service request has been closed now that enforcement action has been taken.`
+        `A notice to comply${ref} was issued to the responsible party, and the location will be re-inspected after the compliance period.` +
+        `${recordedActionSentence} Your service request has been closed now that this action has been taken.`
       )
     case 'ticket_issued':
       return (
         `A by-law enforcement officer attended the location${where} on ${date}, observed a violation of ${policy}, ` +
-        `and issued a ticket${ref} to the responsible party. This file has now been closed.`
+        `and issued a ticket${ref} to the responsible party. This file has now been closed.${recordedActionSentence}`
       )
     case 'resolved':
       return (
         `A by-law enforcement officer attended the location${where} on ${date}. ` +
-        `The issue had been resolved, so no further enforcement action under ${policy} was required and this file has been closed. ` +
-        `Thank you for reporting it.`
+        `The issue had been resolved, so no further enforcement action under ${policy} was required and this file has been closed.` +
+        `${recordedActionSentence} Thank you for reporting it.`
       )
   }
+}
+
+/**
+ * A plain, resident-safe version of the officer's recorded action text, or null
+ * when none was recorded. Lower-cases the first letter and trims trailing
+ * punctuation so it reads naturally inside a sentence.
+ */
+function plainAction(text: string | null): string | null {
+  const t = (text ?? '').trim().replace(/[.\s]+$/, '')
+  if (!t) return null
+  return t.charAt(0).toLowerCase() + t.slice(1)
 }
 
 export function buildClosureDraft(
@@ -452,6 +477,8 @@ export function buildClosureDraft(
     fieldAction
       ? `Field outcome on file: ${FIELD_OUTCOME_LABELS[fieldAction.outcome]} by ${fieldAction.officerName} on ${fieldVisitDateLabel(fieldAction)}${fieldAction.referenceNumber ? ` (ref ${fieldAction.referenceNumber})` : ''}.`
       : 'No officer field action on file — closure language is review-only and claims no site visit.',
+    ...(fieldAction?.actionTaken ? [`Officer recorded action taken: ${fieldAction.actionTaken}.`] : []),
+    ...(fieldAction?.violationObserved ? [`Officer recorded violation observed: ${fieldAction.violationObserved}.`] : []),
     'Staff must review and approve before any resident communication is sent.',
   ]
 
@@ -461,7 +488,7 @@ export function buildClosureDraft(
     policyChecklist: [
       { item: `Cites applicable by-law (${context.policyMatch.reference})`, ok: true },
       {
-        item: fieldAction ? 'States the enforcement action taken' : 'States the review performed (no field action claimed)',
+        item: fieldAction ? 'States the recorded field action taken' : 'States the review performed (no field action claimed)',
         ok: true,
       },
       { item: 'Only claims a site visit when an officer recorded one', ok: true },
@@ -696,6 +723,10 @@ export function buildSeedCases(): DemoCase[] {
       referenceNumber: null,
       followUpRequired: false,
       recordedAt: visitedAt,
+      violationObserved: 'no',
+      actionTaken: 'No further action required — issue already resolved on arrival',
+      observedCondition: 'No active noise at the time of the visit.',
+      officerNotes: null,
     }
     const approvedAt = addSeconds(closed.createdAt, 600)
     // Rebuild the closure draft from the recorded outcome so the closure message

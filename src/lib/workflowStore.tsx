@@ -183,12 +183,19 @@ export function WorkflowProvider({
     setState((s) => {
       const existing = s.cases.find((c) => c.id === row.case_id)
       if (existing) {
-        // Refresh a previously-opened case when the officer has since recorded a
-        // field outcome the cached version predates, so closure review reflects
-        // it. Closed cases are never re-derived.
-        const needsFieldOutcome =
-          row.field_visit_completed && !existing.fieldAction && existing.stage !== 'closed'
-        if (!needsFieldOutcome) return { ...s, activeCaseId: row.case_id }
+        // Refresh a previously-opened case when the officer has since recorded —
+        // or RE-recorded — a field outcome, so closure review reflects the latest
+        // Supabase truth and never keeps a stale localStorage fieldAction. We
+        // refresh when there is a recorded outcome but no cached fieldAction, OR
+        // when the Supabase recorded-at differs from the cached fieldAction's
+        // recordedAt (a newer / changed outcome). Closed cases are never re-derived.
+        const rowRecordedAt = row.field_outcome_recorded_at
+        const staleFieldOutcome =
+          row.field_visit_completed &&
+          existing.stage !== 'closed' &&
+          (!existing.fieldAction ||
+            (rowRecordedAt != null && rowRecordedAt !== existing.fieldAction.recordedAt))
+        if (!staleFieldOutcome) return { ...s, activeCaseId: row.case_id }
         const refreshed = residentRowToCase(row)
         return {
           ...s,
@@ -304,6 +311,13 @@ export function WorkflowProvider({
           referenceNumber: input.referenceNumber?.trim() ? input.referenceNumber.trim() : null,
           followUpRequired: input.followUpRequired ?? false,
           recordedAt: now,
+          // The local (NYC benchmark) officer form records the disposition by
+          // outcome directly (no separate free-text action), so actionTaken stays
+          // null and the observation notes are carried through.
+          violationObserved: null,
+          actionTaken: null,
+          observedCondition: input.observations.trim() || null,
+          officerNotes: null,
         }
         // Regenerate the closure draft grounded in the recorded outcome.
         const draft = buildClosureDraft(c.input, c.triage, c.context, now, fieldAction)

@@ -102,13 +102,18 @@ export type CaseSummary = {
  * activity when one of these has been recorded. Mirrors a standard municipal
  * by-law enforcement disposition.
  */
-export type FieldVisitOutcome = 'no_violation' | 'notice_issued' | 'ticket_issued' | 'resolved'
+export type FieldVisitOutcome = 'no_violation' | 'notice_issued' | 'ticket_issued' | 'resolved' | 'warning_education'
 
 /**
  * A recorded officer field visit. Created only when a By-law Officer (role)
  * attends the location and records what they found. Drives the truthful closure
  * language — without this, the closure response must not claim an officer
  * attended.
+ *
+ * The closure draft is grounded in the officer's RECORDED action, not an
+ * assumed disposition: a "yes" violation does not mean a ticket was issued, so
+ * the raw recorded fields below are carried through and used verbatim where the
+ * letter describes what the officer actually did.
  */
 export type OfficerFieldAction = {
   officerName: string
@@ -119,6 +124,12 @@ export type OfficerFieldAction = {
   referenceNumber: string | null
   followUpRequired: boolean
   recordedAt: string // ISO timestamp
+  // Verbatim fields the officer recorded on the field form, so the closure draft
+  // reflects the real action taken rather than collapsing to a single template.
+  violationObserved: 'yes' | 'no' | 'unclear' | null
+  actionTaken: string | null
+  observedCondition: string | null
+  officerNotes: string | null
 }
 
 /** The AI-drafted closure response staff review, edit, and approve. */
