@@ -17,7 +17,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react'
 import type {
   DemoCase,
-  FieldVisitOutcome,
   OfficerFieldAction,
   Priority,
   ResidentComplaintInput,
@@ -28,6 +27,7 @@ import {
   buildClosureDraft,
   buildSeedCases,
   computeSupervisorMetrics,
+  deriveFieldVisitOutcome,
   FIELD_OUTCOME_LABELS,
   runWorkflow,
 } from '../services/demoWorkflowService'
@@ -43,12 +43,18 @@ import { ROLE_ACTOR_NAME, canSwitchRoleForEmail, roleForEmail, type StaffRole } 
 const STORAGE_KEY = 'brampton-demo-workflow-v3'
 const STAFF_NAME = 'M. Okafor (By-law Officer)'
 
-/** What an officer enters when recording a field investigation. */
+/**
+ * What an officer enters when recording a field investigation. This mirrors the
+ * resident Supabase field-outcome form (Officer Oakley's structure), so the
+ * local NYC benchmark path records the same fields and the outcome is DERIVED
+ * from the recorded violation + action — not picked from a dropdown.
+ */
 export type FieldActionInput = {
-  outcome: FieldVisitOutcome
-  observations: string
-  referenceNumber?: string | null
-  followUpRequired?: boolean
+  observedCondition: string
+  violationObserved: 'yes' | 'no' | 'unclear'
+  actionTaken: string
+  officerNotes?: string
+  followUpRequired: boolean
 }
 
 type WorkflowState = {
@@ -303,21 +309,27 @@ export function WorkflowProvider({
       updateCase(id, (c) => {
         if (c.stage === 'closed') return c
         const officerName = c.assignedOfficer ?? ROLE_ACTOR_NAME.officer
+        const observedCondition = input.observedCondition.trim()
+        const actionTaken = input.actionTaken.trim()
+        const officerNotes = input.officerNotes?.trim() ?? ''
+        // Derive the disposition from the recorded violation + action using the
+        // SAME shared rules as the resident Supabase path — a "yes" violation
+        // never implies a ticket.
+        const outcome = deriveFieldVisitOutcome(input.violationObserved, actionTaken)
         const fieldAction: OfficerFieldAction = {
           officerName,
           visitedAt: now,
-          outcome: input.outcome,
-          observations: input.observations,
-          referenceNumber: input.referenceNumber?.trim() ? input.referenceNumber.trim() : null,
-          followUpRequired: input.followUpRequired ?? false,
+          outcome,
+          observations: [observedCondition, officerNotes].filter(Boolean).join(' — '),
+          referenceNumber: null,
+          followUpRequired: input.followUpRequired,
           recordedAt: now,
-          // The local (NYC benchmark) officer form records the disposition by
-          // outcome directly (no separate free-text action), so actionTaken stays
-          // null and the observation notes are carried through.
-          violationObserved: null,
-          actionTaken: null,
-          observedCondition: input.observations.trim() || null,
-          officerNotes: null,
+          // Carry the verbatim recorded fields so the closure draft reflects the
+          // real action taken, not an assumed disposition.
+          violationObserved: input.violationObserved,
+          actionTaken: actionTaken || null,
+          observedCondition: observedCondition || null,
+          officerNotes: officerNotes || null,
         }
         // Regenerate the closure draft grounded in the recorded outcome.
         const draft = buildClosureDraft(c.input, c.triage, c.context, now, fieldAction)
@@ -326,10 +338,10 @@ export function WorkflowProvider({
           stage: 'field-visit',
           fieldAction,
           draft,
-          decisions: [...c.decisions, { action: `Recorded field outcome: ${FIELD_OUTCOME_LABELS[input.outcome]}`, by: officerName, at: now }],
+          decisions: [...c.decisions, { action: `Recorded field outcome: ${FIELD_OUTCOME_LABELS[outcome]}`, by: officerName, at: now }],
           audit: [
             ...c.audit,
-            auditEvent('officer', 'Field visit recorded', `${officerName} attended the location and recorded the outcome: ${FIELD_OUTCOME_LABELS[input.outcome]}.`, now),
+            auditEvent('officer', 'Field visit recorded', `${officerName} attended the location and recorded the outcome: ${FIELD_OUTCOME_LABELS[outcome]}.`, now),
             auditEvent('ai', 'Closure draft updated', 'Closure response regenerated to reflect the recorded field outcome.', addSecondsIso(now, 1)),
           ],
         }

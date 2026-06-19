@@ -4,7 +4,7 @@ import { useWorkflow, type FieldActionInput } from '../../lib/workflowStore'
 import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
-import type { DemoCase, FieldVisitOutcome } from '../../data/demoWorkflowTypes'
+import type { DemoCase } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
   getResidentRequestByCaseId,
@@ -17,28 +17,13 @@ import {
 // BOTH sources the officer can be assigned:
 //   * Local workflow DemoCase records (NYC open benchmark cases assigned in the
 //     Workbench) — checked first; the officer records the field outcome via the
-//     in-browser workflow store (recordFieldAction).
+//     in-browser workflow store (recordFieldAction), using the SAME field
+//     structure as Officer Oakley's resident form (observed condition, violation
+//     observed, action taken, officer notes, follow-up).
 //   * Supabase resident_service_requests — the existing resident intake flow,
 //     unchanged: the officer records the outcome via recordResidentFieldOutcome.
 // Recording the outcome feeds closure review; a supervisor still approves the
 // final closure. Closed cases are read only.
-
-// Field outcomes the officer can record on a local (NYC benchmark) case, with
-// which ones issue a reference number.
-const OUTCOME_ORDER: FieldVisitOutcome[] = [
-  'no_violation',
-  'warning_education',
-  'notice_issued',
-  'ticket_issued',
-  'resolved',
-]
-const OUTCOME_NEEDS_REFERENCE: Record<FieldVisitOutcome, boolean> = {
-  no_violation: false,
-  warning_education: false,
-  notice_issued: true,
-  ticket_issued: true,
-  resolved: false,
-}
 
 export default function AppOfficerCasePage() {
   const { caseId = '' } = useParams()
@@ -551,24 +536,31 @@ function LocalFieldOutcomeSection({
 
 function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecorded: () => void }) {
   const { recordFieldAction } = useWorkflow()
-  const [outcome, setOutcome] = useState<FieldVisitOutcome>('no_violation')
-  const [observations, setObservations] = useState('')
-  const [reference, setReference] = useState('')
+  const [observedCondition, setObservedCondition] = useState('')
+  const [violationObserved, setViolationObserved] = useState<'yes' | 'no' | 'unclear'>('unclear')
+  const [actionTaken, setActionTaken] = useState('')
+  const [officerNotes, setOfficerNotes] = useState('')
   const [followUpRequired, setFollowUpRequired] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const needsReference = OUTCOME_NEEDS_REFERENCE[outcome]
-
+  // Same structure as Officer Oakley's resident field-outcome form. The closure
+  // disposition is derived from violation + action; the officer never picks
+  // "ticket" from a dropdown.
   function submit() {
-    if (!observations.trim()) {
-      setError('Describe what you observed on site before recording the outcome.')
+    if (!observedCondition.trim()) {
+      setError('Describe the observed condition before completing the field outcome.')
+      return
+    }
+    if (!actionTaken.trim()) {
+      setError('Record the action taken before completing the field outcome.')
       return
     }
     setError(null)
     const input: FieldActionInput = {
-      outcome,
-      observations: observations.trim(),
-      referenceNumber: needsReference ? reference.trim() || null : null,
+      observedCondition: observedCondition.trim(),
+      violationObserved,
+      actionTaken: actionTaken.trim(),
+      officerNotes: officerNotes.trim() || undefined,
       followUpRequired,
     }
     recordFieldAction(caseId, input)
@@ -579,37 +571,46 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
     <Panel title="Record field outcome" subtitle="Your on-site findings — feeds closure review readiness">
       <div className="space-y-4">
         <label className="block">
-          <span className="stat-label">Outcome</span>
+          <span className="stat-label">Observed condition</span>
+          <textarea
+            value={observedCondition}
+            onChange={(e) => setObservedCondition(e.target.value)}
+            rows={3}
+            placeholder="What you observed on site…"
+            className={fieldClass}
+          />
+        </label>
+
+        <label className="block">
+          <span className="stat-label">Violation observed</span>
           <select
-            value={outcome}
-            onChange={(e) => setOutcome(e.target.value as FieldVisitOutcome)}
+            value={violationObserved}
+            onChange={(e) => setViolationObserved(e.target.value as 'yes' | 'no' | 'unclear')}
             className={fieldClass}
           >
-            {OUTCOME_ORDER.map((o) => (
-              <option key={o} value={o}>{FIELD_OUTCOME_LABELS[o]}</option>
-            ))}
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+            <option value="unclear">Unclear</option>
           </select>
         </label>
 
-        {needsReference && (
-          <label className="block">
-            <span className="stat-label">{outcome === 'ticket_issued' ? 'Ticket number' : 'Notice number'}</span>
-            <input
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              placeholder={outcome === 'ticket_issued' ? 'e.g. TKT-20260616-014' : 'e.g. NTC-20260616-007'}
-              className={fieldClass}
-            />
-          </label>
-        )}
+        <label className="block">
+          <span className="stat-label">Action taken</span>
+          <input
+            value={actionTaken}
+            onChange={(e) => setActionTaken(e.target.value)}
+            placeholder="e.g. Education provided, warning issued, notice to comply, ticket issued, no action needed"
+            className={fieldClass}
+          />
+        </label>
 
         <label className="block">
-          <span className="stat-label">Observations</span>
+          <span className="stat-label">Officer notes</span>
           <textarea
-            value={observations}
-            onChange={(e) => setObservations(e.target.value)}
-            rows={3}
-            placeholder="What you observed on site…"
+            value={officerNotes}
+            onChange={(e) => setOfficerNotes(e.target.value)}
+            rows={2}
+            placeholder="Optional additional notes…"
             className={fieldClass}
           />
         </label>

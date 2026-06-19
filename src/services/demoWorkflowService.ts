@@ -373,6 +373,45 @@ export const FIELD_OUTCOME_LABELS: Record<FieldVisitOutcome, string> = {
   warning_education: 'Warning or education provided',
 }
 
+/**
+ * Shared, deterministic mapping from the officer's recorded field finding
+ * (violation observed + free-text action taken) to a standard by-law
+ * disposition. BOTH the resident Supabase path and the local NYC benchmark path
+ * use this single rule set, so the closure draft is grounded the same way:
+ *
+ *   ticket / fine / citation / summons / penalty → ticket_issued
+ *   education / warning / advisory / verbal / guidance → warning_education
+ *   notice / order / comply / compliance → notice_issued
+ *   resolved / cleared / fixed / no further action → resolved
+ *
+ * A "yes" violation ALONE never implies a ticket: with generic wording it is
+ * recorded as a warning/education (the real action text is carried into the
+ * letter). A "no" violation is always no_violation.
+ */
+export function deriveFieldVisitOutcome(
+  violationObserved: string | null,
+  actionTaken: string | null,
+): FieldVisitOutcome {
+  const violation = (violationObserved ?? '').trim().toLowerCase()
+  const action = (actionTaken ?? '').trim().toLowerCase()
+
+  if (violation === 'no') return 'no_violation'
+
+  // A ticket is only ever claimed when the recorded action EXPLICITLY says so.
+  if (/ticket|fine|citation|summons|penalt/.test(action)) return 'ticket_issued'
+  // Education / warning / advisory / guidance → a warning-or-education record.
+  if (/educat|warn|advisor|verbal|guidance/.test(action)) return 'warning_education'
+  // Formal notice / order to comply (non-ticket enforcement step).
+  if (/notice|order|comply|compliance/.test(action)) return 'notice_issued'
+  // Resolved / cleared / fixed / no further action on site.
+  if (/resolv|complied|cleared|cleaned|removed|fixed|corrected|no further|no action/.test(action))
+    return 'resolved'
+
+  // Violation seen but the action wording is generic → record as warning/education
+  // (never assume a ticket). Unclear with no clear action → no violation.
+  return violation === 'yes' ? 'warning_education' : 'no_violation'
+}
+
 function fieldVisitDateLabel(action: OfficerFieldAction): string {
   return formatDate(action.visitedAt)
 }

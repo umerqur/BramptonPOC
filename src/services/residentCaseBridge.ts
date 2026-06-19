@@ -16,12 +16,11 @@
 import type {
   DemoCase,
   DemoCategory,
-  FieldVisitOutcome,
   OfficerFieldAction,
   ResidentComplaintInput,
   ContactPreference,
 } from '../data/demoWorkflowTypes'
-import { runWorkflow, buildClosureDraft } from './demoWorkflowService'
+import { runWorkflow, buildClosureDraft, deriveFieldVisitOutcome } from './demoWorkflowService'
 import { residentRowToNormalized } from './serviceRequest'
 import type { ResidentRequestRow } from './residentRequests'
 
@@ -58,44 +57,6 @@ function methodToPreference(method: string | null): ContactPreference {
   return 'Email'
 }
 
-/**
- * Deterministically map the officer's recorded field outcome (whether a
- * violation was observed + the free-text action taken) to a standard by-law
- * enforcement disposition. This is what converts the officer's raw finding into
- * a professional, resident-facing closure paragraph; the officer's raw notes
- * stay internal. No automated enforcement decision — a supervisor still approves
- * the closure.
- */
-function deriveFieldOutcome(
-  violationObserved: string | null,
-  actionTaken: string | null,
-): FieldVisitOutcome {
-  const violation = (violationObserved ?? '').trim().toLowerCase()
-  const action = (actionTaken ?? '').trim().toLowerCase()
-
-  if (violation === 'no') return 'no_violation'
-
-  // A ticket is only ever claimed when the recorded action EXPLICITLY says so.
-  // A "yes" violation alone never implies a ticket.
-  if (/ticket|fine|citation|summons|penalt/.test(action)) return 'ticket_issued'
-
-  // Education / warning / advisory → a warning-or-education record (non-ticket).
-  if (/educat|warn|advisor|verbal/.test(action)) return 'warning_education'
-
-  // Formal notice / order to comply (non-ticket enforcement step).
-  if (/notice|order|comply|compliance/.test(action)) return 'notice_issued'
-
-  // Resolved / complied / cleared on site.
-  if (/resolv|complied|cleared|cleaned|removed|fixed|corrected|no further|no action/.test(action))
-    return 'resolved'
-
-  // Violation seen but the action wording is generic → record it as a
-  // warning/education (the safest non-ticket disposition, with the recorded
-  // action text carried into the letter); unclear with no clear action → no
-  // violation. Never assume a ticket.
-  return violation === 'yes' ? 'warning_education' : 'no_violation'
-}
-
 /** Normalize a stored violation-observed value to the recorded union, or null. */
 function normalizeViolation(value: string | null): 'yes' | 'no' | 'unclear' | null {
   const v = (value ?? '').trim().toLowerCase()
@@ -121,7 +82,7 @@ function fieldActionFromRow(row: ResidentRequestRow): OfficerFieldAction | null 
     officerName: row.assigned_officer_name ?? 'Officer Oakley',
     visitedAt: recordedAt,
     recordedAt,
-    outcome: deriveFieldOutcome(row.field_violation_observed, row.field_action_taken),
+    outcome: deriveFieldVisitOutcome(row.field_violation_observed, row.field_action_taken),
     observations: internalObservation,
     referenceNumber: null,
     followUpRequired: row.field_follow_up_required,
