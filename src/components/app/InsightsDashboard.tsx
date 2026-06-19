@@ -292,13 +292,18 @@ function OperationalSnapshot() {
   const { metrics, cases } = useWorkflow()
 
   const high = open.data?.highPriority ?? null
+
+  // Share of AI-summarized files that reached high review readiness (enough
+  // context to prepare a closure draft). AI assists readiness; staff still decide.
   const readinessPct =
     metrics.aiSummariesGenerated > 0
       ? Math.round((metrics.closureDraftsPrepared / metrics.aiSummariesGenerated) * 100)
       : null
-  // Closure drafts waiting on a supervisor decision (staff-review) plus any
-  // approved-but-not-yet-closed cases. This reads the active human-approval
-  // backlog rather than a cumulative closed count (which can look weak at 0/1).
+  // Assigned to an officer but no field outcome recorded yet — work stuck waiting
+  // on a field inspection.
+  const fieldPending = cases.filter((c) => c.assignedOfficer && !c.fieldAction && c.stage !== 'closed').length
+  // Closure drafts in staff-review (plus approved-awaiting-close) — work stuck
+  // waiting on a supervisor approval decision.
   const approvalsPending = cases.filter((c) => c.stage === 'staff-review' || c.stage === 'approved').length
 
   // Open-queue value cells degrade to "—" with a clear note when not loaded.
@@ -311,7 +316,8 @@ function OperationalSnapshot() {
         <div>
           <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
           <p className="mt-0.5 text-xs text-ink-subtle">
-            Each KPI shows its value, a benchmark, and whether it is on track.
+            Where work is stuck across the enforcement response workflow — each KPI shows a value, a benchmark, and
+            whether it is on track.
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
@@ -325,7 +331,7 @@ function OperationalSnapshot() {
           value={openValue}
           direction="lower"
           status="neutral"
-          benchmark={open.error ? 'Open queue not loaded' : 'Monitor vs. your last review'}
+          benchmark={open.error ? 'Open queue not loaded' : 'Monitor vs. last refresh or operational target'}
           helper="Current backlog of open cases that may need review"
         />
         <KpiCard
@@ -334,43 +340,46 @@ function OperationalSnapshot() {
           direction="lower"
           status={high == null || open.error ? 'neutral' : high >= 20 ? 'attention' : high >= 15 ? 'watch' : 'good'}
           benchmark="Target below 20"
-          helper="Cases surfaced first for staff attention"
-          note="Lower is better after review"
+          helper="Urgent cases surfaced first for review"
+          note="Lower is better after staff action"
         />
         <KpiCard
-          title="Ready for staff review"
+          title="AI ready for staff review"
           value={readinessPct == null ? '—' : `${readinessPct}%`}
           direction="higher"
           status={readinessPct == null ? 'neutral' : readinessPct >= 80 ? 'good' : readinessPct >= 60 ? 'watch' : 'attention'}
           benchmark="Target 80% or higher"
-          helper="Files with enough context to prepare a draft"
+          helper="Files with enough context to prepare a closure draft"
         />
         <KpiCard
-          title="Drafts prepared"
-          value={fmtInt(metrics.closureDraftsPrepared)}
-          direction="higher"
-          status="good"
-          benchmark="Track vs. previous period"
-          helper="Closure responses ready for human approval"
-          note="Higher is better, with staff approval"
+          title="Field investigation pending"
+          value={fmtInt(fieldPending)}
+          direction="lower"
+          status={fieldPending === 0 ? 'good' : 'neutral'}
+          benchmark="Target 0 pending overnight"
+          helper="Assigned cases waiting on officer outcome"
+        />
+        <KpiCard
+          title="Closure approvals pending"
+          value={fmtInt(approvalsPending)}
+          direction="lower"
+          status={approvalsPending === 0 ? 'good' : 'neutral'}
+          benchmark="Target 0 pending overnight"
+          helper="Drafts waiting for supervisor approval"
         />
         <KpiCard
           title="Estimated staff time saved"
           value={`${fmtInt(metrics.manualResearchHoursAvoided)} hrs`}
           direction="higher"
           status="good"
-          benchmark="vs. manual research baseline"
+          benchmark="Compared with manual research and drafting baseline"
           helper="Research and drafting effort avoided"
         />
-        <KpiCard
-          title="Human approvals pending"
-          value={fmtInt(approvalsPending)}
-          direction="lower"
-          status={approvalsPending === 0 ? 'good' : 'neutral'}
-          benchmark="Target 0 pending overnight"
-          helper="Closure drafts waiting for supervisor decision"
-        />
       </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+        AI assists readiness, summaries, and drafting. Staff assign, inspect, approve, and close.
+      </p>
 
       <BenchmarkContextStrip state={hist} />
     </section>
@@ -466,7 +475,8 @@ function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
       ) : data ? (
         <>
           <p className="mt-1 text-xs text-ink-muted">
-            Based on {fmtInt(data.closed_requests)} closed public NYC 311 records:
+            {fmtInt(data.closed_requests)} closed public NYC 311 records used to compare workload patterns and closure
+            language.
           </p>
           <dl className="mt-2 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-3">
             <BenchmarkItem
