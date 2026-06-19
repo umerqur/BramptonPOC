@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useWorkflow } from '../../lib/workflowStore'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
   getInsightsKpis,
@@ -275,132 +276,228 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
 // --- Operational snapshot --------------------------------------------------
 
 /**
- * Executive snapshot, directly below the source banner and above the map. Two
- * clearly separated bands:
+ * Operational snapshot — six KPI cards, each with a current value, a benchmark
+ * or target, a plain-language direction/status badge, and a helper line. Below
+ * the cards sits a small benchmark-context strip with the historical NYC 311
+ * reference figures in plain operational language (no statistical jargon).
  *
- *   1. Active open-case review queue — the LIVE open NYC 311 queue
- *      (v_nyc_open_tier_volume / v_nyc_open_review_queue). Visually prominent so
- *      the UI never implies there are zero active cases. If the open dataset is
- *      not loaded, this band says "Open queue not loaded" rather than showing a
- *      misleading zero.
- *   2. Historical workload intelligence — the closed-heavy NYC 311 history
- *      (v_insights_kpis). This is completed workload, not the active queue, so
- *      its "open in historical extract" figure is intentionally not surfaced here.
+ * Live open-queue figures come from v_nyc_open_review_queue; the workflow
+ * throughput figures (readiness, drafts, time saved, approved closures) come
+ * from the in-app workflow store; the historical benchmark comes from
+ * v_insights_kpis.
  */
 function OperationalSnapshot() {
   const hist = useLive<InsightsKpis>(getInsightsKpis)
   const open = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
+  const { metrics, cases } = useWorkflow()
+
+  const high = open.data?.highPriority ?? null
+  const readinessPct =
+    metrics.aiSummariesGenerated > 0
+      ? Math.round((metrics.closureDraftsPrepared / metrics.aiSummariesGenerated) * 100)
+      : null
+  const approvedClosures = cases.filter((c) => c.stage === 'closed').length
+
+  // Open-queue value cells degrade to "—" with a clear note when not loaded.
+  const openValue = open.loading ? '…' : open.error ? '—' : fmtInt(open.data?.total ?? 0)
+  const highValue = open.loading ? '…' : open.error || high == null ? '—' : fmtInt(high)
 
   return (
     <section className="card p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
-          <p className="mt-0.5 text-xs text-ink-subtle">Active review queue and historical workload at a glance.</p>
+          <p className="mt-0.5 text-xs text-ink-subtle">
+            Each KPI shows its value, a benchmark, and whether it is on track.
+          </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
           Live data
         </span>
       </div>
 
-      <div className="mt-4 space-y-5">
-        <ActiveOpenQueueBand state={open} />
-        <HistoricalWorkloadBand state={hist} />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <KpiCard
+          title="Open cases waiting"
+          value={openValue}
+          direction="lower"
+          status="neutral"
+          benchmark={open.error ? 'Open queue not loaded' : 'Monitor vs. your last review'}
+          helper="Current backlog of open cases that may need review"
+        />
+        <KpiCard
+          title="High priority cases"
+          value={highValue}
+          direction="lower"
+          status={high == null || open.error ? 'neutral' : high >= 20 ? 'attention' : high >= 15 ? 'watch' : 'good'}
+          benchmark="Target below 20"
+          helper="Cases surfaced first for staff attention"
+          note="Lower is better after review"
+        />
+        <KpiCard
+          title="Ready for staff review"
+          value={readinessPct == null ? '—' : `${readinessPct}%`}
+          direction="higher"
+          status={readinessPct == null ? 'neutral' : readinessPct >= 80 ? 'good' : readinessPct >= 60 ? 'watch' : 'attention'}
+          benchmark="Target 80% or higher"
+          helper="Files with enough context to prepare a draft"
+        />
+        <KpiCard
+          title="Drafts prepared"
+          value={fmtInt(metrics.closureDraftsPrepared)}
+          direction="higher"
+          status="good"
+          benchmark="Track vs. previous period"
+          helper="Closure responses ready for human approval"
+          note="Higher is better, with staff approval"
+        />
+        <KpiCard
+          title="Estimated staff time saved"
+          value={`${fmtInt(metrics.manualResearchHoursAvoided)} hrs`}
+          direction="higher"
+          status="good"
+          benchmark="vs. manual research baseline"
+          helper="Research and drafting effort avoided"
+        />
+        <KpiCard
+          title="Staff approved closures"
+          value={fmtInt(approvedClosures)}
+          direction="higher"
+          status="good"
+          benchmark="Track vs. previous period"
+          helper="Staff approved closure responses"
+        />
       </div>
+
+      <BenchmarkContextStrip state={hist} />
     </section>
   )
 }
 
-/** Small band header: a label, a one-line description, and a subtle divider. */
-function BandHeading({ label, hint }: { label: string; hint: string }) {
-  return (
-    <div className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-slate-100 pb-2">
-      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-navy-900">{label}</h3>
-      <span className="text-[11px] text-ink-subtle">{hint}</span>
-    </div>
-  )
+type KpiDirection = 'higher' | 'lower'
+// 'neutral' simply shows the orientation; 'good' is on-track; 'watch'/'attention'
+// flag a benchmark breach.
+type KpiStatus = 'neutral' | 'good' | 'watch' | 'attention'
+
+const KPI_BADGE: Record<KpiStatus, { className: string }> = {
+  neutral: { className: 'bg-slate-100 text-slate-600' },
+  good: { className: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200' },
+  watch: { className: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200' },
+  attention: { className: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200' },
 }
 
-/** A compact metric tile for the historical band. */
-function StatTile({ label, value }: { label: string; value: string }) {
+/** Direction/status label: orientation by default, or Watch / Needs attention on a breach. */
+function kpiBadgeLabel(direction: KpiDirection, status: KpiStatus): string {
+  if (status === 'watch') return 'Watch'
+  if (status === 'attention') return 'Needs attention'
+  return direction === 'higher' ? 'Higher is better' : 'Lower is better'
+}
+
+/**
+ * One KPI card: current value, benchmark/target, a plain-language direction or
+ * status badge, and a helper line. No statistical jargon.
+ */
+function KpiCard({
+  title,
+  value,
+  benchmark,
+  helper,
+  direction,
+  status,
+  note,
+}: {
+  title: string
+  value: string
+  benchmark: string
+  helper: string
+  direction: KpiDirection
+  status: KpiStatus
+  note?: string
+}) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3.5">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
-      <div className="mt-1 truncate text-xl font-semibold tabular-nums text-navy-900" title={value}>
-        {value}
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${KPI_BADGE[status].className}`}
+        >
+          {kpiBadgeLabel(direction, status)}
+        </span>
       </div>
+      <div className="mt-1.5 text-3xl font-bold tabular-nums text-navy-900">{value}</div>
+      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-muted">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+          className={`h-3 w-3 shrink-0 ${direction === 'higher' ? 'text-emerald-600' : 'text-sky-600'}`}
+        >
+          {direction === 'higher' ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M12 5v14M5 12l7 7 7-7" />}
+        </svg>
+        <span>Benchmark: {benchmark}</span>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+      {note && <p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">{note}</p>}
     </div>
   )
 }
 
 /**
- * Active open-case review queue band. The headline "Active open queue" card is
- * intentionally prominent (accent panel, large number). On a load failure or an
- * unavailable open dataset it shows a clear "Open queue not loaded" notice — no
- * fabricated zero.
+ * Benchmark context strip — the historical NYC 311 reference figures in plain
+ * operational language. Uses "Typical historical closure" instead of an average
+ * label, and "Slow case threshold" instead of "P90".
  */
-function ActiveOpenQueueBand({ state }: { state: LiveState<OpenQueueSummary> }) {
+function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
   const { data, loading, error } = state
   return (
-    <div>
-      <BandHeading label="Active open-case review queue" hint="Live open NYC 311 cases awaiting review." />
+    <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Benchmark context</div>
       {error ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
-          <div className="font-semibold">Open queue not loaded.</div>
-          <div className="mt-0.5 text-xs">
-            The active open NYC 311 review queue is not available yet. Load the open dataset to see live active cases.
-          </div>
-        </div>
+        <p className="mt-1 text-xs text-ink-subtle">Historical benchmark unavailable right now.</p>
       ) : loading ? (
-        <div className="animate-pulse rounded-lg bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading live data…</div>
+        <p className="mt-1 text-xs text-ink-subtle">Loading historical benchmark…</p>
       ) : data ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {/* Prominent headline card. */}
-          <div className="relative overflow-hidden rounded-xl border border-accent-200 bg-gradient-to-br from-accent-50 to-white p-4 shadow-sm sm:col-span-2 lg:col-span-1">
-            <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-accent-500" />
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-accent-700">Active open queue</div>
-            <div className="mt-1 text-3xl font-bold tabular-nums text-navy-900">{fmtInt(data.total)}</div>
-            <div className="mt-0.5 text-[11px] text-ink-subtle">Open cases awaiting review · decision support</div>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Open high-priority cases</div>
-            <div className="mt-1 text-2xl font-semibold tabular-nums text-navy-900">
-              {data.highPriority == null ? '—' : fmtInt(data.highPriority)}
-            </div>
-            <div className="mt-0.5 text-[11px] text-ink-subtle">
-              {data.highPriority == null ? 'Review-priority tiers not loaded' : 'High review-priority tier'}
-            </div>
-          </div>
-        </div>
+        <>
+          <p className="mt-1 text-xs text-ink-muted">
+            Based on {fmtInt(data.closed_requests)} closed public NYC 311 records:
+          </p>
+          <dl className="mt-2 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-3">
+            <BenchmarkItem
+              label="Typical historical closure"
+              value={data.avg_closure_days == null ? '—' : `${data.avg_closure_days.toFixed(1)} days`}
+            />
+            <BenchmarkItem
+              label="Slow case threshold"
+              value={
+                data.p90_closure_days == null
+                  ? '—'
+                  : `most similar cases closed within ${Math.round(data.p90_closure_days)} days`
+              }
+            />
+            <BenchmarkItem
+              label="Top workload pressure"
+              value={
+                [data.top_complaint_type, data.busiest_council_district ? `District ${data.busiest_council_district}` : null]
+                  .filter(Boolean)
+                  .join(', ') || '—'
+              }
+            />
+          </dl>
+        </>
       ) : null}
     </div>
   )
 }
 
-/**
- * Historical workload intelligence band — the closed-heavy NYC 311 history. This
- * is completed workload data, NOT the active queue, so it never shows an
- * "open / active" figure that would imply a live backlog of zero.
- */
-function HistoricalWorkloadBand({ state }: { state: LiveState<InsightsKpis> }) {
-  const { data, loading, error } = state
+function BenchmarkItem({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <BandHeading label="Historical workload intelligence" hint="Closed-heavy NYC 311 history — completed workload." />
-      {error ? (
-        <SectionError name="the historical workload snapshot" error={error} />
-      ) : loading ? (
-        <div className="animate-pulse rounded-lg bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading live data…</div>
-      ) : data ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatTile label="Historical records loaded" value={fmtInt(data.total_requests)} />
-          <StatTile label="Closed historical records" value={fmtInt(data.closed_requests)} />
-          <StatTile label="Avg historical closure" value={fmtDays(data.avg_closure_days)} />
-          <StatTile label="P90 historical closure" value={fmtDays(data.p90_closure_days)} />
-          <StatTile label="Busiest district" value={data.busiest_council_district ? `District ${data.busiest_council_district}` : '—'} />
-          <StatTile label="Top historical complaint type" value={data.top_complaint_type ?? '—'} />
-        </div>
-      ) : null}
+    <div className="min-w-0">
+      <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</dt>
+      <dd className="mt-0.5 text-navy-900">{value}</dd>
     </div>
   )
 }
@@ -717,7 +814,7 @@ function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters)
     return filtered.slice(0, 12)
   }, [data, highVolumeOnly])
   return (
-    <SectionShell name="closure bottlenecks" title="Closure bottlenecks by complaint type" subtitle="Where closure is slowest." loading={loading} error={error} empty={data?.length === 0}
+    <SectionShell name="closure bottlenecks" title="Closure bottlenecks by complaint type" subtitle="Where closure is slowest. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}
       action={
         <label className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
           <input type="checkbox" checked={highVolumeOnly} onChange={(e) => setHighVolumeOnly(e.target.checked)} />
@@ -727,7 +824,7 @@ function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters)
     >
       {data && (
         <Table
-          head={['Complaint type', 'Total', 'Closed', 'Avg', 'Median', 'P90']}
+          head={['Complaint type', 'Total', 'Closed', 'Avg', 'Median', 'Slow case']}
           align={['left', 'right', 'right', 'right', 'right', 'right']}
           rows={rows.map((row) => ({
             key: row.complaint_type,
@@ -745,10 +842,10 @@ function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(12))
   return (
-    <SectionShell name="area bottlenecks" title="Area bottlenecks by council district" subtitle="Workload and closure pressure by the ward-like unit." loading={loading} error={error} empty={data?.length === 0}>
+    <SectionShell name="area bottlenecks" title="Area bottlenecks by council district" subtitle="Workload and closure pressure by the ward-like unit. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}>
       {data && (
         <Table
-          head={['Council district', 'Total', 'Avg', 'P90', 'Top complaint type']}
+          head={['Council district', 'Total', 'Avg', 'Slow case', 'Top complaint type']}
           align={['left', 'right', 'right', 'right', 'left']}
           rows={data.map((row) => ({
             key: row.council_district,

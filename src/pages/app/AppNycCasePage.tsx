@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getUnifiedNycCaseDetail, type UnifiedNycCaseDetail } from '../../services/caseExplorer'
+import { buildCasePriorityContext } from '../../services/benchmarks'
 
 // Full NYC 311 case page (replaces the old side drawer). Reads one case by id
 // from the unified detail reader, which resolves it from EITHER the historical
@@ -85,6 +86,8 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
   // status is terminal — NOT based on which source view it came from. The open
   // review queue can still hold Closed cases, so sourceType must not drive this.
   const isClosed = !!detail.closed_at || isTerminalStatus(detail.status)
+  // Plain-language, case-level priority explanation (open cases only).
+  const priorityContext = isClosed ? null : buildCasePriorityContext(detail.age_days)
   const coordinates = fmtCoordinates(detail.source.latitude, detail.source.longitude)
   const crossStreets = joinParts([
     detail.source.cross_street_1,
@@ -230,6 +233,16 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
                 <Field label="Priority tier" value={detail.priority_tier} />
                 <Field label="Priority reason" value={detail.priority_reason} />
               </dl>
+              {priorityContext && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">Why this is prioritized</div>
+                  <ul className="mt-1 space-y-0.5 text-xs leading-relaxed text-amber-900">
+                    {priorityContext.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
                 Review priority is an internal ranking we compute to help staff decide what to look at first — it is{' '}
                 <span className="font-semibold">not</span> a field from the NYC 311 source record. It is not an automated
