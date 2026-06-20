@@ -185,7 +185,7 @@ export default function AppCaseWorkbenchPage() {
 
           {!isBenchmark && <ResidentAttachments caseId={c.id} variant="full" />}
 
-          <Panel title="Case summary" subtitle="AI assisted summary, staff review required">
+          <Panel title="Case summary" subtitle="Decision support summary, staff review required">
             <p className="text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
             <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2">
               {summary.structuredFacts.map((f) => (
@@ -277,7 +277,7 @@ export default function AppCaseWorkbenchPage() {
 
           <DecisionLogicPanel data={decisionLogic} />
 
-          <Panel title="AI review readiness" subtitle="AI assisted file readiness, staff confirm and decide">
+          <Panel title="Review readiness" subtitle="Rules based file readiness, staff confirm and decide">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />
             <div
               className={`mt-3 rounded-lg px-3 py-2 text-xs ${
