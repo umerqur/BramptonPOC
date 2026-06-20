@@ -27,19 +27,39 @@ import {
 
 export default function AppOfficerCasePage() {
   const { caseId = '' } = useParams()
-  const { role, cases } = useWorkflow()
+  const { role, cases, userEmail } = useWorkflow()
 
   // Officers only.
   if (role !== 'officer') return <Navigate to="/app" replace />
 
+  const officerEmail = (userEmail ?? '').trim().toLowerCase()
+
   // Local-first: NYC open benchmark cases live only in the workflow store and are
   // recorded through it. Everything else falls back to the Supabase resident flow.
   const localCase = cases.find((c) => c.id === caseId && c.source.kind === 'nyc_open')
-  if (localCase) return <LocalOfficerCaseView caseId={caseId} />
-  return <SupabaseOfficerCaseView caseId={caseId} />
+  if (localCase) {
+    // A signed-in officer may only open a case assigned to their own email.
+    if ((localCase.assignedOfficerEmail ?? '').toLowerCase() !== officerEmail) {
+      return <NotAssignedNotice />
+    }
+    return <LocalOfficerCaseView caseId={caseId} />
+  }
+  return <SupabaseOfficerCaseView caseId={caseId} officerEmail={officerEmail} />
 }
 
-function SupabaseOfficerCaseView({ caseId }: { caseId: string }) {
+// Shown when an officer tries to open a case that is not assigned to their email.
+function NotAssignedNotice() {
+  return (
+    <div className="container-page py-10">
+      <BackLink />
+      <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">
+        This case is not assigned to you. You can only open cases assigned to your officer account.
+      </div>
+    </div>
+  )
+}
+
+function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; officerEmail: string }) {
   const [row, setRow] = useState<ResidentRequestRow | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   // True only right after the officer records the outcome this session, so we can
@@ -81,6 +101,12 @@ function SupabaseOfficerCaseView({ caseId }: { caseId: string }) {
         </div>
       </div>
     )
+  }
+
+  // A signed-in officer may only open a case assigned to their own email. The
+  // resident request carries assigned_officer_email — enforce it here.
+  if ((row.assigned_officer_email ?? '').toLowerCase() !== officerEmail) {
+    return <NotAssignedNotice />
   }
 
   // Compact success state, shown right after the officer records the outcome.

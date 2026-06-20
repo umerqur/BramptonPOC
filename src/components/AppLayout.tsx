@@ -5,7 +5,7 @@ import Footer from './Footer'
 import WorkflowRail from './app/WorkflowRail'
 import { useAuth } from '../lib/auth'
 import { useWorkflow, WorkflowProvider } from '../lib/workflowStore'
-import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLE_OPTIONS, type StaffRole } from '../lib/roles'
+import { ROLE_DESCRIPTIONS, ROLE_LABELS, type StaffRole } from '../lib/roles'
 
 // Authenticated app shell for the staff workflow. The top nav now depends on the
 // signed-in user's role (derived from their email):
@@ -135,10 +135,13 @@ function RoleBadge({ role, canSwitchRole }: { role: StaffRole; canSwitchRole: bo
   )
 }
 
-// Acting-as role switcher, shown only to supervisor/dev accounts for demo
-// testing. A By-law Officer account never sees this and cannot escalate.
+// Acting-as role switcher. It renders ONLY the roles the signed-in user's staff
+// profile allows — not every possible role. A supervisor/CSR account sees only
+// Supervisor + CSR (never By-law Officer); a By-law Officer account has a single
+// allowed role, so the switcher is hidden for them entirely (canSwitchRole is
+// false). This is staff-profile-based access control, not a free persona switcher.
 function RoleSwitcher({ className = '' }: { className?: string }) {
-  const { role, setRole } = useWorkflow()
+  const { role, setRole, allowedRoles } = useWorkflow()
   return (
     <label className={`flex items-center gap-1.5 text-xs text-ink-subtle ${className}`}>
       <span className="hidden 2xl:inline whitespace-nowrap">Acting as</span>
@@ -148,7 +151,7 @@ function RoleSwitcher({ className = '' }: { className?: string }) {
         title={ROLE_DESCRIPTIONS[role]}
         className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-navy-900 focus:border-accent-500 focus:outline-none"
       >
-        {ROLE_OPTIONS.map((r) => (
+        {allowedRoles.map((r) => (
           <option key={r} value={r}>
             {ROLE_LABELS[r]}
           </option>

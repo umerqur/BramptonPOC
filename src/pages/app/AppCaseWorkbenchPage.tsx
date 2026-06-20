@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
-import { can, rolesAllowed, DEMO_OFFICER } from '../../lib/roles'
+import { can, rolesAllowed, officerProfiles } from '../../lib/roles'
 import { FIELD_OUTCOME_LABELS, formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { getResidentRequestAttachmentsForCases, isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import { computeResidentPriority, normalizeTier } from '../../services/workQueue'
@@ -432,13 +432,19 @@ export default function AppCaseWorkbenchPage() {
 }
 
 // Officer field-investigation panel — the real-world step between triage and
-// closure. The supervisor/CSR assigns the case to the single demo By-law Officer
-// (Officer Oakley); the officer records the actual on-site outcome from their
-// own Officer Field Console. The supervisor never records a field outcome here.
+// closure. The supervisor/CSR assigns the case to an assignable By-law Officer
+// profile (for now only Officer Oakley); assignment is tied to that officer's
+// login email. The officer records the actual on-site outcome from their own
+// Officer Field Console. The supervisor never records a field outcome here.
 function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnly?: boolean }) {
   const { role, assignToOfficer } = useWorkflow()
   const canAssign = !readOnly && can(role, 'assignOfficer')
   const assigned = Boolean(c.assignedOfficer)
+
+  // Assignable officers come from the staff profile list (officer-role profiles).
+  const officers = officerProfiles()
+  const [selectedEmail, setSelectedEmail] = useState(officers[0]?.email ?? '')
+  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? officers[0] ?? null
 
   const [flash, setFlash] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -457,9 +463,11 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
   }
 
   async function handleAssign() {
+    if (!selectedOfficer) return
     setBusy(true)
-    // One demo officer: always Officer Oakley. No invented officer identities.
-    assignToOfficer(c.id, DEMO_OFFICER.name)
+    // Assign to a real officer profile (name + login email) — never an invented
+    // officer identity. The assignment is tied to the officer's email.
+    assignToOfficer(c.id, { name: selectedOfficer.name, email: selectedOfficer.email })
     const suffix = await emailResident({
       type: 'status_update',
       status: 'assigned',
@@ -469,7 +477,7 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
       requestType: c.triage.category,
       location: c.input.location,
     })
-    setFlash(`Assigned to ${DEMO_OFFICER.name}.${suffix}`)
+    setFlash(`Assigned to ${selectedOfficer.name}.${suffix}`)
     setBusy(false)
   }
 
@@ -512,21 +520,41 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
 
   return (
     <Panel title="Field investigation" subtitle="Supervisor assigns; the officer records the on-site outcome">
-      <dl className="space-y-1.5 text-sm">
-        <Row label="Assigned officer" value={DEMO_OFFICER.name} />
-      </dl>
-
       {assigned ? (
-        <p className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
-          Assigned to {DEMO_OFFICER.name}. Officer can record the field outcome from the Officer Field Console.
-        </p>
+        <>
+          <dl className="space-y-1.5 text-sm">
+            <Row label="Assigned officer" value={c.assignedOfficer ?? '—'} />
+          </dl>
+          <p className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+            Assigned to {c.assignedOfficer}. The officer can record the field outcome from their Officer Field Console.
+          </p>
+        </>
       ) : canAssign ? (
-        <div className="mt-3">
-          <button onClick={handleAssign} disabled={busy} className="btn-primary text-sm disabled:opacity-60">
-            {busy ? 'Assigning…' : `Assign to ${DEMO_OFFICER.name}`}
+        <div>
+          <label className="block text-sm">
+            <span className="stat-label">Assign to officer</span>
+            <select
+              value={selectedEmail}
+              onChange={(e) => setSelectedEmail(e.target.value)}
+              disabled={busy || officers.length <= 1}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+            >
+              {officers.map((o) => (
+                <option key={o.email} value={o.email}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={handleAssign}
+            disabled={busy || !selectedOfficer}
+            className="btn-primary mt-3 text-sm disabled:opacity-60"
+          >
+            {busy ? 'Assigning…' : `Assign to ${selectedOfficer?.name ?? 'officer'}`}
           </button>
           <p className="mt-2 text-[11px] text-ink-subtle">
-            The supervisor assigns the case; {DEMO_OFFICER.name} records the field outcome from the Officer Field
+            The supervisor assigns the case; the assigned officer records the field outcome from their Officer Field
             Console. Supervisors do not record field outcomes here.
           </p>
         </div>
