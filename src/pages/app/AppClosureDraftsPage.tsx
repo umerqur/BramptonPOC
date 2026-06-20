@@ -157,8 +157,9 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
       </div>
 
       <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-700">
-        <span className="font-semibold">AI assisted retrieval is reference only.</span> Similar case retrieval may
-        support staff review, but the resident closure message remains rules based and supervisor approved.
+        <span className="font-semibold">Semantic retrieval is reference only.</span> Similar case retrieval (Cohere
+        embeddings + Qdrant + Cohere rerank) may support staff review, but the resident closure message remains rules
+        based and supervisor approved.
       </div>
 
       {c.source.kind === 'nyc_open' && (

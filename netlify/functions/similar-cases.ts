@@ -1,10 +1,10 @@
-// Server-side Netlify function: "AI assisted similar case retrieval".
+// Server-side Netlify function: Cohere semantic retrieval of similar closed cases.
 //
 // Given a resident intake case or NYC open benchmark case (its text fields), it
-// finds similar HISTORICAL CLOSED benchmark cases for staff reference using text
-// similarity. It is decision support only: it never writes anything, never
-// decides an outcome, and is not part of the resident closure response (which
-// stays rules based and supervisor approved).
+// finds similar HISTORICAL CLOSED benchmark cases for staff reference using
+// semantic (vector) similarity. It is decision support only: it never writes
+// anything, never decides an outcome, and is not part of the resident closure
+// response (which stays rules based and supervisor approved).
 //
 // SECURITY
 // --------
@@ -22,8 +22,10 @@
 //   4. Rerank those candidates with Cohere Rerank down to the top N (<= 10).
 //   5. Return only safe benchmark fields + similarity/rerank scores.
 //
-// This deliberately does NOT use Claude. Similar-case retrieval is the first AI
-// feature and is intentionally limited to embeddings + rerank.
+// This deliberately does NOT use Claude or Anthropic. It is a clean single-vendor
+// Cohere retrieval pipeline (Cohere embeddings + Cohere rerank) plus Qdrant, and
+// is intentionally limited to embeddings + rerank. If a future version adds
+// generated summaries, prefer Cohere Command first to keep this single-vendor.
 
 // Netlify Functions v2 web-standard handler. Node 20 provides a global fetch, so
 // no SDK dependency is required. The client calls the reserved

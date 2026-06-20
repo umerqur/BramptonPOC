@@ -1,8 +1,9 @@
 // Provenance labels for the case workflow. These make the division of
 // responsibility explicit and auditable wherever AI assistance appears:
 //
-//   * AI assisted retrieval     — embeddings + rerank surface similar closed
-//                                 cases for reference. It does NOT decide outcomes.
+//   * Semantic retrieval        — Cohere embeddings + Qdrant vector search +
+//                                 Cohere rerank surface similar closed cases for
+//                                 reference. It does NOT decide outcomes.
 //   * Rules based closure template — the resident closure message is generated
 //                                 from deterministic, rule based templates.
 //   * Human approved            — a supervisor reviews and approves before the
@@ -14,7 +15,7 @@ export type ProvenanceKind = 'ai-retrieval' | 'rules-closure' | 'human-approved'
 
 const PROVENANCE_LABELS: Record<ProvenanceKind, { label: string; cls: string }> = {
   'ai-retrieval': {
-    label: 'AI assisted retrieval',
+    label: 'Semantic retrieval',
     cls: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
   },
   'rules-closure': {
