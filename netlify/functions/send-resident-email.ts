@@ -422,7 +422,7 @@ function buildFieldUpdateContent(input: EmailRequest): EmailContent {
   const message = input.message ?? ''
   const statusUrl = statusUrlForCase(input.caseId)
 
-  const subject = input.subject?.trim() || `Proactive Enforcement Demo: An officer has investigated your request ${input.caseId}`
+  const subject = input.subject?.trim() || `City of Brampton: Enforcement Response Field Update ${input.caseId}`
 
   const inner = `
     <p style="margin:0 0 14px;">Hi ${safeName},</p>
