@@ -67,7 +67,7 @@ export default function LoginPage() {
           <Logo className="h-9 w-9" />
           <h2 className="mt-6 text-2xl font-semibold text-white">Proactive Enforcement Intelligence</h2>
           <p className="mt-3 text-navy-100">
-            Sign in to the Closure Review Workbench — AI assisted research, analysis, and draft closure responses for staff approval, on live data.
+            Sign in to the Closure Review Workbench — AI-supported benchmark retrieval and a rules-based workflow, with staff approval on every step, on live data.
           </p>
           <ul className="mt-8 space-y-3 text-sm text-navy-100">
             {['Passwordless email sign in', 'Access limited to authorized project users', 'Live data stays behind login'].map((t) => (
