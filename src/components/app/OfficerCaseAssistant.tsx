@@ -66,7 +66,9 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
             `${bullets([
               'Observed condition — what you actually saw on site.',
               'Violation observed — yes / no / unclear.',
-              'Action taken — e.g. education/warning, notice to comply, ticket issued, no action.',
+              'Enforcement action — select what you did: education / warning, notice issued, parking ticket / penalty notice issued, no action, or other.',
+              'For a parking ticket / penalty notice: record the notice number (if you have it) and the method of service.',
+              'Action taken notes — optional supporting detail (the disposition comes from the structured action, not this text).',
               'Officer notes — any internal detail (kept internal, not sent to the resident).',
               'Follow-up required — flag if a re-inspection or zoning review is needed.',
             ])}\n\n` +

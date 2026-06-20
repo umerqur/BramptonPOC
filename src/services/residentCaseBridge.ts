@@ -16,8 +16,10 @@
 import type {
   DemoCase,
   DemoCategory,
+  EnforcementAction,
   OfficerFieldAction,
   ResidentComplaintInput,
+  ServiceMethod,
   ContactPreference,
 } from '../data/demoWorkflowTypes'
 import { runWorkflow, buildClosureDraft, deriveFieldVisitOutcome } from './demoWorkflowService'
@@ -63,6 +65,27 @@ function normalizeViolation(value: string | null): 'yes' | 'no' | 'unclear' | nu
   return v === 'yes' || v === 'no' || v === 'unclear' ? v : null
 }
 
+const ENFORCEMENT_ACTIONS: EnforcementAction[] = [
+  'warning_education',
+  'notice_issued',
+  'ticket_issued',
+  'no_action',
+  'other',
+]
+const SERVICE_METHODS: ServiceMethod[] = ['placed_on_vehicle', 'handed_to_driver', 'sent_by_mail', 'other']
+
+/** Normalize a stored enforcement-action value to the union, or null. */
+function normalizeEnforcementAction(value: string | null): EnforcementAction | null {
+  const v = (value ?? '').trim()
+  return (ENFORCEMENT_ACTIONS as string[]).includes(v) ? (v as EnforcementAction) : null
+}
+
+/** Normalize a stored method-of-service value to the union, or null. */
+function normalizeServiceMethod(value: string | null): ServiceMethod | null {
+  const v = (value ?? '').trim()
+  return (SERVICE_METHODS as string[]).includes(v) ? (v as ServiceMethod) : null
+}
+
 /**
  * Build a recorded OfficerFieldAction from the resident request's field-outcome
  * columns, or null when the officer has not recorded an outcome yet. The
@@ -78,16 +101,21 @@ function fieldActionFromRow(row: ResidentRequestRow): OfficerFieldAction | null 
     const t = (s ?? '').trim()
     return t.length > 0 ? t : null
   }
+  const enforcementAction = normalizeEnforcementAction(row.field_enforcement_action)
   return {
     officerName: row.assigned_officer_name ?? 'Officer Oakley',
     visitedAt: recordedAt,
     recordedAt,
-    outcome: deriveFieldVisitOutcome(row.field_violation_observed, row.field_action_taken),
+    outcome: deriveFieldVisitOutcome(row.field_violation_observed, enforcementAction),
     observations: internalObservation,
-    referenceNumber: null,
+    // Ticket / penalty notice number, only when a ticket was issued.
+    referenceNumber: enforcementAction === 'ticket_issued' ? clean(row.field_reference_number) : null,
     followUpRequired: row.field_follow_up_required,
     // Verbatim recorded fields, so the closure draft reflects the real action.
     violationObserved: normalizeViolation(row.field_violation_observed),
+    enforcementAction,
+    serviceMethod:
+      enforcementAction === 'ticket_issued' ? normalizeServiceMethod(row.field_service_method) : null,
     actionTaken: clean(row.field_action_taken),
     observedCondition: clean(row.field_observed_condition),
     officerNotes: clean(row.field_officer_notes),

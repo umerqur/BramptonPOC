@@ -17,9 +17,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from 'react'
 import type {
   DemoCase,
+  EnforcementAction,
   OfficerFieldAction,
   Priority,
   ResidentComplaintInput,
+  ServiceMethod,
   SupervisorMetrics,
 } from '../data/demoWorkflowTypes'
 import {
@@ -56,12 +58,20 @@ const STORAGE_KEY = 'brampton-demo-workflow-v4'
  * What an officer enters when recording a field investigation. This mirrors the
  * resident Supabase field-outcome form (Officer Oakley's structure), so the
  * local NYC benchmark path records the same fields and the outcome is DERIVED
- * from the recorded violation + action — not picked from a dropdown.
+ * from the recorded violation + the STRUCTURED enforcement action — the officer
+ * never types the disposition into a free-text box.
  */
 export type FieldActionInput = {
   observedCondition: string
   violationObserved: 'yes' | 'no' | 'unclear'
-  actionTaken: string
+  /** Structured enforcement action — what the officer actually did. */
+  enforcementAction: EnforcementAction
+  /** How the ticket / penalty notice was served (ticket_issued only). */
+  serviceMethod?: ServiceMethod
+  /** Ticket / penalty notice number (ticket_issued only, optional). */
+  referenceNumber?: string
+  /** Optional supporting "action taken" notes. */
+  actionTaken?: string
   officerNotes?: string
   followUpRequired: boolean
 }
@@ -345,23 +355,29 @@ export function WorkflowProvider({
         if (c.stage === 'closed') return c
         const officerName = c.assignedOfficer ?? actingNameRef.current
         const observedCondition = input.observedCondition.trim()
-        const actionTaken = input.actionTaken.trim()
+        const actionTaken = input.actionTaken?.trim() ?? ''
         const officerNotes = input.officerNotes?.trim() ?? ''
-        // Derive the disposition from the recorded violation + action using the
-        // SAME shared rules as the resident Supabase path — a "yes" violation
-        // never implies a ticket.
-        const outcome = deriveFieldVisitOutcome(input.violationObserved, actionTaken)
+        const isTicket = input.enforcementAction === 'ticket_issued'
+        const referenceNumber = isTicket ? input.referenceNumber?.trim() || null : null
+        const serviceMethod = isTicket ? input.serviceMethod ?? null : null
+        // Derive the disposition from the recorded violation + the structured
+        // enforcement action using the SAME shared rules as the resident
+        // Supabase path — a "yes" violation never implies a ticket, and a ticket
+        // is only ever claimed when the officer explicitly selected it.
+        const outcome = deriveFieldVisitOutcome(input.violationObserved, input.enforcementAction)
         const fieldAction: OfficerFieldAction = {
           officerName,
           visitedAt: now,
           outcome,
           observations: [observedCondition, officerNotes].filter(Boolean).join(' — '),
-          referenceNumber: null,
+          referenceNumber,
           followUpRequired: input.followUpRequired,
           recordedAt: now,
           // Carry the verbatim recorded fields so the closure draft reflects the
           // real action taken, not an assumed disposition.
           violationObserved: input.violationObserved,
+          enforcementAction: input.enforcementAction,
+          serviceMethod,
           actionTaken: actionTaken || null,
           observedCondition: observedCondition || null,
           officerNotes: officerNotes || null,

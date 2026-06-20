@@ -105,6 +105,30 @@ export type CaseSummary = {
 export type FieldVisitOutcome = 'no_violation' | 'notice_issued' | 'ticket_issued' | 'resolved' | 'warning_education'
 
 /**
+ * The structured enforcement action an officer selects on the field-outcome
+ * form. This is what the officer actually DID — the closure disposition is
+ * derived from it (a "yes" violation alone never implies a ticket). "Action
+ * taken" free text is only optional supporting detail.
+ */
+export type EnforcementAction =
+  | 'warning_education' // Education / warning provided
+  | 'notice_issued' // Notice issued
+  | 'ticket_issued' // Parking ticket / penalty notice issued
+  | 'no_action' // No action taken
+  | 'other' // Other
+
+/**
+ * How a parking ticket / penalty notice was served. Only recorded when the
+ * enforcement action is ticket_issued. This records what the officer did — it
+ * is not a payment or ticket-issuance system.
+ */
+export type ServiceMethod =
+  | 'placed_on_vehicle' // Placed on vehicle
+  | 'handed_to_driver' // Handed to driver / owner
+  | 'sent_by_mail' // Sent by mail
+  | 'other' // Other
+
+/**
  * A recorded officer field visit. Created only when a By-law Officer (role)
  * attends the location and records what they found. Drives the truthful closure
  * language — without this, the closure response must not claim an officer
@@ -120,13 +144,18 @@ export type OfficerFieldAction = {
   visitedAt: string // ISO timestamp
   outcome: FieldVisitOutcome
   observations: string
-  /** Notice / ticket reference number, when the outcome issued one. */
+  /** Ticket / penalty notice number, when a ticket was issued. */
   referenceNumber: string | null
   followUpRequired: boolean
   recordedAt: string // ISO timestamp
   // Verbatim fields the officer recorded on the field form, so the closure draft
   // reflects the real action taken rather than collapsing to a single template.
   violationObserved: 'yes' | 'no' | 'unclear' | null
+  /** Structured enforcement action the officer selected — drives the outcome. */
+  enforcementAction: EnforcementAction | null
+  /** How the ticket / penalty notice was served (ticket_issued only). */
+  serviceMethod: ServiceMethod | null
+  /** Optional supporting "action taken" notes — never the sole disposition. */
   actionTaken: string | null
   observedCondition: string | null
   officerNotes: string | null
