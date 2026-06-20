@@ -1,15 +1,21 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { DemoCategory } from '../../data/demoWorkflowTypes'
-import { guidanceForCategory } from '../../data/bylawGuidance'
+import {
+  askOfficerCaseAssistant,
+  AssistantNotConfiguredError,
+  type AssistantResult,
+} from '../../services/officerCaseAssistant'
 
-// Officer Assistant — the By-law Officer's case-driven helper.
+// Officer Case Assistant — a CASE-SCOPED, server-side AI helper for the By-law
+// Officer (and supervisor / CSR) viewing one assigned case.
 //
-// This is a DETERMINISTIC, rule-based assistant (not a live AI model). It is
-// grounded in the case file (complaint type, location, description) and the
-// by-law "offended" for the case's category, and it tells the officer what to
-// check on site, what their action options are, and how to record a truthful
-// field outcome. The officer's surface is intentionally workflow-driven: this
-// assistant plus the field-outcome form, nothing else.
+// This is NOT a generic chatbot. It calls the server-side
+// /.netlify/functions/officer-case-assistant function (Cohere Command), which
+// answers ONLY from the current case context, the workflow timeline, and any
+// retrieved benchmark references. It is decision support only: it never writes
+// to Supabase and never decides an enforcement outcome. The free-text box is
+// intentionally scoped to this case — broad, unrelated prompts are refused by
+// the server guardrail and surfaced here as a refusal.
 
 export type AssistantCaseContext = {
   caseId: string
@@ -20,171 +26,100 @@ export type AssistantCaseContext = {
   assignedOfficer: string | null
 }
 
-type ChatMessage = { id: number; from: 'assistant' | 'officer'; text: string }
-
-// The preset questions the officer can ask. Each maps to a deterministic answer
-// built from the case context + by-law guidance.
-type Intent = 'bylaw' | 'check' | 'actions' | 'record' | 'summary'
-
-const PRESETS: { intent: Intent; label: string }[] = [
-  { intent: 'bylaw', label: 'What by-law applies?' },
-  { intent: 'check', label: 'What should I check on site?' },
-  { intent: 'actions', label: 'What are my action options?' },
-  { intent: 'record', label: 'How do I record the outcome?' },
-  { intent: 'summary', label: 'Summarize this case' },
+// Suggested, case-scoped prompts. Each maps to the precise question sent to the
+// server so the surface never looks like an open-ended assistant.
+const PROMPT_CHIPS: { label: string; question: string }[] = [
+  { label: 'Summarize this case', question: 'Summarize this case.' },
+  { label: 'What should I verify on site?', question: 'What should I verify on site?' },
+  { label: 'What information is missing?', question: 'What information is missing?' },
+  { label: 'Explain similar benchmark cases', question: 'Explain the similar benchmark cases.' },
+  {
+    label: 'Draft internal field-note summary',
+    question: 'Turn my field notes into a clean internal summary.',
+  },
 ]
 
-function bullets(lines: string[]): string {
-  return lines.map((l) => `• ${l}`).join('\n')
-}
+type LoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; result: AssistantResult; pocOnly: boolean; benchmarksUsed: number }
+  | { status: 'unconfigured'; message: string }
+  | { status: 'error'; message: string }
 
 export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContext }) {
-  const guidance = useMemo(() => guidanceForCategory(ctx.category), [ctx.category])
+  const [state, setState] = useState<LoadState>({ status: 'idle' })
+  const [input, setInput] = useState('')
+  const [lastQuestion, setLastQuestion] = useState<string | null>(null)
 
-  // Deterministic responder: build the answer for a given intent from the case
-  // context + the by-law guidance for its category.
-  const answerFor = useMemo(() => {
-    return (intent: Intent): string => {
-      switch (intent) {
-        case 'bylaw':
-          return (
-            `This case looks like a ${guidance.offence.toLowerCase()}.\n\n` +
-            `Applicable by-law: ${guidance.bylawName} (${guidance.bylawReference}).\n` +
-            `${guidance.summary}`
-          )
-        case 'check':
-          return `On site, confirm the following before you record anything:\n\n${bullets(guidance.whatToCheck)}`
-        case 'actions':
-          return (
-            `Your action options for a ${guidance.offence.toLowerCase()} (least to most severe):\n\n` +
-            `${bullets(guidance.actionOptions)}\n\n` +
-            `Pick the action that matches what you actually did — the closure letter is built from it.`
-          )
-        case 'record':
-          return (
-            `Record your field outcome in the form below using these fields:\n\n` +
-            `${bullets([
-              'Observed condition — what you actually saw on site.',
-              'Violation observed — yes / no / unclear.',
-              'Enforcement action — select what you did: education / warning, notice issued, parking ticket / penalty notice issued, no action, or other.',
-              'For a parking ticket / penalty notice: record the notice number (if you have it) and the method of service.',
-              'Action taken notes — optional supporting detail (the disposition comes from the structured action, not this text).',
-              'Officer notes — any internal detail (kept internal, not sent to the resident).',
-              'Follow-up required — flag if a re-inspection or zoning review is needed.',
-            ])}\n\n` +
-            `Keep it truthful:\n${bullets(guidance.recordingTips)}`
-          )
-        case 'summary':
-          return (
-            `Case ${ctx.caseId}\n` +
-            `${bullets([
-              `Complaint type: ${ctx.complaintType}`,
-              `By-law offended: ${guidance.bylawName} (${guidance.bylawReference})`,
-              `Location: ${ctx.location || 'not provided'}`,
-              ctx.assignedOfficer ? `Assigned to: ${ctx.assignedOfficer}` : 'Assigned to: you',
-            ])}\n\n` +
-            `Reported issue: ${ctx.description.trim() ? ctx.description.trim() : 'No description was provided.'}`
-          )
+  // Reset when the focused case changes so a stale answer never carries across.
+  useEffect(() => {
+    setState({ status: 'idle' })
+    setLastQuestion(null)
+    setInput('')
+  }, [ctx.caseId])
+
+  async function ask(question: string) {
+    const q = question.trim()
+    if (!q || state.status === 'loading') return
+    setLastQuestion(q)
+    setState({ status: 'loading' })
+    try {
+      const res = await askOfficerCaseAssistant(ctx.caseId, q, {
+        issue_type: ctx.complaintType,
+        description: ctx.description,
+        location: ctx.location,
+        assigned_officer_name: ctx.assignedOfficer,
+      })
+      setState({
+        status: 'ready',
+        result: res.result,
+        pocOnly: res.poc_only,
+        benchmarksUsed: res.benchmarks_used,
+      })
+    } catch (err) {
+      if (err instanceof AssistantNotConfiguredError) {
+        setState({ status: 'unconfigured', message: err.message })
+      } else {
+        setState({ status: 'error', message: err instanceof Error ? err.message : String(err) })
       }
     }
-  }, [ctx, guidance])
-
-  // Map free-text to an intent by keyword, defaulting to a helpful prompt.
-  function intentForText(text: string): Intent | null {
-    const t = text.toLowerCase()
-    if (/by-?law|law|applies|offen|policy|reference/.test(t)) return 'bylaw'
-    if (/check|site|look|inspect|observe|evidence/.test(t)) return 'check'
-    if (/action|option|do|issue|ticket|notice|warn/.test(t)) return 'actions'
-    if (/record|outcome|report|form|log|enter/.test(t)) return 'record'
-    if (/summ|detail|case|context|what.*about|tell me/.test(t)) return 'summary'
-    return null
-  }
-
-  const idRef = useRef(1)
-  const nextId = () => idRef.current++
-
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    {
-      id: 0,
-      from: 'assistant',
-      text:
-        `I'm your case assistant for ${ctx.caseId}. This looks like a ${guidance.offence.toLowerCase()} ` +
-        `under the ${guidance.bylawName} (${guidance.bylawReference}).\n\n` +
-        `Ask me what to check on site, your action options, or how to record the outcome. ` +
-        `I only use this case file and the by-law guidance — I can't approve closures or see other officers' cases.`,
-    },
-  ])
-  const [input, setInput] = useState('')
-
-  function pushExchange(question: string, intent: Intent | null) {
-    setMessages((m) => [
-      ...m,
-      { id: nextId(), from: 'officer', text: question },
-      {
-        id: nextId(),
-        from: 'assistant',
-        text:
-          intent != null
-            ? answerFor(intent)
-            : `I can help with this case. Try one of:\n\n${bullets(PRESETS.map((p) => p.label))}`,
-      },
-    ])
-  }
-
-  function askPreset(intent: Intent, label: string) {
-    pushExchange(label, intent)
-  }
-
-  function submitInput() {
-    const text = input.trim()
-    if (!text) return
-    pushExchange(text, intentForText(text))
-    setInput('')
   }
 
   return (
     <section className="card flex flex-col p-0">
       <div className="border-b border-slate-200 px-5 py-3">
-        <h3 className="text-sm font-semibold text-navy-900">Officer Assistant</h3>
-        <p className="text-xs text-ink-subtle">
-          Case-grounded guidance for {ctx.caseId}. Deterministic POC helper — staff decide.
-        </p>
+        <h3 className="text-sm font-semibold text-navy-900">Officer Case Assistant</h3>
+        <p className="text-xs text-ink-subtle">Case-scoped AI support. Does not decide enforcement action.</p>
       </div>
 
-      <div className="max-h-[22rem] flex-1 space-y-3 overflow-y-auto px-5 py-4">
-        {messages.map((m) => (
-          <div key={m.id} className={m.from === 'officer' ? 'flex justify-end' : 'flex justify-start'}>
-            <div
-              className={`max-w-[85%] whitespace-pre-line rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                m.from === 'officer'
-                  ? 'bg-accent-600 text-white'
-                  : 'bg-slate-100 text-ink'
-              }`}
-            >
-              {m.text}
-            </div>
-          </div>
-        ))}
+      {/* Decision-support banner — always visible so the surface is never read as
+          an action tool. */}
+      <div className="mx-5 mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
+        Decision support only. Staff remain responsible for enforcement decisions. This assistant cannot issue
+        tickets, close cases, or approve closures.
       </div>
 
-      <div className="border-t border-slate-200 px-5 py-3">
+      <div className="px-5 py-4">
         <div className="flex flex-wrap gap-1.5">
-          {PRESETS.map((p) => (
+          {PROMPT_CHIPS.map((chip) => (
             <button
-              key={p.intent}
+              key={chip.label}
               type="button"
-              onClick={() => askPreset(p.intent, p.label)}
-              className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-navy-800 transition hover:border-accent-300 hover:text-accent-700"
+              disabled={state.status === 'loading'}
+              onClick={() => ask(chip.question)}
+              className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-navy-800 transition hover:border-accent-300 hover:text-accent-700 disabled:opacity-60"
             >
-              {p.label}
+              {chip.label}
             </button>
           ))}
         </div>
+
         <form
           className="mt-3 flex items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            submitInput()
+            ask(input)
+            setInput('')
           }}
         >
           <input
@@ -193,11 +128,118 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
             placeholder="Ask about this case…"
             className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
           />
-          <button type="submit" disabled={!input.trim()} className="btn-primary text-sm disabled:opacity-60">
-            Send
+          <button
+            type="submit"
+            disabled={!input.trim() || state.status === 'loading'}
+            className="btn-primary text-sm disabled:opacity-60"
+          >
+            Ask
           </button>
         </form>
+
+        {/* Result / state surface */}
+        <div className="mt-4">
+          {state.status === 'idle' && (
+            <p className="text-xs text-ink-subtle">
+              Pick a suggested prompt or ask a question about case {ctx.caseId}. Answers use only this case file,
+              its workflow history, and similar benchmark references.
+            </p>
+          )}
+
+          {state.status === 'loading' && (
+            <p className="text-sm text-ink-subtle">Reviewing the case file…</p>
+          )}
+
+          {state.status === 'unconfigured' && (
+            <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-navy-800">
+              Officer Case Assistant is not configured in this environment.
+            </div>
+          )}
+
+          {state.status === 'error' && (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
+              {state.message}
+            </div>
+          )}
+
+          {state.status === 'ready' && (
+            <AssistantAnswer
+              question={lastQuestion}
+              result={state.result}
+              pocOnly={state.pocOnly}
+              benchmarksUsed={state.benchmarksUsed}
+            />
+          )}
+        </div>
       </div>
     </section>
+  )
+}
+
+function AssistantAnswer({
+  question,
+  result,
+  pocOnly,
+  benchmarksUsed,
+}: {
+  question: string | null
+  result: AssistantResult
+  pocOnly: boolean
+  benchmarksUsed: number
+}) {
+  return (
+    <div className="space-y-3">
+      {question && (
+        <div className="text-xs font-medium text-ink-subtle">
+          You asked: <span className="text-navy-800">{question}</span>
+        </div>
+      )}
+
+      <div className="rounded-lg bg-slate-100 px-3.5 py-2.5">
+        <p className="whitespace-pre-line text-sm leading-relaxed text-ink">{result.answer}</p>
+      </div>
+
+      <AnswerList title="Officer checklist" items={result.officer_checklist} />
+      <AnswerList title="Missing information" items={result.missing_information} />
+      <AnswerList
+        title="Benchmark notes"
+        items={result.benchmark_notes}
+        emptyHint={benchmarksUsed === 0 ? 'No benchmark references were retrieved for this case.' : undefined}
+      />
+
+      {result.used_context.length > 0 && (
+        <p className="text-[11px] text-ink-subtle">Context used: {result.used_context.join(', ')}.</p>
+      )}
+
+      <p className="text-[11px] font-medium text-amber-700">{result.limitations}</p>
+
+      {pocOnly && (
+        <p className="text-[11px] text-ink-subtle">
+          POC mode: server-side identity verification is not configured in this environment.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AnswerList({ title, items, emptyHint }: { title: string; items: string[]; emptyHint?: string }) {
+  if (items.length === 0) {
+    if (!emptyHint) return null
+    return (
+      <div>
+        <div className="stat-label">{title}</div>
+        <p className="mt-1 text-xs italic text-ink-subtle">{emptyHint}</p>
+      </div>
+    )
+  }
+  return (
+    <div>
+      <div className="stat-label">{title}</div>
+      <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink">
+        {items.map((item, i) => (
+          <li key={i}>{item}</li>
+        ))}
+      </ul>
+    </div>
   )
 }
