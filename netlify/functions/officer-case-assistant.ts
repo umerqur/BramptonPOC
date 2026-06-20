@@ -1,8 +1,15 @@
 // Server-side Netlify function backing the "Officer Case Assistant" — a
-// case-scoped, grounded municipal enforcement assistant powered by Cohere
-// Command. It helps a By-law Officer (and supervisor / CSR) understand the
-// current case, prepare for a field review, identify missing information,
-// explain workflow requirements, and summarize retrieved benchmark context.
+// case-scoped, grounded municipal enforcement assistant. The generation layer
+// is provider-pluggable: it prefers Anthropic Claude (the Messages API) and
+// falls back to Cohere Command when Anthropic is not configured. It helps a
+// By-law Officer (and supervisor / CSR) understand the current case, prepare
+// for a field review, identify missing information, explain workflow
+// requirements, and summarize retrieved benchmark context.
+//
+// IMPORTANT: only the GENERATION layer is provider-pluggable. The benchmark
+// retrieval pipeline (similar-cases: Cohere embeddings + Qdrant + Cohere
+// rerank) is unchanged and stays on Cohere regardless of which model generates
+// the answer.
 //
 // This is NOT a generic chatbot. It answers ONLY about the one case it is
 // scoped to, using:
@@ -20,10 +27,12 @@
 //
 // SECURITY
 // --------
-// COHERE_API_KEY and the Supabase service role key are read from the Netlify
-// environment and used ONLY inside this server-side function. They are never
-// sent to the browser, never exposed through a VITE_* variable, and never
-// logged. Do not create VITE_ copies of any of these.
+// ANTHROPIC_API_KEY, COHERE_API_KEY, and the Supabase service role key are read
+// from the Netlify environment and used ONLY inside this server-side function.
+// They are never sent to the browser, never exposed through a VITE_* variable,
+// and never logged. Do not create VITE_ copies of any of these. We log model
+// status codes only — never keys, never the full prompt. The only audit signal
+// emitted is the fixed string "Officer Case Assistant consulted." (no PII).
 //
 // Identity is resolved server-side when possible: the caller's Supabase access
 // token (Authorization: Bearer …) is exchanged for the authenticated user via
@@ -46,6 +55,93 @@ const PROMPT_VERSION = 'officer-case-assistant-v1'
 // command-a-plus-05-2026). It takes a `messages` array (system + user) and
 // returns the answer under message.content[].text.
 const COHERE_CHAT_URL = 'https://api.cohere.com/v2/chat'
+
+// Anthropic Messages API. We call it with raw fetch (no SDK dependency, matching
+// the sibling generate-case-ai-review function): a `system` guardrail prompt and
+// a single `user` message, returning the answer under content[].text.
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
+const ANTHROPIC_VERSION = '2023-06-01'
+// Small output budget (structured JSON answer), low temperature for a stable
+// grounded answer, and a server-side timeout so a slow upstream never hangs the
+// request. Sonnet/Haiku-class models accept `temperature`; do not point
+// ANTHROPIC_OFFICER_ASSISTANT_MODEL at an Opus 4.7+/Fable model, which rejects it.
+const ANTHROPIC_MAX_TOKENS = 900
+const ANTHROPIC_TEMPERATURE = 0.2
+const ANTHROPIC_TIMEOUT_MS = 12_000
+
+/** Prompt caching is opt-in. It only ever caches the stable guardrail/system
+ *  prompt (which embeds the JSON schema and decision-support rules); the
+ *  changing case context, workflow events, officer question, and benchmark
+ *  references are never cached. The assistant works the same with it off. */
+function promptCacheEnabled(): boolean {
+  return process.env.ANTHROPIC_PROMPT_CACHE_ENABLED === 'true'
+}
+
+// ---------------------------------------------------------------------------
+// App-level abuse controls (server-side, not browser-only)
+// ---------------------------------------------------------------------------
+
+// Simple per-user throttle: an ~8–10s cooldown between calls and a rolling
+// hourly cap. Best-effort in-memory store — serverless containers recycle, so
+// this holds within a warm instance; combined with the hourly cap and the
+// 600-char question limit it is a reasonable demo abuse guard. It runs
+// server-side, so the browser cannot bypass it.
+const ASSISTANT_COOLDOWN_MS = 9_000
+const ASSISTANT_HOURLY_LIMIT = 10
+const ASSISTANT_WINDOW_MS = 60 * 60 * 1000
+const RATE_LIMIT_MESSAGE = 'Assistant usage limit reached for this demo. Please try again later.'
+
+const assistantCalls = new Map<string, number[]>()
+
+/** Records and checks the per-user call budget. Returns false (and records
+ *  nothing) when the caller is in cooldown or over the hourly limit. */
+function checkAssistantRate(key: string): boolean {
+  const now = Date.now()
+  const recent = (assistantCalls.get(key) ?? []).filter((t) => now - t < ASSISTANT_WINDOW_MS)
+  const last = recent[recent.length - 1]
+  if (last != null && now - last < ASSISTANT_COOLDOWN_MS) {
+    assistantCalls.set(key, recent)
+    return false
+  }
+  if (recent.length >= ASSISTANT_HOURLY_LIMIT) {
+    assistantCalls.set(key, recent)
+    return false
+  }
+  recent.push(now)
+  assistantCalls.set(key, recent)
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Provider selection (generation layer only)
+// ---------------------------------------------------------------------------
+
+type ProviderConfig =
+  | { kind: 'anthropic'; model: string; apiKey: string }
+  | { kind: 'cohere'; model: string; apiKey: string }
+
+/**
+ * Resolve which model provider generates the answer:
+ *   1. Anthropic when ANTHROPIC_API_KEY and ANTHROPIC_OFFICER_ASSISTANT_MODEL
+ *      are both set.
+ *   2. Otherwise Cohere Command when COHERE_API_KEY and a Command model id are
+ *      both set (the original behavior).
+ *   3. Otherwise null — the handler returns the calm 503.
+ * This only affects generation; benchmark retrieval stays on Cohere.
+ */
+function resolveProvider(): ProviderConfig | null {
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  const anthropicModel = process.env.ANTHROPIC_OFFICER_ASSISTANT_MODEL
+  if (anthropicKey && anthropicModel) {
+    return { kind: 'anthropic', model: anthropicModel, apiKey: anthropicKey }
+  }
+  const cohereKey = process.env.COHERE_API_KEY
+  const cohereModel = process.env.COHERE_COMMAND_MODEL || process.env.COHERE_CHAT_MODEL
+  if (cohereKey && cohereModel) {
+    return { kind: 'cohere', model: cohereModel, apiKey: cohereKey }
+  }
+  return null
+}
 
 // Cap the officer's free-text question so the prompt stays predictable.
 const MAX_QUESTION_LEN = 600
@@ -488,6 +584,85 @@ function parseResult(text: string, allowedCaseIds: Set<string>): AssistantResult
 }
 
 // ---------------------------------------------------------------------------
+// Provider calls — each returns the raw model text (the JSON object), or throws
+// ---------------------------------------------------------------------------
+
+/** Cohere Command (v2 chat). The original generation path, unchanged. */
+async function callCohere(model: string, apiKey: string, userMessage: string): Promise<string> {
+  const res = await fetch(COHERE_CHAT_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: PREAMBLE },
+        { role: 'user', content: userMessage },
+      ],
+      // Force a JSON object response so the structured contract is reliable.
+      response_format: { type: 'json_object' },
+      temperature: 0.2,
+      max_tokens: 900,
+    }),
+  })
+  if (!res.ok) throw new Error(`Cohere returned status ${res.status}`)
+  const data = (await res.json()) as { message?: { content?: Array<{ type?: string; text?: string }> } }
+  return (data.message?.content ?? [])
+    .filter((block) => typeof block.text === 'string')
+    .map((block) => block.text as string)
+    .join('\n')
+    .trim()
+}
+
+/**
+ * Anthropic Claude (Messages API). Uses the SAME strict guardrail/system prompt
+ * as Cohere. The guardrail prompt instructs JSON-only output (parsed by
+ * parseResult, which tolerates a stray fence). Small max output, low
+ * temperature, and a 12s server-side timeout. Prompt caching, when enabled,
+ * caches only the stable system prompt — never the per-request case context.
+ */
+async function callAnthropic(model: string, apiKey: string, userMessage: string): Promise<string> {
+  // Cache breakpoint sits on the stable guardrail prompt (system prompt + JSON
+  // schema + decision-support rules). Everything that changes per request lives
+  // in the user message and is never cached.
+  const system = promptCacheEnabled()
+    ? [{ type: 'text', text: PREAMBLE, cache_control: { type: 'ephemeral' } }]
+    : PREAMBLE
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ANTHROPIC_TIMEOUT_MS)
+  try {
+    const res = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: ANTHROPIC_MAX_TOKENS,
+        temperature: ANTHROPIC_TEMPERATURE,
+        system,
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`Anthropic returned status ${res.status}`)
+    const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> }
+    return (data.content ?? [])
+      .filter((block) => block.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text as string)
+      .join('\n')
+      .trim()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -496,10 +671,10 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'Method not allowed. Use POST.' }, 405)
   }
 
-  const cohereKey = process.env.COHERE_API_KEY
-  const commandModel = process.env.COHERE_COMMAND_MODEL || process.env.COHERE_CHAT_MODEL
-  // Calm 503 when the assistant is not wired up in this environment.
-  if (!cohereKey || !commandModel) {
+  // Choose the generation provider (Anthropic preferred, Cohere fallback). Calm
+  // 503 when neither is wired up in this environment.
+  const provider = resolveProvider()
+  if (!provider) {
     return json({ error: 'Officer Case Assistant is not configured.' }, 503)
   }
 
@@ -524,6 +699,9 @@ export default async function handler(req: Request): Promise<Response> {
   let timeline: TimelineEvent[] = []
   let retrievalText = ''
   let pocOnly = false
+  // Subject for the per-user throttle: the server-verified email when we have
+  // one, otherwise the client IP (POC path). Never the client-passed identity.
+  let rateSubject: string | null = null
 
   if (supabaseUrl && serviceKey) {
     // ---- Server-verified path -------------------------------------------
@@ -569,6 +747,7 @@ export default async function handler(req: Request): Promise<Response> {
     context = serverCase.context
     timeline = serverCase.timeline
     retrievalText = serverCase.retrievalText
+    rateSubject = authedEmail
   } else {
     // ---- POC fallback path ----------------------------------------------
     // Server-side Supabase is not configured. We cannot verify identity here, so
@@ -598,53 +777,33 @@ export default async function handler(req: Request): Promise<Response> {
     retrievalText = [context.issue_type, context.description, context.location].filter(Boolean).join('\n')
   }
 
+  // Per-user throttle (server-side). Keyed by verified email, else client IP.
+  // Enforced before any benchmark retrieval or model call so over-limit callers
+  // do no work. A browser cannot bypass this.
+  const clientIp = (req.headers.get('x-nf-client-connection-ip') || req.headers.get('x-forwarded-for') || '')
+    .split(',')[0]
+    .trim()
+  const rateKey = (rateSubject || clientIp || 'anon').toLowerCase()
+  if (!checkAssistantRate(rateKey)) {
+    return json({ error: RATE_LIMIT_MESSAGE }, 429)
+  }
+
   // Optional benchmark references (best-effort; degrades to none).
   const benchmarks = await fetchBenchmarks(caseId, retrievalText)
 
-  // Call Cohere Command.
-  let cohereRes: Response
-  try {
-    cohereRes = await fetch(COHERE_CHAT_URL, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${cohereKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: commandModel,
-        messages: [
-          { role: 'system', content: PREAMBLE },
-          { role: 'user', content: buildMessage({ context, timeline, benchmarks, question }) },
-        ],
-        // Force a JSON object response so the structured contract is reliable.
-        response_format: { type: 'json_object' },
-        temperature: 0.2,
-        max_tokens: 900,
-      }),
-    })
-  } catch (err) {
-    console.error('officer-case-assistant: Cohere request failed:', errorText(err))
-    return json({ error: 'Could not reach the assistant service. Try again.' }, 502)
-  }
-
-  if (!cohereRes.ok) {
-    console.error('officer-case-assistant: Cohere returned non-OK status:', cohereRes.status)
-    return json({ error: 'Assistant service error. Please try again.' }, 502)
-  }
-
+  // Generate the answer with the selected provider. The prompt (guardrails +
+  // case context + benchmarks + question) is identical across providers.
+  const userMessage = buildMessage({ context, timeline, benchmarks, question })
   let text: string
   try {
-    const data = (await cohereRes.json()) as {
-      message?: { content?: Array<{ type?: string; text?: string }> }
-    }
-    text = (data.message?.content ?? [])
-      .filter((block) => typeof block.text === 'string')
-      .map((block) => block.text as string)
-      .join('\n')
-      .trim()
+    text =
+      provider.kind === 'anthropic'
+        ? await callAnthropic(provider.model, provider.apiKey, userMessage)
+        : await callCohere(provider.model, provider.apiKey, userMessage)
   } catch (err) {
-    console.error('officer-case-assistant: unreadable Cohere response:', errorText(err))
-    return json({ error: 'Assistant service returned an unreadable response.' }, 502)
+    // Log status/message only — never the key or the full prompt.
+    console.error(`officer-case-assistant: ${provider.kind} request failed:`, errorText(err))
+    return json({ error: 'Assistant service error. Please try again.' }, 502)
   }
 
   const allowedCaseIds = new Set(benchmarks.map((b) => b.case_id))
@@ -659,10 +818,13 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'Assistant service returned an empty answer.' }, 502)
   }
 
-  // Audit: intentionally NOT persisted. The assistant never writes to Supabase,
-  // and we do not store free-text prompts in this POC.
+  // Audit: intentionally NOT persisted, and PII-free. The assistant never writes
+  // to Supabase, and we do not store the free-text prompt in this POC.
+  console.info('Officer Case Assistant consulted.')
+
   return json({
-    model: commandModel,
+    provider: provider.kind,
+    model: provider.model,
     prompt_version: PROMPT_VERSION,
     poc_only: pocOnly,
     benchmarks_used: benchmarks.length,

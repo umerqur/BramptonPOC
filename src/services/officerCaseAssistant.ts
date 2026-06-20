@@ -3,8 +3,9 @@ import { supabase } from '../lib/supabase'
 // Client wrapper for the server-side "Officer Case Assistant" Netlify function
 // (netlify/functions/officer-case-assistant.ts).
 //
-// The Cohere Command key and the Supabase service role key live ONLY on the
-// server. The browser sends the case id, the officer's question, and — when a
+// The Anthropic / Cohere generation keys and the Supabase service role key live
+// ONLY on the server. The browser sends the case id, the officer's question,
+// and — when a
 // Supabase session exists — the access token in the Authorization header so the
 // server can resolve the authenticated staff identity and enforce case-scoped
 // access. The assistant is case-scoped decision support; it never writes to
@@ -53,6 +54,8 @@ export type AssistantResult = {
 }
 
 export type AssistantResponse = {
+  /** Which generation provider answered: 'anthropic' (Claude) or 'cohere'. */
+  provider?: 'anthropic' | 'cohere'
   model: string
   prompt_version: string
   poc_only: boolean
