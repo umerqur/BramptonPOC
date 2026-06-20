@@ -1,13 +1,18 @@
-// Mock AI workflow engine for the Proactive Enforcement Response POC demo.
+// Deterministic workflow and decision-support helpers for the Proactive
+// Enforcement Response POC.
+//
+// The real AI-supported retrieval layer is separate: Cohere embeddings + Qdrant
+// + Cohere rerank. This service handles rules-based classification helpers,
+// missing-information checks, context assembly, readiness scoring, and
+// rules-based closure template assembly.
 //
 // This service is intentionally self-contained and synchronous: it lets the
 // end-to-end demo run entirely in the browser with synthetic data, without
 // waiting on Supabase. Given a raw resident complaint it deterministically
-// produces classification, extracted facts, a missing-information check,
-// enforcement context, a case summary, a confidence score, and a closure-
-// response draft — i.e. all the manual research and drafting the AI is taking
-// off staff. Staff actions (approve, edit, override, request info) are applied
-// on top via the workflow store.
+// produces a classification check, extracted facts, a missing-information check,
+// enforcement context, a case summary, a readiness score, and a rules-based
+// closure-response draft. Staff actions (approve, edit, override, request info)
+// are applied on top via the workflow store.
 //
 // DEMO POSITIONING: every output is decision support / closure-response
 // automation only. Final review remains with authorized staff. The numbers and
@@ -57,7 +62,7 @@ function auditEvent(
 ): AuditEvent {
   const actorLabel =
     actor === 'ai'
-      ? 'AI workflow system'
+      ? 'Decision support engine'
       : actor === 'staff'
         ? 'By-law staff'
         : actor === 'officer'
@@ -255,7 +260,7 @@ function buildTriage(
   // --- Confidence rules (mirrors the diagram's "Enough confidence?" gate) ---
   let confidence = 0.94
   const reasoning: string[] = []
-  reasoning.push(`Classified as ${category} from complaint wording (model confidence ${(categoryConfidence * 100).toFixed(0)}%).`)
+  reasoning.push(`Classified as ${category} from complaint wording (classification confidence ${(categoryConfidence * 100).toFixed(0)}%).`)
 
   if (!input.location.trim()) {
     confidence -= 0.25
@@ -612,7 +617,7 @@ export function buildClosureDraft(
 }
 
 // ---------------------------------------------------------------------------
-// Orchestration — run the full AI workflow on a fresh intake
+// Orchestration — run the full decision-support workflow on a fresh intake
 // ---------------------------------------------------------------------------
 
 /**
@@ -636,16 +641,16 @@ export function runWorkflow(
   const audit: AuditEvent[] = [
     auditEvent('resident', 'Complaint submitted', `Resident filed a ${triage.category} complaint via ${input.channel}.`, t0),
     auditEvent('ai', 'Intake captured', 'Intake fields parsed and a synthetic case object was created.', addSeconds(t0, 1)),
-    auditEvent('ai', 'AI classification', `Classified as ${triage.category} (${(triage.categoryConfidence * 100).toFixed(0)}% model confidence); routed to ${triage.recommendedDepartment}.`, addSeconds(t0, 2)),
+    auditEvent('ai', 'Classification check', `Classified as ${triage.category} (${(triage.categoryConfidence * 100).toFixed(0)}% classification confidence); routed to ${triage.recommendedDepartment}.`, addSeconds(t0, 2)),
     auditEvent('ai', 'Facts extracted', `${triage.keyFacts.length} key facts extracted; ${triage.missingInformation.length} missing-information flag(s).`, addSeconds(t0, 3)),
     auditEvent('ai', 'Context gathered', `Pulled ${context.complaintHistory.length} history record(s), patrol/ticket notes, trend summary, and policy match.`, addSeconds(t0, 4)),
-    auditEvent('ai', 'Case summary built', 'Plain-language summary and structured facts assembled for staff.', addSeconds(t0, 5)),
-    auditEvent('ai', 'Review readiness checked', `File readiness ${(triage.confidence * 100).toFixed(0)}% (${triage.confidenceLevel}).`, addSeconds(t0, 6)),
+    auditEvent('ai', 'Case summary assembled', 'Plain-language summary and structured facts assembled for staff.', addSeconds(t0, 5)),
+    auditEvent('ai', 'File readiness checked', `File readiness ${(triage.confidence * 100).toFixed(0)}% (${triage.confidenceLevel}).`, addSeconds(t0, 6)),
   ]
   if (draftReady) {
-    audit.push(auditEvent('ai', 'Closure draft prepared', 'High confidence — a closure-response draft was prepared for staff review.', addSeconds(t0, 7)))
+    audit.push(auditEvent('ai', 'Rules-based draft prepared', 'Rules-based template draft prepared for staff review.', addSeconds(t0, 7)))
   } else {
-    audit.push(auditEvent('ai', 'Routed to staff attention', 'Confidence below threshold — routed to a staff member to clarify before drafting.', addSeconds(t0, 7)))
+    audit.push(auditEvent('ai', 'Routed to staff attention', 'File readiness below threshold — routed to a staff member to clarify before drafting.', addSeconds(t0, 7)))
   }
 
   return {

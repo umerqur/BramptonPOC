@@ -1,12 +1,14 @@
-// Type model for the end-to-end AI-assisted closure-response demo workflow.
+// Type model for the end-to-end decision-support closure-response demo workflow.
 //
 // This is the heart of the redesigned Proactive Enforcement Response POC. The
 // flow mirrors the use-case concept diagram: a resident complaint is captured,
-// the AI workflow system classifies it, extracts facts, checks for missing
-// information, gathers enforcement context, builds a case summary, checks
-// confidence, and prepares a closure-response draft. By-law staff only review
-// exceptions, edit the draft, and approve the final response — every approval is
-// an explicit human action.
+// deterministic workflow helpers classify it, extract facts, check for missing
+// information, assemble enforcement context, build a case summary, check file
+// readiness, and prepare a rules-based closure-response draft. By-law staff only
+// review exceptions, edit the draft, and approve the final response — every
+// approval is an explicit human action. (The genuine AI layer — Cohere
+// embeddings + Qdrant + Cohere rerank for semantic benchmark retrieval — is
+// separate from these deterministic helpers.)
 //
 // All data backed by these types is SYNTHETIC / benchmark demo data. Nothing
 // here represents Brampton operational complaint data, and nothing is ever sent
@@ -57,7 +59,11 @@ export type ResidentComplaintInput = {
   residentEmail: string
 }
 
-/** What the AI system produced automatically from the raw intake. */
+/**
+ * What the decision-support layer produced from the raw intake.
+ * Legacy type name `AiTriageResult` retained for compatibility; this is
+ * deterministic decision support, not LLM output.
+ */
 export type AiTriageResult = {
   category: DemoCategory
   categoryConfidence: number // 0..1
@@ -74,7 +80,7 @@ export type AiTriageResult = {
   reasoning: string[]
 }
 
-/** Context the AI gathered so staff don't have to research manually. */
+/** Context assembled for staff review so staff don't have to research manually. */
 export type EnforcementContext = {
   complaintHistory: { caseId: string; date: string; summary: string; status: string }[]
   patrolLogs: string[]
@@ -86,7 +92,7 @@ export type EnforcementContext = {
   repeatLocationSignal: 'None' | 'Emerging' | 'High'
 }
 
-/** The assembled, staff-readable case the AI built from intake + context. */
+/** The staff-readable case summary assembled from intake and context. */
 export type CaseSummary = {
   plainLanguage: string
   structuredFacts: { label: string; value: string }[]
@@ -161,7 +167,7 @@ export type OfficerFieldAction = {
   officerNotes: string | null
 }
 
-/** The AI-drafted closure response staff review, edit, and approve. */
+/** The rules-based closure draft staff review, edit, and approve. */
 export type ClosureDraft = {
   subject: string
   body: string

@@ -5,9 +5,9 @@
 //
 // When a resident files a complaint it lands in Supabase and shows up in the
 // Staff Inbox. When staff click "Open case", we turn that row into a workbench
-// DemoCase using the same deterministic AI workflow that powers the POC
-// Walkthrough — so staff get an AI-style triage, summary, confidence, and
-// recommended action even though no real model result exists yet.
+// DemoCase using the same deterministic decision-support workflow that powers
+// the POC Walkthrough — so staff get a classification check, summary, file
+// readiness, and recommended action, all rules-based.
 //
 // This is decision support only: every department / priority / confidence value
 // here is a generated placeholder, and every closure still requires explicit
