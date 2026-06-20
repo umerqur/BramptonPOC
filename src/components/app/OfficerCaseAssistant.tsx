@@ -4,6 +4,7 @@ import {
   askOfficerCaseAssistant,
   AssistantNotConfiguredError,
   type AssistantResult,
+  type BenchmarkReference,
 } from '../../services/officerCaseAssistant'
 
 // Officer Case Assistant — a CASE-SCOPED, server-side AI helper for the By-law
@@ -42,7 +43,12 @@ const PROMPT_CHIPS: { label: string; question: string }[] = [
 type LoadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ready'; result: AssistantResult; pocOnly: boolean; benchmarksUsed: number }
+  | {
+      status: 'ready'
+      result: AssistantResult
+      pocOnly: boolean
+      benchmarks: BenchmarkReference[]
+    }
   | { status: 'unconfigured'; message: string }
   | { status: 'error'; message: string }
 
@@ -74,7 +80,7 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
         status: 'ready',
         result: res.result,
         pocOnly: res.poc_only,
-        benchmarksUsed: res.benchmarks_used,
+        benchmarks: res.benchmarks ?? [],
       })
     } catch (err) {
       if (err instanceof AssistantNotConfiguredError) {
@@ -167,7 +173,7 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
               question={lastQuestion}
               result={state.result}
               pocOnly={state.pocOnly}
-              benchmarksUsed={state.benchmarksUsed}
+              benchmarks={state.benchmarks}
             />
           )}
         </div>
@@ -180,12 +186,12 @@ function AssistantAnswer({
   question,
   result,
   pocOnly,
-  benchmarksUsed,
+  benchmarks,
 }: {
   question: string | null
   result: AssistantResult
   pocOnly: boolean
-  benchmarksUsed: number
+  benchmarks: BenchmarkReference[]
 }) {
   return (
     <div className="space-y-3">
@@ -201,11 +207,8 @@ function AssistantAnswer({
 
       <AnswerList title="Officer checklist" items={result.officer_checklist} />
       <AnswerList title="Missing information" items={result.missing_information} />
-      <AnswerList
-        title="Benchmark notes"
-        items={result.benchmark_notes}
-        emptyHint={benchmarksUsed === 0 ? 'No benchmark references were retrieved for this case.' : undefined}
-      />
+
+      <BenchmarkNotes notes={result.benchmark_notes} benchmarks={benchmarks} />
 
       {result.used_context.length > 0 && (
         <p className="text-[11px] text-ink-subtle">Context used: {result.used_context.join(', ')}.</p>
@@ -218,6 +221,62 @@ function AssistantAnswer({
           POC mode: server-side identity verification is not configured in this environment.
         </p>
       )}
+    </div>
+  )
+}
+
+// Benchmark notes are shown with the supporting benchmark case_id and its
+// relevance (rerank) / similarity scores, so a claim like "a comparable case
+// resulted in a Notice of Violation" is traceable to an actual surfaced case
+// rather than looking invented. When nothing was retrieved we say so plainly.
+function BenchmarkNotes({
+  notes,
+  benchmarks,
+}: {
+  notes: { case_id: string; note: string }[]
+  benchmarks: BenchmarkReference[]
+}) {
+  const byId = new Map(benchmarks.map((b) => [b.case_id, b]))
+
+  if (notes.length === 0) {
+    return (
+      <div>
+        <div className="stat-label">Benchmark notes</div>
+        <p className="mt-1 text-xs italic text-ink-subtle">No benchmark references were available.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="stat-label">Benchmark notes</div>
+      <ul className="mt-1 space-y-2">
+        {notes.map((n, i) => {
+          const ref = byId.get(n.case_id)
+          return (
+            <li key={i} className="rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm text-ink">
+              <p>{n.note}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-navy-800">
+                  {ref?.complaint_type ? `${ref.complaint_type} · ` : ''}case {n.case_id}
+                </span>
+                {ref?.rerank_score != null && (
+                  <span className="text-ink-subtle">relevance {ref.rerank_score.toFixed(2)}</span>
+                )}
+                {ref?.similarity_score != null && (
+                  <span className="text-ink-subtle">· similarity {ref.similarity_score.toFixed(2)}</span>
+                )}
+                {ref?.closure_days != null && (
+                  <span className="text-ink-subtle">· closed in {ref.closure_days}d</span>
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="mt-1.5 text-[11px] text-ink-subtle">
+        AI-supported references retrieved from similar closed benchmark cases. For staff reference only.
+      </p>
     </div>
   )
 }

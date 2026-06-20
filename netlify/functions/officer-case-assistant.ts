@@ -54,6 +54,16 @@ const MAX_QUESTION_LEN = 600
 const MAX_TIMELINE_EVENTS = 12
 const MAX_BENCHMARKS = 5
 
+// Benchmark references with a Cohere rerank relevance below this score are
+// considered too weak to ground an answer and are NOT passed to Command. This
+// keeps benchmark_notes anchored to genuinely comparable cases. Overridable per
+// environment via COHERE_RERANK_MIN (a 0..1 value).
+const DEFAULT_MIN_RERANK = 0.3
+function minRerankScore(): number {
+  const raw = Number(process.env.COHERE_RERANK_MIN)
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : DEFAULT_MIN_RERANK
+}
+
 // Always-present limitation note. The model is asked to include it; we also
 // enforce it server-side so the UI can never present an answer without it.
 const REQUIRED_LIMITATION =
@@ -75,12 +85,17 @@ const PREAMBLE = [
   `If the question is unrelated to this case or its workflow, respond with exactly: "${SCOPE_REFUSAL}"`,
   'Do not answer general chat, politics, personal opinions, internet searches, or requests for personal data not already in the case context.',
   '',
+  'Benchmark grounding rules:',
+  '- Every benchmark observation MUST be supported by one of the retrieved benchmark references listed under BENCHMARK REFERENCES, and MUST cite that reference by its exact case_id.',
+  '- Never invent a benchmark case, a case_id, an outcome, or a number. Only use the benchmark references provided.',
+  '- If NO benchmark references are provided, return an empty benchmark_notes array and, if the question is about benchmarks, state: "No benchmark references were available."',
+  '',
   'Return ONLY a single JSON object (no markdown, no code fences, no commentary) with exactly these fields:',
   '- answer: string — a concise, plain-language answer grounded only in the provided context.',
   '- used_context: string[] — short labels for the context you actually relied on (e.g. "case details", "workflow timeline", "benchmark references").',
   '- officer_checklist: string[] — concrete things to verify or do on site / before closure review, or [] if not applicable.',
   '- missing_information: string[] — important information not present in the case file, or [] if nothing is clearly missing.',
-  '- benchmark_notes: string[] — neutral observations about the retrieved benchmark references, or [] if none were provided.',
+  '- benchmark_notes: array of objects, each {"case_id": string, "note": string} — a neutral observation directly supported by ONE retrieved benchmark reference, where case_id exactly matches a provided benchmark case_id. Return [] when no benchmark references are provided.',
   `- limitations: string — must include: "${REQUIRED_LIMITATION}"`,
 ].join('\n')
 
@@ -156,12 +171,23 @@ type TimelineEvent = {
   notes: string | null
 }
 
+// A single retrieved benchmark reference. case_id and the retrieval scores are
+// included so the answer can be traced back to a specific surfaced case in the
+// UI (it is decision support, not an invented fact).
 type BenchmarkRef = {
+  case_id: string
   complaint_type: string | null
   request_detail: string | null
   resolution_description: string | null
   closure_days: number | null
+  similarity_score: number | null
   rerank_score: number | null
+}
+
+// A model observation that MUST cite the case_id of a retrieved benchmark.
+type BenchmarkNote = {
+  case_id: string
+  note: string
 }
 
 type AssistantResult = {
@@ -169,7 +195,7 @@ type AssistantResult = {
   used_context: string[]
   officer_checklist: string[]
   missing_information: string[]
-  benchmark_notes: string[]
+  benchmark_notes: BenchmarkNote[]
   limitations: string
 }
 
@@ -328,13 +354,21 @@ async function fetchBenchmarks(caseId: string | null, text: string): Promise<Ben
     const data = (await res.json()) as {
       results?: Array<Record<string, unknown>>
     }
-    return (data.results ?? []).slice(0, MAX_BENCHMARKS).map((r) => ({
-      complaint_type: strOrNull(r.complaint_type),
-      request_detail: strOrNull(r.request_detail),
-      resolution_description: strOrNull(r.resolution_description),
-      closure_days: typeof r.closure_days === 'number' ? r.closure_days : null,
-      rerank_score: typeof r.rerank_score === 'number' ? r.rerank_score : null,
-    }))
+    const minScore = minRerankScore()
+    return (data.results ?? [])
+      .map((r, i) => ({
+        case_id: strOrNull(r.case_id) ?? `ref-${i + 1}`,
+        complaint_type: strOrNull(r.complaint_type),
+        request_detail: strOrNull(r.request_detail),
+        resolution_description: strOrNull(r.resolution_description),
+        closure_days: typeof r.closure_days === 'number' ? r.closure_days : null,
+        similarity_score: typeof r.similarity_score === 'number' ? r.similarity_score : null,
+        rerank_score: typeof r.rerank_score === 'number' ? r.rerank_score : null,
+      }))
+      // Minimum rerank threshold: drop weak references so they never ground an
+      // answer. A reference with no rerank score is treated as below threshold.
+      .filter((b) => b.rerank_score != null && b.rerank_score >= minScore)
+      .slice(0, MAX_BENCHMARKS)
   } catch (err) {
     // Qdrant rebuilding / unavailable: degrade gracefully to no benchmarks.
     console.error('officer-case-assistant: benchmark retrieval skipped:', errorText(err))
@@ -364,11 +398,14 @@ function buildMessage(args: {
 
   const benchmarkLines = benchmarks.length
     ? benchmarks.map((b, i) =>
-        `${i + 1}. ${b.complaint_type ?? 'benchmark case'}${b.request_detail ? ` — ${b.request_detail}` : ''}` +
+        `${i + 1}. case_id: ${b.case_id} | type: ${b.complaint_type ?? '(n/a)'}` +
+        `${b.request_detail ? ` | detail: ${b.request_detail}` : ''}` +
         `${b.resolution_description ? ` | resolution: ${b.resolution_description}` : ''}` +
-        `${b.closure_days != null ? ` | closure_days: ${b.closure_days}` : ''}`,
+        `${b.closure_days != null ? ` | closure_days: ${b.closure_days}` : ''}` +
+        `${b.similarity_score != null ? ` | similarity_score: ${b.similarity_score.toFixed(3)}` : ''}` +
+        `${b.rerank_score != null ? ` | rerank_score: ${b.rerank_score.toFixed(3)}` : ''}`,
       )
-    : ['(no benchmark references retrieved — answer from the current case context only)']
+    : ['(no benchmark references retrieved — answer from the current case context only; benchmark_notes must be [])']
 
   return [
     'Answer the staff question about THIS ONE case, using only the context below.',
@@ -395,6 +432,7 @@ function buildMessage(args: {
     ...timelineLines,
     '',
     'BENCHMARK REFERENCES (similar closed cases, for reference only — not this case)',
+    'Cite a benchmark only by the exact case_id shown below. Do not reference any case not listed here.',
     ...benchmarkLines,
     '',
     'STAFF QUESTION',
@@ -402,8 +440,27 @@ function buildMessage(args: {
   ].join('\n')
 }
 
+// Validate the model's benchmark_notes: keep only well-formed objects whose
+// case_id matches a genuinely retrieved benchmark reference. This is the
+// server-side guardrail that prevents the assistant from citing (or inventing)
+// a benchmark case that was not surfaced. If no benchmarks were retrieved, the
+// allowed set is empty and every note is dropped.
+function validateBenchmarkNotes(value: unknown, allowedCaseIds: Set<string>): BenchmarkNote[] {
+  if (!Array.isArray(value) || allowedCaseIds.size === 0) return []
+  const out: BenchmarkNote[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const obj = item as Record<string, unknown>
+    const caseId = asString(obj.case_id).trim()
+    const note = asString(obj.note).trim()
+    if (!caseId || !note || !allowedCaseIds.has(caseId)) continue
+    out.push({ case_id: caseId, note })
+  }
+  return out
+}
+
 // Pull the JSON object out of the model text, tolerating a stray code fence.
-function parseResult(text: string): AssistantResult {
+function parseResult(text: string, allowedCaseIds: Set<string>): AssistantResult {
   let candidate = text.trim()
   const fence = candidate.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
   if (fence) candidate = fence[1].trim()
@@ -425,7 +482,7 @@ function parseResult(text: string): AssistantResult {
     used_context: strArray(parsed.used_context),
     officer_checklist: strArray(parsed.officer_checklist),
     missing_information: strArray(parsed.missing_information),
-    benchmark_notes: strArray(parsed.benchmark_notes),
+    benchmark_notes: validateBenchmarkNotes(parsed.benchmark_notes, allowedCaseIds),
     limitations,
   }
 }
@@ -590,9 +647,10 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'Assistant service returned an unreadable response.' }, 502)
   }
 
+  const allowedCaseIds = new Set(benchmarks.map((b) => b.case_id))
   let result: AssistantResult
   try {
-    result = parseResult(text)
+    result = parseResult(text, allowedCaseIds)
   } catch (err) {
     console.error('officer-case-assistant: failed to parse assistant JSON:', errorText(err))
     return json({ error: 'Assistant service did not return a structured answer.' }, 502)
@@ -608,6 +666,9 @@ export default async function handler(req: Request): Promise<Response> {
     prompt_version: PROMPT_VERSION,
     poc_only: pocOnly,
     benchmarks_used: benchmarks.length,
+    // The exact retrieved benchmark references (with scores) that grounded the
+    // answer, so the UI can show which case supports each benchmark note.
+    benchmarks,
     result,
   })
 }
