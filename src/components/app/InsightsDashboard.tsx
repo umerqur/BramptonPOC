@@ -1631,14 +1631,56 @@ function SimCard({
 
 const PAGE_SIZE = 25
 
+/** A Postgres statement timeout (57014) — the Case Explorer's expected slow-query failure. */
+function isTimeoutError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null
+  const code = e?.code ?? ''
+  const msg = (e?.message ?? '').toLowerCase()
+  return code === '57014' || msg.includes('57014') || msg.includes('statement timeout') || msg.includes('canceling statement')
+}
+
+type ExplorerError = { message: string; timedOut: boolean }
+
+/** Calm, specific timeout state for the Case Explorer (does not imply Insights is down). */
+function CaseExplorerTimeout({ detail }: { detail: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm">
+      <div className="font-semibold text-navy-900">Case Explorer query timed out</div>
+      <p className="mt-1 text-ink-muted">
+        The aggregate Insights are still available. This search needs a narrower filter or database index to return
+        quickly.
+      </p>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[11px] text-ink-subtle">Technical detail</summary>
+        <p className="mt-1 font-mono text-[11px] text-ink-subtle">Postgres 57014 statement timeout</p>
+        {detail && <p className="mt-1 font-mono text-[11px] text-ink-subtle/80">{detail}</p>}
+      </details>
+    </div>
+  )
+}
+
 function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilters; onFiltersChange: (f: CaseExplorerFilters) => void }) {
   const navigate = useNavigate()
   const [rows, setRows] = useState<NycCaseRow[]>([])
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ExplorerError | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [options, setOptions] = useState<CaseExplorerOptions | null>(null)
+
+  // True when no filter or search is set — the fast default view. A timeout here
+  // shows a friendly "add a filter" prompt rather than a scary error.
+  const hasAnyFilter = Boolean(
+    filters.search ||
+      filters.complaintType ||
+      filters.borough ||
+      filters.councilDistrict ||
+      filters.agency ||
+      filters.status ||
+      filters.dateFrom ||
+      filters.dateTo,
+  )
 
   // Last loaded page (zero-based) for "Load more", and a request token so a slow
   // response for stale filters can never overwrite the current results.
@@ -1665,14 +1707,16 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           if (id !== reqRef.current) return
           setRows((prev) => (append ? [...prev, ...res.rows] : res.rows))
           setHasMore(res.hasMore)
+          setNotice(res.notice ?? null)
         })
         .catch((err: unknown) => {
           if (id !== reqRef.current) return
           console.error('Case Explorer load failed:', err)
-          setError(errorMessage(err))
+          setError({ message: errorMessage(err), timedOut: isTimeoutError(err) })
           if (!append) {
             setRows([])
             setHasMore(false)
+            setNotice(null)
           }
         })
         .finally(() => {
@@ -1694,7 +1738,9 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
   // Count-free result label. We never claim an exact total over the 3.4M-row
   // table — just how many rows are loaded and whether more are available.
   const countLabel = error
-    ? 'Live data unavailable'
+    ? error.timedOut
+      ? 'Query timed out'
+      : 'Live data unavailable'
     : loading
       ? 'Loading…'
       : rows.length === 0
@@ -1727,8 +1773,20 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider">Live data</span>
         </div>
 
+        {notice && !error && (
+          <div className="mb-3 rounded-md border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-900">{notice}</div>
+        )}
+
         {error ? (
-          <SectionError name="the case list" error={error} />
+          error.timedOut && !hasAnyFilter ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-ink-muted">
+              Select a complaint type, borough, district, or date range to search historical cases.
+            </div>
+          ) : error.timedOut ? (
+            <CaseExplorerTimeout detail={error.message} />
+          ) : (
+            <SectionError name="the case list" error={error.message} />
+          )
         ) : loading ? (
           <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
         ) : rows.length === 0 ? (
