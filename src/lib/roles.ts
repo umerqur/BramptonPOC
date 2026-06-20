@@ -119,6 +119,13 @@ export const STAFF_PROFILES: StaffProfile[] = [
     roleDisplayNames: { supervisor: 'Supervisor Stephen', csr: 'CSR Stephen', officer: 'Officer Stephen' },
   },
   {
+    name: 'Dean McKeown',
+    email: 'dean.mckeown@queensu.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Dean', csr: 'CSR Dean', officer: 'Officer Dean' },
+  },
+  {
     // The dedicated demo By-law Officer. This profile can ONLY be an officer.
     name: 'Officer Oakley',
     email: 'oakley.carpentry_worker@yahoo.com',
