@@ -512,7 +512,7 @@ function KpiCard({
 /**
  * Benchmark context strip — the historical NYC 311 reference figures in plain
  * operational language. Uses "Typical historical closure" instead of an average
- * label, and "Slow case threshold" instead of "P90".
+ * label, and "90% closed within" instead of "P90".
  */
 function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
   const { data, loading, error } = state
@@ -535,12 +535,8 @@ function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
               value={data.avg_closure_days == null ? '—' : `${data.avg_closure_days.toFixed(1)} days`}
             />
             <BenchmarkItem
-              label="Slow case threshold"
-              value={
-                data.p90_closure_days == null
-                  ? '—'
-                  : `most similar cases closed within ${Math.round(data.p90_closure_days)} days`
-              }
+              label="90% closed within"
+              value={data.p90_closure_days == null ? '—' : `${Math.round(data.p90_closure_days)} days`}
             />
             <BenchmarkItem
               label="Top workload pressure"
@@ -1009,13 +1005,38 @@ function ClosureLeaderboard({ rows, onExplore }: { rows: ClosureBottleneck[]; on
   )
 }
 
-// --- Area bottlenecks ------------------------------------------------------
+// --- Leaderboard / Table view toggle (shared) ------------------------------
+
+/** Small segmented control to switch a section between the visual leaderboard
+ *  (default) and the raw table — same control used on "Where closure takes longest". */
+function ViewToggle({ view, onChange }: { view: 'leaderboard' | 'table'; onChange: (v: 'leaderboard' | 'table') => void }) {
+  return (
+    <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+      {(['leaderboard', 'table'] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          className={`rounded-md px-2.5 py-1 transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+        >
+          {v === 'leaderboard' ? 'Leaderboard' : 'Table'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// --- District workload pressure --------------------------------------------
 
 function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(12))
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   return (
-    <SectionShell name="district workload pressure" title="District workload pressure" subtitle="Districts with the highest case volume and closure pressure." loading={loading} error={error} empty={data?.length === 0}>
-      {data && (
+    <SectionShell name="district workload pressure" title="District workload pressure" subtitle="Districts with the highest workload. Longer bars mean more cases; closure timing is shown as supporting context." loading={loading} error={error} empty={data?.length === 0}
+      action={data && data.length > 0 ? <ViewToggle view={view} onChange={setView} /> : undefined}
+    >
+      {data && view === 'leaderboard' && <DistrictLeaderboard rows={data} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
           head={['Council district', 'Total', 'Avg', '90% closed within', 'Top complaint type']}
           align={['left', 'right', 'right', 'right', 'left']}
@@ -1030,13 +1051,56 @@ function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) =>
   )
 }
 
-// --- Department workload ---------------------------------------------------
+/** Visual leaderboard of districts by workload (default view). */
+function DistrictLeaderboard({ rows, onExplore }: { rows: AreaBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => (
+        <li key={row.council_district}>
+          <button
+            type="button"
+            onClick={() => onExplore({ councilDistrict: row.council_district })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                <span className="truncate text-sm font-medium text-navy-900">District {row.council_district}</span>
+              </div>
+              <span className="shrink-0 text-[11px] tabular-nums text-ink-subtle">
+                <span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases
+              </span>
+            </div>
+            <div className="mt-1 text-[11px] text-ink-subtle">
+              Top issue: <span className="text-ink-muted">{row.top_complaint_type ?? '—'}</span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-subtle">
+              <span>Avg closure: <span className="font-medium text-ink">{fmtDays(row.avg_closure_days)}</span></span>
+              <span aria-hidden>·</span>
+              <span>90% closed within: <span className="font-medium text-ink">{fmtDays(row.p90_closure_days)}</span></span>
+            </div>
+            <div className="mt-2">
+              <MetricBar label="Volume" pct={Math.round((row.total_cases / maxVolume) * 100)} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+            </div>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// --- Department / agency workload ------------------------------------------
 
 function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<InsightsDepartmentWorkload[]>(() => getInsightsDepartmentWorkload(12))
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   return (
-    <SectionShell name="department workload" title="Department workload" subtitle="Caseload by agency / assigned department." loading={loading} error={error} empty={data?.length === 0}>
-      {data && (
+    <SectionShell name="department / agency workload" title="Department / agency workload" subtitle="Which agencies carry the largest case volumes in the benchmark data." loading={loading} error={error} empty={data?.length === 0}
+      action={data && data.length > 0 ? <ViewToggle view={view} onChange={setView} /> : undefined}
+    >
+      {data && view === 'leaderboard' && <DepartmentLeaderboard rows={data} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
           head={['Department / agency', 'Total', 'Open', 'Closed', 'Avg closure']}
           align={['left', 'right', 'right', 'right', 'right']}
@@ -1048,6 +1112,41 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
         />
       )}
     </SectionShell>
+  )
+}
+
+/** Horizontal-bar leaderboard of agencies by case volume (default view). */
+function DepartmentLeaderboard({ rows, onExplore }: { rows: InsightsDepartmentWorkload[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => (
+        <li key={row.department}>
+          <button
+            type="button"
+            onClick={() => onExplore({ agency: row.department })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                <span className="truncate text-sm font-medium text-navy-900">{row.department}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-4 text-[11px] tabular-nums text-ink-subtle">
+                <span><span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases</span>
+                <span>Avg closure <span className="font-semibold text-ink">{fmtDays(row.avg_closure_days)}</span></span>
+              </div>
+            </div>
+            <div className="mt-2">
+              <MetricBar label="Volume" pct={Math.round((row.total_cases / maxVolume) * 100)} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+            </div>
+            <p className="mt-1 text-[11px] text-ink-subtle">
+              Open {fmtInt(row.open_cases)} · Closed {fmtInt(row.closed_cases)}
+            </p>
+          </button>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -1171,7 +1270,7 @@ function DistrictBottleneck({
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Metric label="Total cases" value={fmtInt(row.total_cases)} />
         <Metric label="Avg closure" value={fmtDays(row.avg_closure_days)} />
-        <Metric label="Slow case (P90)" value={fmtDays(row.p90_closure_days)} />
+        <Metric label="90% closed within" value={fmtDays(row.p90_closure_days)} />
         <Metric label="Top complaint type" value={row.top_complaint_type ?? '—'} />
       </dl>
       <OperationalRead reads={reads} />
