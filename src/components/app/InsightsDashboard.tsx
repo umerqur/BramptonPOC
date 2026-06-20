@@ -1646,10 +1646,7 @@ function CaseExplorerTimeout({ detail }: { detail: string }) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm">
       <div className="font-semibold text-navy-900">Case Explorer query timed out</div>
-      <p className="mt-1 text-ink-muted">
-        The aggregate Insights are still available. This search needs a narrower filter or database index to return
-        quickly.
-      </p>
+      <p className="mt-1 text-ink-muted">Try a narrower filter, or search by exact case ID.</p>
       <details className="mt-2">
         <summary className="cursor-pointer text-[11px] text-ink-subtle">Technical detail</summary>
         <p className="mt-1 font-mono text-[11px] text-ink-subtle">Postgres 57014 statement timeout</p>
