@@ -24,12 +24,31 @@ export type AssistantCaseContextInput = {
   assigned_officer_name?: string | null
 }
 
+// A single retrieved benchmark reference (a similar closed case) with the
+// retrieval scores that justify surfacing it. Used to show which case supports
+// each benchmark note.
+export type BenchmarkReference = {
+  case_id: string
+  complaint_type: string | null
+  request_detail: string | null
+  resolution_description: string | null
+  closure_days: number | null
+  similarity_score: number | null
+  rerank_score: number | null
+}
+
+// A benchmark observation tied to the case_id of a retrieved benchmark.
+export type BenchmarkNote = {
+  case_id: string
+  note: string
+}
+
 export type AssistantResult = {
   answer: string
   used_context: string[]
   officer_checklist: string[]
   missing_information: string[]
-  benchmark_notes: string[]
+  benchmark_notes: BenchmarkNote[]
   limitations: string
 }
 
@@ -38,6 +57,8 @@ export type AssistantResponse = {
   prompt_version: string
   poc_only: boolean
   benchmarks_used: number
+  /** The retrieved benchmark references that grounded the answer. */
+  benchmarks: BenchmarkReference[]
   result: AssistantResult
 }
 

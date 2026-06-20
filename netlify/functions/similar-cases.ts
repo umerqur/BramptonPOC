@@ -45,7 +45,7 @@ const MAX_RESULTS = 10
 const DEFAULT_RESULTS = 5
 
 const ADVISORY =
-  'AI assisted retrieval for staff reference only. It surfaces similar closed ' +
+  'AI-supported retrieval for staff reference only. It surfaces similar closed ' +
   'benchmark records; it does not decide the outcome. The resident closure ' +
   'message remains rules based and supervisor approved.'
 
