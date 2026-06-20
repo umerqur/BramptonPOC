@@ -25,6 +25,7 @@ import type {
 import { runWorkflow, buildClosureDraft, deriveFieldVisitOutcome } from './demoWorkflowService'
 import { residentRowToNormalized } from './serviceRequest'
 import type { ResidentRequestRow } from './residentRequests'
+import { sanitizeResidentDescription } from '../lib/residentDescription'
 
 /**
  * Deterministic mapping from a resident-facing issue type to the internal
@@ -132,7 +133,7 @@ function fieldActionFromRow(row: ResidentRequestRow): OfficerFieldAction | null 
  */
 export function residentRowToCase(row: ResidentRequestRow): DemoCase {
   const input: ResidentComplaintInput = {
-    description: row.description ?? '',
+    description: sanitizeResidentDescription(row.description),
     location: [row.location, row.city].filter(Boolean).join(', '),
     channel: '311 Web',
     hasPhoto: false,

@@ -18,12 +18,14 @@ import {
   mapResidentToWorkRow,
   sortByReviewPriority,
   isActiveResident,
+  needsOfficerAssignment,
   REVIEW_PRIORITY_EXPLAINER,
   REVIEW_PRIORITY_FACTORS,
   type WorkQueueRow,
   type ReviewPriorityTier,
 } from '../../services/workQueue'
 import type { OpenReviewRow } from '../../services/caseExplorer'
+import { sanitizeResidentDescription } from '../../lib/residentDescription'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 import { DecisionLogicDisclosure, decisionLogicFromWorkRow } from '../../components/app/DecisionLogicPanel'
 
@@ -129,6 +131,13 @@ export default function AppStaffInboxPage() {
   // active Work Queue.
   const residentActive = useMemo(() => resident.rows.filter(isActiveResident), [resident.rows])
 
+  // Resident intakes tab shows only NEW / unassigned intakes that still need a
+  // supervisor to assign an officer (including any with an incomplete assignment).
+  const residentNeedsAssignment = useMemo(
+    () => residentActive.filter(needsOfficerAssignment),
+    [residentActive],
+  )
+
   const residentWorkRows = useMemo(
     () => residentActive.map((r) => mapResidentToWorkRow(r, attachmentsByCase[r.case_id]?.length ?? 0)),
     [residentActive, attachmentsByCase],
@@ -197,7 +206,7 @@ export default function AppStaffInboxPage() {
   const loading = resident.loading || open.loading
   const counts: Record<WorkTab, number> = {
     all: allActive.length,
-    resident: residentActive.length,
+    resident: residentNeedsAssignment.length,
     open: open.rows.length,
     assigned: assignedInProgress.length,
     closure: readyForClosure.length,
@@ -238,7 +247,7 @@ export default function AppStaffInboxPage() {
         {tab === 'resident' ? (
           <ResidentIntakesView
             state={resident}
-            rows={residentActive}
+            rows={residentNeedsAssignment}
             attachmentsByCase={attachmentsByCase}
             canAssign={canAssign}
             assigningId={assigningId}
@@ -444,6 +453,21 @@ function WorkRowCard({
 
       <DecisionLogicDisclosure data={decisionLogicFromWorkRow(row)} />
 
+      {/* Assigned resident cases: surface the assigned officer and the next step
+          so the assignment state reads clearly once a supervisor has assigned. */}
+      {isResident && row.in_progress && (
+        <p className="mt-2 text-xs text-ink-muted">
+          {row.assigned_to ? (
+            <>
+              <span className="font-medium text-ink">Assigned officer:</span> {row.assigned_to}
+              {!row.ready_for_closure && ' · Next step: Officer records field outcome'}
+            </>
+          ) : (
+            <span className="font-medium text-rose-700">Assignment incomplete — reassign an officer from Resident intakes.</span>
+          )}
+        </p>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] text-ink-subtle">
           {row.workflow_stage}
@@ -632,7 +656,7 @@ function InboxCard({
   const { triage, summary } = triageCase
   const priority = triage.recommendedPriority
   const missingInformation = triage.missingInformation
-  const residentComplaint = row.description?.trim()
+  const residentComplaint = sanitizeResidentDescription(row.description)
 
   return (
     <div className="card p-5">
@@ -773,14 +797,18 @@ function AssignmentPanel({
   onAssign: (officer: StaffProfile) => void
   routingRecommendation: string
 }) {
-  const assigned = Boolean(row.assigned_officer_name)
+  // Only a recorded officer name means the assignment actually completed. A row
+  // can carry status 'assigned' with NO officer on file (an incomplete or stale
+  // assignment) — that is not "assigned", it needs the supervisor to finish it.
+  const assignedComplete = Boolean(row.assigned_officer_name)
+  const assignmentIncomplete = !assignedComplete && row.status === 'assigned'
   // The assignable By-law Officers (Officer Qureshi, Officer Mann, Officer Ahmed,
   // Officer Oakley). Assignment stores the chosen officer's login email.
   const officers = officerProfiles()
   const [selectedEmail, setSelectedEmail] = useState(officers[0]?.email ?? '')
   const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? officers[0] ?? null
 
-  if (assigned) {
+  if (assignedComplete) {
     return (
       <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
         <div className="flex items-center gap-2">
@@ -798,20 +826,37 @@ function AssignmentPanel({
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+    <div
+      className={`mt-4 rounded-xl border p-4 ${
+        assignmentIncomplete ? 'border-rose-200 bg-rose-50/60' : 'border-amber-200 bg-amber-50/60'
+      }`}
+    >
       <div className="flex items-center gap-2">
-        <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-        <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">Assignment</span>
+        <span
+          aria-hidden
+          className={`inline-block h-2 w-2 rounded-full ${assignmentIncomplete ? 'bg-rose-500' : 'bg-amber-500'}`}
+        />
+        <span
+          className={`text-xs font-semibold uppercase tracking-wide ${
+            assignmentIncomplete ? 'text-rose-800' : 'text-amber-800'
+          }`}
+        >
+          Assignment
+        </span>
       </div>
       <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs uppercase tracking-wide text-ink-subtle">Status</dt>
-          <dd className="mt-0.5 font-medium text-amber-700">Human assignment required</dd>
+          <dd className={`mt-0.5 font-medium ${assignmentIncomplete ? 'text-rose-700' : 'text-amber-700'}`}>
+            {assignmentIncomplete ? 'Assignment incomplete — select an officer again' : 'Human assignment required'}
+          </dd>
         </div>
         <Detail label="Routing recommendation" value={routingRecommendation} />
       </dl>
       <p className="mt-2 text-[11px] text-ink-subtle">
-        Routing recommendation does not dispatch an officer automatically.
+        {assignmentIncomplete
+          ? 'This case shows as assigned but has no officer on file. Select an officer to complete the assignment.'
+          : 'Routing recommendation does not dispatch an officer automatically.'}
       </p>
       {canAssign && row.status !== 'closed' && (
         <div className="mt-3 flex flex-wrap items-center gap-2">

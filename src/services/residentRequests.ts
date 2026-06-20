@@ -111,7 +111,9 @@ export const STAFF_ACTIONS: Array<{
   eventType: string
 }> = [
   { toStatus: 'received', label: 'Mark received', eventType: 'resident_request_received' },
-  { toStatus: 'assigned', label: 'Assign to officer', eventType: 'resident_request_assigned' },
+  // NOTE: there is intentionally NO generic "move to assigned" action here.
+  // Assigning a case must go through assignResidentRequestToOfficer so the
+  // officer email/name/assigned_at are written together with status 'assigned'.
   { toStatus: 'in_review', label: 'Move to review', eventType: 'resident_request_in_review' },
   { toStatus: 'closed', label: 'Close case', eventType: 'resident_request_closed' },
 ]
@@ -594,6 +596,13 @@ export async function applyStaffStatusUpdate(
 ): Promise<StaffStatusUpdateResult> {
   const client = requireClient()
   const fromStatus = request.status
+
+  // Guard: a case may only become 'assigned' through assignResidentRequestToOfficer,
+  // which writes the officer email/name/assigned_at atomically. A bare status move
+  // to 'assigned' would leave the row assigned with no officer on file.
+  if (action.toStatus === 'assigned') {
+    throw new Error('Use assignResidentRequestToOfficer to assign a case to an officer.')
+  }
 
   const { data, error } = await client
     .from(RESIDENT_REQUESTS_TABLE)

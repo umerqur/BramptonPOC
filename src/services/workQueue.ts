@@ -114,6 +114,32 @@ export function isActiveResident(row: ResidentRequestRow): boolean {
   return ACTIVE_RESIDENT_STATUSES.includes(row.status)
 }
 
+/**
+ * Whether a resident request is assigned / in progress. A row counts as assigned
+ * if its status is 'assigned' or 'in_review', OR if it carries an assigned
+ * officer (email or name). The officer-field check keeps the "Assigned / in
+ * progress" tab consistent even if the status and the assignment ever drift.
+ */
+export function isAssignedResident(row: ResidentRequestRow): boolean {
+  return (
+    row.status === 'assigned' ||
+    row.status === 'in_review' ||
+    Boolean(row.assigned_officer_email) ||
+    Boolean(row.assigned_officer_name)
+  )
+}
+
+/**
+ * Whether a resident request is a new intake still awaiting supervisor
+ * assignment. True when it is active and NOT completely assigned (no assigned
+ * officer name on file). This deliberately INCLUDES rows whose status is
+ * 'assigned' but which have no officer recorded — an incomplete assignment that
+ * a supervisor must finish — so they remain actionable on the intake tab.
+ */
+export function needsOfficerAssignment(row: ResidentRequestRow): boolean {
+  return isActiveResident(row) && row.status !== 'closed' && !row.assigned_officer_name
+}
+
 /** Whole days since an ISO timestamp, or null when unparseable. */
 function ageDays(iso: string | null): number | null {
   if (!iso) return null
@@ -254,7 +280,7 @@ export function mapResidentToWorkRow(row: ResidentRequestRow, attachmentCount = 
 
   const age = ageDays(row.created_at) ?? 0
   const readyForClosure = row.field_visit_completed && row.status !== 'closed'
-  const inProgress = row.status === 'assigned' || row.status === 'in_review'
+  const inProgress = isAssignedResident(row)
 
   const { score, tier, reason, components } = computeResidentPriority({
     priority,
