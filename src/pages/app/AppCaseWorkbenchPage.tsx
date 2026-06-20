@@ -6,6 +6,7 @@ import { can, rolesAllowed, officerProfiles, officerDisplayName } from '../../li
 import { FIELD_OUTCOME_LABELS, fieldOutcomeNeedsStructuredAction, formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { getResidentRequestAttachmentsForCases, isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import { computeResidentPriority, normalizeTier } from '../../services/workQueue'
+import { getNextRecommendedAction } from '../../services/nextRecommendedAction'
 import { DecisionLogicBody, type DecisionLogicData } from '../../components/app/DecisionLogicPanel'
 import {
   AutomationBadge,
@@ -52,6 +53,7 @@ export default function AppCaseWorkbenchPage() {
   const similar = useSimilarCases(c)
   const similarRef = useRef<HTMLElement>(null)
   const logicRef = useRef<HTMLElement>(null)
+  const fieldRef = useRef<HTMLDivElement>(null)
   const [logicOpen, setLogicOpen] = useState(false)
 
   function findSimilar() {
@@ -147,11 +149,79 @@ export default function AppCaseWorkbenchPage() {
     window.setTimeout(() => setFlash((m) => (m === msg ? null : m)), 4000)
   }
 
+  // Deterministic, stage-aware next-best-action. The first matching rule wins, so
+  // it always reflects where the case is in the officer-first lifecycle.
+  const nextAction = getNextRecommendedAction(c)
+  const nextActionButton = (() => {
+    switch (nextAction.kind) {
+      case 'request_info':
+        return (
+          <button
+            onClick={() => {
+              requestMoreInfo(c.id)
+              note('Marked as needing more information — logged to audit trail.')
+            }}
+            className="btn-primary text-sm"
+          >
+            Request more information
+          </button>
+        )
+      case 'assign_officer':
+        return (
+          <button
+            onClick={() => fieldRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="btn-primary text-sm"
+          >
+            Assign an officer
+          </button>
+        )
+      case 'prepare_closure':
+        return (
+          <button
+            onClick={() => {
+              sendToStaffReview(c.id)
+              note('Closure draft prepared from the recorded field outcome. Sent to staff review.')
+              navigate(`/app/closure?case=${c.id}`)
+            }}
+            className="btn-primary text-sm"
+          >
+            Prepare closure draft
+          </button>
+        )
+      case 'review_closure':
+        return (
+          <button onClick={() => navigate(`/app/closure?case=${c.id}`)} className="btn-primary text-sm">
+            Review &amp; approve closure
+          </button>
+        )
+      default:
+        // closed, wait_for_outcome, complete_structured_action, follow_up —
+        // informational; no primary button (the explanation is the guidance).
+        return null
+    }
+  })()
+
   return (
     <div className="container-page py-10">
       <Header cases={cases} activeId={c.id} onPick={setActiveCase} />
 
       <CaseSourceBar c={c} />
+
+      {/* Primary decision support: the single next best action, why, and a staff
+          control. Deterministic and stage-aware — staff confirm and can override. */}
+      <section className="mt-4 card p-5 ring-1 ring-navy-100">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="badge bg-navy-50 text-navy-900 ring-1 ring-inset ring-navy-200">Next recommended action</span>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-ink-subtle">Staff decision required</span>
+        </div>
+        <h2 className="mt-2 text-lg font-semibold text-navy-900">{nextAction.label}</h2>
+        <div className="mt-2">
+          <div className="stat-label">Why this is next</div>
+          <p className="mt-1 text-sm leading-relaxed text-ink">{nextAction.why}</p>
+        </div>
+        {nextActionButton && <div className="mt-3">{nextActionButton}</div>}
+        <p className="mt-3 text-[11px] text-ink-subtle">{nextAction.staffNote}</p>
+      </section>
 
       {isBenchmark && (
         <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs leading-relaxed text-teal-900">
@@ -326,7 +396,7 @@ export default function AppCaseWorkbenchPage() {
             <DecisionLogicBody {...decisionLogic} />
           </CollapsibleCard>
 
-          <Panel title="Review readiness" subtitle="Rules based file readiness, staff confirm and decide">
+          <Panel title="File readiness" subtitle="Rules based intake-completeness signal — supporting context">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />
             <div
               className={`mt-3 rounded-lg px-3 py-2 text-xs ${
@@ -336,12 +406,8 @@ export default function AppCaseWorkbenchPage() {
               }`}
             >
               {c.triage.confidenceLevel === 'High'
-                ? 'The file has enough intake detail, policy match, and context to prepare a staff reviewed closure draft.'
-                : 'More information is needed before staff review. Resolve the items below before preparing a closure draft.'}
-            </div>
-            <div className="mt-3">
-              <div className="stat-label">Recommended next step</div>
-              <p className="mt-1 text-sm text-navy-900">{summary.recommendedNextStep}</p>
+                ? 'The file has enough intake detail, policy match, and context for confident staff review.'
+                : 'More intake information is needed before staff can act confidently. See the next recommended action above.'}
             </div>
           </Panel>
 
@@ -377,7 +443,7 @@ export default function AppCaseWorkbenchPage() {
               </dl>
             </Panel>
           ) : (
-          <Panel title="Next staff action" subtitle="Human review / decision — one step at a time">
+          <Panel title="Staff actions" subtitle="Staff decision required — you can override the recommendation">
             <div className="flex items-center gap-2 text-xs text-ink-subtle">
               <span>Effective priority:</span>
               <span className="badge bg-navy-50 text-navy-900 ring-1 ring-inset ring-navy-200">{effectivePriority}</span>
@@ -385,37 +451,9 @@ export default function AppCaseWorkbenchPage() {
             </div>
 
             <div className="mt-3 grid gap-2">
-              {/* The primary next step follows the linear flow: assign an officer →
-                  wait for the field outcome → prepare the closure draft from it.
-                  A legacy field outcome with no structured enforcement action must
-                  not be drafted until staff set the structured action. */}
-              {fieldOutcomeNeedsStructuredAction(c.fieldAction) ? (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs leading-relaxed text-rose-800">
-                  This field outcome was recorded before structured enforcement actions were available. Select the
-                  recorded enforcement action before preparing a closure draft.
-                </div>
-              ) : c.fieldAction ? (
-                <button
-                  onClick={() => {
-                    sendToStaffReview(c.id)
-                    note('Closure draft prepared from the recorded field outcome. Sent to staff review.')
-                    navigate(`/app/closure?case=${c.id}`)
-                  }}
-                  className="btn-primary justify-start text-sm"
-                >
-                  Prepare closure draft from officer outcome
-                </button>
-              ) : c.assignedOfficer ? (
-                <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs leading-relaxed text-indigo-800">
-                  Waiting for field outcome from <span className="font-semibold">{c.assignedOfficer}</span>. The closure
-                  draft will be prepared after the officer records findings.
-                </div>
-              ) : (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
-                  Assign this case to a By-law Officer before field investigation can begin.
-                </div>
-              )}
-
+              {/* The recommended primary action lives in the "Next recommended
+                  action" card at the top. This panel keeps the always-available
+                  secondary controls. */}
               <button
                 onClick={() => {
                   requestMoreInfo(c.id)
@@ -464,7 +502,9 @@ export default function AppCaseWorkbenchPage() {
           </Panel>
           )}
 
-          <FieldInvestigationPanel c={c} readOnly={isClosed} />
+          <div ref={fieldRef}>
+            <FieldInvestigationPanel c={c} readOnly={isClosed} />
+          </div>
         </div>
       </div>
 
