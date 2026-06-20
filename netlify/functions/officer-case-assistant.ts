@@ -42,7 +42,10 @@ import { allowedRolesForEmail } from '../../src/lib/roles'
 // ---------------------------------------------------------------------------
 
 const PROMPT_VERSION = 'officer-case-assistant-v1'
-const COHERE_CHAT_URL = 'https://api.cohere.com/v1/chat'
+// Cohere v2 Chat API — required for the current Command models (e.g.
+// command-a-plus-05-2026). It takes a `messages` array (system + user) and
+// returns the answer under message.content[].text.
+const COHERE_CHAT_URL = 'https://api.cohere.com/v2/chat'
 
 // Cap the officer's free-text question so the prompt stays predictable.
 const MAX_QUESTION_LEN = 600
@@ -552,8 +555,12 @@ export default async function handler(req: Request): Promise<Response> {
       },
       body: JSON.stringify({
         model: commandModel,
-        preamble: PREAMBLE,
-        message: buildMessage({ context, timeline, benchmarks, question }),
+        messages: [
+          { role: 'system', content: PREAMBLE },
+          { role: 'user', content: buildMessage({ context, timeline, benchmarks, question }) },
+        ],
+        // Force a JSON object response so the structured contract is reliable.
+        response_format: { type: 'json_object' },
         temperature: 0.2,
         max_tokens: 900,
       }),
@@ -570,8 +577,14 @@ export default async function handler(req: Request): Promise<Response> {
 
   let text: string
   try {
-    const data = (await cohereRes.json()) as { text?: string }
-    text = asString(data.text).trim()
+    const data = (await cohereRes.json()) as {
+      message?: { content?: Array<{ type?: string; text?: string }> }
+    }
+    text = (data.message?.content ?? [])
+      .filter((block) => typeof block.text === 'string')
+      .map((block) => block.text as string)
+      .join('\n')
+      .trim()
   } catch (err) {
     console.error('officer-case-assistant: unreadable Cohere response:', errorText(err))
     return json({ error: 'Assistant service returned an unreadable response.' }, 502)
