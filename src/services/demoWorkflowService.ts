@@ -197,18 +197,14 @@ function buildContext(input: ResidentComplaintInput, category: DemoCategory): En
   const repeatLocationSignal: EnforcementContext['repeatLocationSignal'] =
     repeatLocationCount >= 4 ? 'High' : repeatLocationCount >= 2 ? 'Emerging' : 'None'
 
-  const history =
-    repeatLocationCount > 0
-      ? Array.from({ length: Math.min(repeatLocationCount, 3) }).map((_, i) => ({
-          caseId: `BR-2025-${4100 + i}`,
-          date: formatDate(daysAgo(30 + i * 22)),
-          summary: `${category} complaint at or near this location`,
-          status: i === 0 ? 'Closed — resolved' : 'Closed — no action required',
-        }))
-      : []
-
+  // Verified complaint history and nearby records are NOT available in this POC:
+  // there is no Supabase per-location complaint-history query, and the previous
+  // synthetic BR-2025-* records made demo data look like real Brampton records.
+  // Leave these empty so the UI shows an honest "no verified records" state and
+  // never displays a fake record id. (Semantic context still comes from the real
+  // Cohere/Qdrant "Similar benchmark references" retrieval shown separately.)
   return {
-    complaintHistory: history,
+    complaintHistory: [],
     patrolLogs:
       repeatLocationCount > 0
         ? [`Patrol unit logged a drive-by of this area ${repeatLocationCount} times in the last 60 days.`, 'Last officer note: area flagged for periodic monitoring.']
@@ -224,13 +220,7 @@ function buildContext(input: ResidentComplaintInput, category: DemoCategory): En
           ? `${category} complaints in this area are slightly above the trailing 90-day average.`
           : `${category} complaint volume for this area is within the normal range.`,
     policyMatch: POLICY_BY_CATEGORY[category],
-    similarNearbyCases:
-      repeatLocationCount > 0
-        ? [
-            { caseId: `BR-2025-${4200}`, distance: '120 m', category, outcome: 'Closed — notice to comply met' },
-            { caseId: `BR-2025-${4221}`, distance: '340 m', category, outcome: 'Closed — no violation found' },
-          ]
-        : [{ caseId: `BR-2025-${4250}`, distance: '1.2 km', category, outcome: 'Closed — resolved on first visit' }],
+    similarNearbyCases: [],
     repeatLocationCount,
     repeatLocationSignal,
   }

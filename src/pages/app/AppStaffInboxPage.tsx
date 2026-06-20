@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { can, officerProfiles, officerDisplayName, type StaffProfile } from '../../lib/roles'
@@ -46,6 +46,16 @@ import { DecisionLogicDisclosure, decisionLogicFromWorkRow } from '../../compone
 // The five Work Queue views.
 type WorkTab = 'all' | 'resident' | 'open' | 'assigned' | 'closure'
 
+// Tab labels. "Open benchmark cases" stays explicitly labelled as benchmark /
+// context data so it never reads as live Brampton resident work.
+const WORK_TAB_LABELS: Record<WorkTab, string> = {
+  all: 'All active work',
+  resident: 'Resident intakes',
+  open: 'Open benchmark cases',
+  assigned: 'Assigned / in progress',
+  closure: 'Ready for closure review',
+}
+
 const STATUS_STYLES: Record<string, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
   received: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
@@ -86,7 +96,11 @@ export default function AppStaffInboxPage() {
   const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
   const [open, setOpen] = useState<OpenState>({ rows: [], hasMore: false, loading: true, error: null })
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
-  const [tab, setTab] = useState<WorkTab>('all')
+  // Tab order + default tab are role-aware (see tabOrder / the default-selection
+  // effect below). Initialise to the role's primary tab so the first paint isn't
+  // backwards for a supervisor; the effect then refines to the first tab that
+  // actually has items once the queue has loaded.
+  const [tab, setTab] = useState<WorkTab>(() => (role === 'csr' ? 'resident' : 'assigned'))
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const canAssign = can(role, 'assignOfficer')
 
@@ -156,6 +170,41 @@ export default function AppStaffInboxPage() {
     [residentWorkRows],
   )
 
+  const counts: Record<WorkTab, number> = useMemo(
+    () => ({
+      all: allActive.length,
+      resident: residentNeedsAssignment.length,
+      open: open.rows.length,
+      assigned: assignedInProgress.length,
+      closure: readyForClosure.length,
+    }),
+    [allActive.length, residentNeedsAssignment.length, open.rows.length, assignedInProgress.length, readyForClosure.length],
+  )
+
+  // Tab order by role. Supervisors should see live operational work first
+  // (assigned/in progress, then closure reviews, then new intakes), with NYC
+  // open benchmark cases last so demo/context data never visually outranks live
+  // resident workflow. CSR / Intake prioritises new resident intakes first.
+  const tabOrder = useMemo<WorkTab[]>(
+    () =>
+      role === 'csr'
+        ? ['resident', 'all', 'assigned', 'closure', 'open']
+        : ['assigned', 'closure', 'resident', 'all', 'open'],
+    [role],
+  )
+
+  // Default-selection: once the queue has loaded, land on the first tab in the
+  // role's preferred order that actually has items (falling back to the role's
+  // primary tab). Runs once and never overrides a manual tab choice.
+  const didInitTab = useRef(false)
+  useEffect(() => {
+    if (didInitTab.current) return
+    if (resident.loading || open.loading) return
+    didInitTab.current = true
+    const firstWithItems = tabOrder.find((t) => counts[t] > 0)
+    if (firstWithItems) setTab(firstWithItems)
+  }, [resident.loading, open.loading, tabOrder, counts])
+
   function openResidentCase(row: ResidentRequestRow) {
     ingestResidentCase(row)
     navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
@@ -204,13 +253,6 @@ export default function AppStaffInboxPage() {
   if (role === 'officer') return <Navigate to="/app/field" replace />
 
   const loading = resident.loading || open.loading
-  const counts: Record<WorkTab, number> = {
-    all: allActive.length,
-    resident: residentNeedsAssignment.length,
-    open: open.rows.length,
-    assigned: assignedInProgress.length,
-    closure: readyForClosure.length,
-  }
 
   return (
     <div className="container-page py-10">
@@ -231,16 +273,15 @@ export default function AppStaffInboxPage() {
       <ReviewPriorityNote />
 
       <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
-        <TabButton label="All active work" count={counts.all} active={tab === 'all'} onClick={() => setTab('all')} />
-        <TabButton label="Resident intakes" count={counts.resident} active={tab === 'resident'} onClick={() => setTab('resident')} />
-        <TabButton
-          label="Open benchmark cases"
-          count={open.error ? null : counts.open}
-          active={tab === 'open'}
-          onClick={() => setTab('open')}
-        />
-        <TabButton label="Assigned / in progress" count={counts.assigned} active={tab === 'assigned'} onClick={() => setTab('assigned')} />
-        <TabButton label="Ready for closure review" count={counts.closure} active={tab === 'closure'} onClick={() => setTab('closure')} />
+        {tabOrder.map((t) => (
+          <TabButton
+            key={t}
+            label={WORK_TAB_LABELS[t]}
+            count={t === 'open' && open.error ? null : counts[t]}
+            active={tab === t}
+            onClick={() => setTab(t)}
+          />
+        ))}
       </div>
 
       <div className="mt-6">

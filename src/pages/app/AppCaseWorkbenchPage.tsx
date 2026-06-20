@@ -364,18 +364,26 @@ export default function AppCaseWorkbenchPage() {
               </Sub>
             </div>
 
-            <Sub label="Similar cases nearby">
-              <ul className="grid gap-2 sm:grid-cols-2">
-                {ctx.similarNearbyCases.map((s) => (
-                  <li key={s.caseId} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-navy-900">{s.caseId}</span>
-                      <span className="text-xs text-ink-subtle">{s.distance}</span>
-                    </div>
-                    <div className="text-xs text-ink-muted">{s.outcome}</div>
-                  </li>
-                ))}
-              </ul>
+            <Sub label="Local complaint history">
+              {ctx.similarNearbyCases.length === 0 ? (
+                <Empty>No verified nearby complaint history found for this location.</Empty>
+              ) : (
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {ctx.similarNearbyCases.map((s) => (
+                    <li key={s.caseId} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-navy-900">{s.caseId}</span>
+                        <span className="text-xs text-ink-subtle">{s.distance}</span>
+                      </div>
+                      <div className="text-xs text-ink-muted">{s.outcome}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="mt-1.5 text-[11px] text-ink-subtle">
+                Verified records for this location only. AI-supported semantic matches appear under “Similar benchmark
+                references” below.
+              </p>
             </Sub>
           </CollapsibleCard>
 
