@@ -440,10 +440,22 @@ function fieldVisitDateLabel(action: OfficerFieldAction): string {
 }
 
 /**
- * The closure paragraph that describes what actually happened. When an officer
- * field action is on file it states the real outcome the officer recorded; with
- * no field action it stays strictly to the review that was performed and never
- * claims an officer attended.
+ * True when a field visit was recorded but no STRUCTURED enforcement action is on
+ * file — a legacy / incomplete outcome. The resident-facing disposition must NOT
+ * be inferred in this case: staff must set the structured enforcement action
+ * before a closure draft can be prepared or sent.
+ */
+export function fieldOutcomeNeedsStructuredAction(fieldAction: OfficerFieldAction | null): boolean {
+  return fieldAction != null && fieldAction.enforcementAction == null
+}
+
+/**
+ * The closure paragraph that describes what actually happened. It is driven ONLY
+ * by the STRUCTURED officer fields (violation observed + enforcement action +,
+ * for a ticket, the reference number). Officer free text (action taken, observed
+ * condition, notes) is NEVER copied into the resident-facing letter — it stays in
+ * internal notes only. With no field action it stays strictly to the review that
+ * was performed and never claims an officer attended.
  */
 function closureOutcomeParagraph(
   triage: AiTriageResult,
@@ -463,11 +475,6 @@ function closureOutcomeParagraph(
   }
 
   const date = fieldVisitDateLabel(fieldAction)
-  const ref = fieldAction.referenceNumber ? ` (${fieldAction.referenceNumber})` : ''
-  // A plain version of the officer's recorded action, appended where it adds
-  // detail so the letter reflects what the officer actually did.
-  const action = plainAction(fieldAction.actionTaken)
-  const recordedActionSentence = action ? ` The officer's recorded action was: ${action}.` : ''
 
   // Friendly, forward-looking invitation to re-engage 311 with the case number —
   // appended to every grounded outcome so the resident always has a clear path
@@ -475,36 +482,48 @@ function closureOutcomeParagraph(
   const inviteBack =
     ` If the issue continues or returns, please contact 311 with your case number so the City can review the matter again.`
 
+  // A completed field visit with NO structured enforcement action is a legacy /
+  // incomplete record. Do NOT imply any disposition (ticket, notice, or warning)
+  // — staff must set the structured action before this is sent (the Workbench and
+  // Closure Review block sending until they do).
+  if (fieldOutcomeNeedsStructuredAction(fieldAction)) {
+    return (
+      `A by-law enforcement officer attended the location${where} on ${date}. ` +
+      `The recorded enforcement outcome is being finalized before this file is closed.` +
+      inviteBack
+    )
+  }
+
   switch (fieldAction.outcome) {
     case 'no_violation':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} to investigate. ` +
-        `At the time of inspection, no violation of ${policy} was observed, so no further action was required and this file has been closed.${recordedActionSentence}` +
+        `At the time of inspection, no violation of ${policy} was observed, so no further action was required and this file has been closed.` +
         inviteBack
       )
     case 'warning_education':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and ` +
         `${fieldAction.violationObserved === 'yes' ? `observed a concern related to ${policy}` : `reviewed the reported concern`}. ` +
-        `The officer addressed the matter by providing education or a warning to the responsible party. ` +
-        `No ticket was recorded on this file.${recordedActionSentence} Your service request has been closed.` +
+        `The officer addressed the matter by providing education or a warning. No ticket was recorded on this file.` +
+        ` Your service request has been closed.` +
         inviteBack
       )
     case 'notice_issued':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
-        `A notice to comply${ref} was issued to the responsible party, and the location will be re-inspected after the compliance period.` +
-        `${recordedActionSentence} Your service request has been closed now that this action has been taken.` +
+        `A notice to comply was issued to the responsible party, and the location will be re-inspected after the compliance period.` +
+        ` Your service request has been closed now that this action has been taken.` +
         inviteBack
       )
     case 'ticket_issued': {
       // Only ever reached when the officer selected "Parking ticket / penalty
-      // notice issued". Include the notice number only if it was provided —
-      // never invent one.
+      // notice issued" (deriveFieldVisitOutcome). Include the notice number only
+      // if it was provided — never invent one.
       const ticketRef = fieldAction.referenceNumber ? ` (number ${fieldAction.referenceNumber})` : ''
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
-        `A parking penalty notice${ticketRef} was issued.${recordedActionSentence} This file has now been closed.` +
+        `A parking penalty notice${ticketRef} was issued. This file has now been closed.` +
         inviteBack
       )
     }
@@ -512,21 +531,10 @@ function closureOutcomeParagraph(
       return (
         `A by-law enforcement officer attended the location${where} on ${date}. ` +
         `After reviewing the matter, no further enforcement action under ${policy} was required at this time, so this file has been closed.` +
-        `${recordedActionSentence} Thank you for reporting it.` +
+        ` Thank you for reporting it.` +
         inviteBack
       )
   }
-}
-
-/**
- * A plain, resident-safe version of the officer's recorded action text, or null
- * when none was recorded. Lower-cases the first letter and trims trailing
- * punctuation so it reads naturally inside a sentence.
- */
-function plainAction(text: string | null): string | null {
-  const t = (text ?? '').trim().replace(/[.\s]+$/, '')
-  if (!t) return null
-  return t.charAt(0).toLowerCase() + t.slice(1)
 }
 
 export function buildClosureDraft(
@@ -553,16 +561,26 @@ export function buildClosureDraft(
     fieldAction
       ? `Field outcome on file: ${FIELD_OUTCOME_LABELS[fieldAction.outcome]} by ${fieldAction.officerName} on ${fieldVisitDateLabel(fieldAction)}${fieldAction.referenceNumber ? ` (ref ${fieldAction.referenceNumber})` : ''}.`
       : 'No officer field action on file — closure language is review-only and claims no site visit.',
+    // A completed visit with no structured enforcement action is incomplete:
+    // flag it so staff know to set the structured action before sending.
+    ...(fieldAction && fieldOutcomeNeedsStructuredAction(fieldAction)
+      ? ['Legacy field outcome: no structured enforcement action recorded. Set the enforcement action before preparing or sending closure.']
+      : []),
     ...(fieldAction?.enforcementAction
       ? [`Officer selected enforcement action: ${ENFORCEMENT_ACTION_LABELS[fieldAction.enforcementAction]}.`]
       : []),
     ...(fieldAction?.enforcementAction === 'ticket_issued' && fieldAction.serviceMethod
       ? [`Method of service: ${SERVICE_METHOD_LABELS[fieldAction.serviceMethod]}.`]
       : []),
-    ...(fieldAction?.actionTaken ? [`Officer recorded action taken notes: ${fieldAction.actionTaken}.`] : []),
+    // Officer free text is kept INTERNAL only — never copied into the resident letter.
     ...(fieldAction?.violationObserved ? [`Officer recorded violation observed: ${fieldAction.violationObserved}.`] : []),
+    ...(fieldAction?.actionTaken ? [`Officer action-taken notes (internal): ${fieldAction.actionTaken}.`] : []),
+    ...(fieldAction?.observedCondition ? [`Officer observed condition (internal): ${fieldAction.observedCondition}.`] : []),
+    ...(fieldAction?.officerNotes ? [`Officer notes (internal): ${fieldAction.officerNotes}.`] : []),
     'Staff must review and approve before any resident communication is sent.',
   ]
+
+  const structuredOutcomeOk = fieldAction ? !fieldOutcomeNeedsStructuredAction(fieldAction) : true
 
   return {
     subject: `Update on your service request — ${triage.category}`,
@@ -570,11 +588,15 @@ export function buildClosureDraft(
     policyChecklist: [
       { item: `Cites applicable by-law (${context.policyMatch.reference})`, ok: true },
       {
-        item: fieldAction ? 'States the recorded field action taken' : 'States the review performed (no field action claimed)',
-        ok: true,
+        item: !fieldAction
+          ? 'States the review performed (no field action claimed)'
+          : structuredOutcomeOk
+            ? 'States the structured enforcement outcome the officer recorded'
+            : 'Field outcome incomplete — set the structured enforcement action before sending',
+        ok: structuredOutcomeOk,
       },
       { item: 'Only claims a site visit when an officer recorded one', ok: true },
-      { item: 'Confirms the case status (closed)', ok: true },
+      { item: 'Resident letter uses structured fields only (no officer free text)', ok: true },
       { item: 'Provides a path to re-open if the issue recurs', ok: true },
     ],
     toneChecklist: [
