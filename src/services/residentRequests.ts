@@ -398,22 +398,20 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
 
-  // Demo-only fields the public form collects but the existing schema has no
-  // dedicated columns for are appended into the description, so we avoid a DB
-  // migration while still preserving the resident's input for staff review.
+  // Supplemental issue/location fields collected by the public form but not stored
+  // in dedicated columns yet. Append only operational details to the case
+  // description so staff can see them, without mixing resident contact details into
+  // the reported issue text.
   const baseDescription = input.description.trim()
-  const demoDetailLines = [
+  const supplementalDetailLines = [
     input.happeningNow ? `Is this happening now: ${input.happeningNow}` : null,
     input.concernUnitNumber ? `Location unit or apartment number: ${input.concernUnitNumber.trim()}` : null,
     input.concernPostalCode ? `Location postal code: ${input.concernPostalCode.trim()}` : null,
-    input.contactStreetAddress ? `Contact street address: ${input.contactStreetAddress.trim()}` : null,
-    input.contactCity ? `Contact city: ${input.contactCity.trim()}` : null,
-    input.contactProvince ? `Contact province: ${input.contactProvince.trim()}` : null,
   ].filter((line): line is string => Boolean(line))
 
   const combinedDescription = [
     baseDescription,
-    demoDetailLines.length > 0 ? `Demo form details:\n${demoDetailLines.join('\n')}` : '',
+    supplementalDetailLines.length > 0 ? `Additional intake details:\n${supplementalDetailLines.join('\n')}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')
