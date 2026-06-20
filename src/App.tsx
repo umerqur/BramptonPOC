@@ -5,7 +5,6 @@ import LandingPage from './pages/LandingPage'
 import MethodologyPage from './pages/MethodologyPage'
 import PrivacyPage from './pages/PrivacyPage'
 import LoginPage from './pages/LoginPage'
-import HowItWorksPage from './pages/HowItWorksPage'
 import NotFoundPage from './pages/NotFoundPage'
 import AppCaseDetailPage from './pages/app/AppCaseDetailPage'
 import AppNycCasePage from './pages/app/AppNycCasePage'
@@ -28,7 +27,8 @@ export default function App() {
           reviewers to login. No public operational data demo. */}
       <Route element={<Layout />}>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/how-it-works" element={<HowItWorksPage />} />
+        {/* Methodology is the single public explanation page; old links redirect. */}
+        <Route path="/how-it-works" element={<Navigate to="/methodology" replace />} />
         <Route path="/methodology" element={<MethodologyPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/login" element={<LoginPage />} />
