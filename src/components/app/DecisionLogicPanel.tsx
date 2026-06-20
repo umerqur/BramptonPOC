@@ -66,7 +66,7 @@ function TierBadge({ tier }: { tier: ReviewPriorityTier }) {
 }
 
 /** The shared decision-logic body: score, tier, why review, breakdown, guardrail. */
-function DecisionLogicBody({ score, tier, reason, components, sourceFields }: DecisionLogicData) {
+export function DecisionLogicBody({ score, tier, reason, components, sourceFields }: DecisionLogicData) {
   const total = score == null ? null : score
   return (
     <div className="space-y-3 text-sm">
