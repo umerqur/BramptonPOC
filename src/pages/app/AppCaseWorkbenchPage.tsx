@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { can, rolesAllowed, officerProfiles, officerDisplayName } from '../../lib/roles'
-import { FIELD_OUTCOME_LABELS, formatDate, formatDateTime } from '../../services/demoWorkflowService'
+import { FIELD_OUTCOME_LABELS, fieldOutcomeNeedsStructuredAction, formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { getResidentRequestAttachmentsForCases, isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import { computeResidentPriority, normalizeTier } from '../../services/workQueue'
 import DecisionLogicPanel, { type DecisionLogicData } from '../../components/app/DecisionLogicPanel'
@@ -339,8 +339,15 @@ export default function AppCaseWorkbenchPage() {
 
             <div className="mt-3 grid gap-2">
               {/* The primary next step follows the linear flow: assign an officer →
-                  wait for the field outcome → prepare the closure draft from it. */}
-              {c.fieldAction ? (
+                  wait for the field outcome → prepare the closure draft from it.
+                  A legacy field outcome with no structured enforcement action must
+                  not be drafted until staff set the structured action. */}
+              {fieldOutcomeNeedsStructuredAction(c.fieldAction) ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs leading-relaxed text-rose-800">
+                  This field outcome was recorded before structured enforcement actions were available. Select the
+                  recorded enforcement action before preparing a closure draft.
+                </div>
+              ) : c.fieldAction ? (
                 <button
                   onClick={() => {
                     sendToStaffReview(c.id)
@@ -422,7 +429,7 @@ export default function AppCaseWorkbenchPage() {
             View approved closure record →
           </Link>
         </div>
-      ) : c.fieldAction ? (
+      ) : c.fieldAction && !fieldOutcomeNeedsStructuredAction(c.fieldAction) ? (
         <div className="mt-6">
           <Link to={`/app/closure?case=${c.id}`} className="text-sm font-semibold text-accent-600 hover:text-accent-700">
             Continue to closure draft & staff review →
