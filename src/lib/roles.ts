@@ -128,11 +128,11 @@ export const STAFF_PROFILES: StaffProfile[] = [
   {
     // Standard staff member (full access, lands on Supervisor) — matches the
     // rest of the team. Added to mirror his Supabase login.
-    name: 'BG Ahmad',
+    name: 'Bilal',
     email: 'bgahmad@gmail.com',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
-    roleDisplayNames: { supervisor: 'Supervisor Ahmad', csr: 'CSR Ahmad', officer: 'Officer Ahmad' },
+    roleDisplayNames: { supervisor: 'Supervisor Bilal', csr: 'CSR Bilal', officer: 'Officer Bilal' },
   },
   {
     // The dedicated demo By-law Officer. This profile can ONLY be an officer.
@@ -143,13 +143,13 @@ export const STAFF_PROFILES: StaffProfile[] = [
     roleDisplayNames: { officer: 'Officer Oakley' },
   },
   {
-    // Dedicated By-law Officer "Shaz" — officer-only, like Officer Oakley, so
-    // "Officer Shaz" is assignable and signs in straight to the field console.
+    // Full-access staff whose field identity is "Officer Shaz". Lands on the
+    // officer field console by default but can also act as supervisor / CSR.
     name: 'Shaz',
     email: 'shahzadqu@gmail.com',
-    allowedRoles: ['officer'],
+    allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'officer',
-    roleDisplayNames: { officer: 'Officer Shaz' },
+    roleDisplayNames: { supervisor: 'Supervisor Shaz', csr: 'CSR Shaz', officer: 'Officer Shaz' },
   },
 ]
 
