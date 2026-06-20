@@ -20,9 +20,11 @@ import SimilarHistoricalCasesCard from '../../components/app/SimilarHistoricalCa
 import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
-// summary in one place, plus the review-readiness gate. Staff act here: approve
-// routing, request more information, override priority, and send the case to
-// staff review (which prepares the closure draft).
+// summary in one place, plus the review-readiness gate. The staff workflow is
+// linear and human-in-the-loop: intake review → assign a By-law Officer → the
+// officer records the field outcome → supervisor reviews and approves the
+// closure. The closure draft is only prepared AFTER an officer field outcome
+// exists, so the main demo path is officer-outcome-first.
 
 const PRIORITIES: Priority[] = ['P1', 'P2', 'P3', 'P4']
 
@@ -35,7 +37,7 @@ function daysSince(iso: string | null): number {
 }
 
 export default function AppCaseWorkbenchPage() {
-  const { cases, activeCase, setActiveCase, approveRouting, requestMoreInfo, overridePriority, sendToStaffReview, role } =
+  const { cases, activeCase, setActiveCase, requestMoreInfo, overridePriority, sendToStaffReview, role } =
     useWorkflow()
   const c = useDemoCase()
   const navigate = useNavigate()
@@ -328,7 +330,7 @@ export default function AppCaseWorkbenchPage() {
               </dl>
             </Panel>
           ) : (
-          <Panel title="Staff actions" subtitle="Human review / decision">
+          <Panel title="Next staff action" subtitle="Human review / decision — one step at a time">
             <div className="flex items-center gap-2 text-xs text-ink-subtle">
               <span>Effective priority:</span>
               <span className="badge bg-navy-50 text-navy-900 ring-1 ring-inset ring-navy-200">{effectivePriority}</span>
@@ -336,15 +338,30 @@ export default function AppCaseWorkbenchPage() {
             </div>
 
             <div className="mt-3 grid gap-2">
-              <button
-                onClick={() => {
-                  approveRouting(c.id)
-                  note('Routing approved and logged to the audit trail.')
-                }}
-                className="btn-secondary justify-start text-sm"
-              >
-                Approve routing
-              </button>
+              {/* The primary next step follows the linear flow: assign an officer →
+                  wait for the field outcome → prepare the closure draft from it. */}
+              {c.fieldAction ? (
+                <button
+                  onClick={() => {
+                    sendToStaffReview(c.id)
+                    note('Closure draft prepared from the recorded field outcome. Sent to staff review.')
+                    navigate(`/app/closure?case=${c.id}`)
+                  }}
+                  className="btn-primary justify-start text-sm"
+                >
+                  Prepare closure draft from officer outcome
+                </button>
+              ) : c.assignedOfficer ? (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs leading-relaxed text-indigo-800">
+                  Waiting for field outcome from <span className="font-semibold">{c.assignedOfficer}</span>. The closure
+                  draft will be prepared after the officer records findings.
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
+                  Assign this case to a By-law Officer before field investigation can begin.
+                </div>
+              )}
+
               <button
                 onClick={() => {
                   requestMoreInfo(c.id)
@@ -355,8 +372,17 @@ export default function AppCaseWorkbenchPage() {
                 Request more information
               </button>
 
+              {isBenchmark && c.fieldAction && (
+                <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-[11px] leading-relaxed text-teal-800">
+                  Source record remains unchanged. This closure is recorded in the Brampton POC workflow layer.
+                </p>
+              )}
+            </div>
+
+            {/* Secondary: priority is an adjustment, not the main path. */}
+            <div className="mt-4 border-t border-slate-100 pt-3">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-ink-subtle">Override priority:</span>
+                <span className="stat-label">Adjust priority</span>
                 {PRIORITIES.map((p) => (
                   <button
                     key={p}
@@ -374,31 +400,6 @@ export default function AppCaseWorkbenchPage() {
                   </button>
                 ))}
               </div>
-
-              <button
-                onClick={() => {
-                  sendToStaffReview(c.id)
-                  note(
-                    c.fieldAction
-                      ? 'Closure draft prepared from the recorded field outcome. Sent to staff review.'
-                      : 'Review-only closure draft prepared (no officer field visit). Sent to staff review.',
-                  )
-                  navigate(`/app/closure?case=${c.id}`)
-                }}
-                className="btn-primary justify-start text-sm"
-              >
-                Prepare closure draft → send to staff review
-              </button>
-              {!c.fieldAction && (
-                <p className="text-[11px] text-ink-subtle">
-                  No field visit recorded — the closure letter will be review-only and won’t claim an officer attended.
-                </p>
-              )}
-              {isBenchmark && (
-                <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-[11px] leading-relaxed text-teal-800">
-                  Source record remains unchanged. This closure is recorded in the Brampton POC workflow layer.
-                </p>
-              )}
             </div>
 
             {flash && (
@@ -421,13 +422,13 @@ export default function AppCaseWorkbenchPage() {
             View approved closure record →
           </Link>
         </div>
-      ) : (
+      ) : c.fieldAction ? (
         <div className="mt-6">
           <Link to={`/app/closure?case=${c.id}`} className="text-sm font-semibold text-accent-600 hover:text-accent-700">
             Continue to closure draft & staff review →
           </Link>
         </div>
-      )}
+      ) : null}
 
       <GuardrailFooter />
     </div>
@@ -524,7 +525,7 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
   }
 
   return (
-    <Panel title="Field investigation" subtitle="Supervisor assigns; the officer records the on-site outcome">
+    <Panel title="Field investigation status" subtitle="Supervisor assigns the officer here; the officer records the on-site outcome in their console">
       {assigned ? (
         <>
           <dl className="space-y-1.5 text-sm">
