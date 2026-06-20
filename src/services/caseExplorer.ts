@@ -147,7 +147,13 @@ export async function getNycCaseExplorerPage(
     }
   }
 
-  let query = client.from(COMPLAINTS_TABLE).select(EXPLORER_COLUMNS).eq('source_city', 'NYC')
+  // Match the partial-index predicate (submitted_at IS NOT NULL) explicitly so
+  // Postgres uses the fast Case Explorer plan consistently on the 3.4M-row table.
+  let query = client
+    .from(COMPLAINTS_TABLE)
+    .select(EXPLORER_COLUMNS)
+    .eq('source_city', 'NYC')
+    .not('submitted_at', 'is', null)
 
   let notice: string | undefined
 
