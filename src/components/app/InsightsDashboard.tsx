@@ -115,6 +115,39 @@ const fmtPct = (value: number, total: number): string => {
   return `${pct.toFixed(pct < 10 ? 1 : 0)}%`
 }
 
+// --- Closure pressure classification (shared by leaderboard + scatter) -------
+//
+// Deterministic, explainable thresholds on historical closure times. Not a
+// prediction — just a plain-language label for how long closures take.
+type Pressure = 'normal' | 'watch' | 'critical'
+
+function closurePressure(p90: number | null, avg: number | null): Pressure {
+  const p = p90 ?? 0
+  const a = avg ?? 0
+  if (p >= 120 || a >= 60) return 'critical'
+  if (p >= 45 || a >= 30) return 'watch'
+  return 'normal'
+}
+
+const PRESSURE_META: Record<Pressure, { label: string; badge: string; bar: string; dot: string }> = {
+  normal: { label: 'Normal', badge: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200', bar: 'bg-emerald-400', dot: '#10b981' },
+  watch: { label: 'Watch', badge: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200', bar: 'bg-amber-400', dot: '#f59e0b' },
+  critical: { label: 'Critical', badge: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200', bar: 'bg-rose-500', dot: '#ef4444' },
+}
+
+/** A labelled horizontal bar (volume / duration) for the closure leaderboard. */
+function MetricBar({ label, pct, barClass, valueText }: { label: string; pct: number; barClass: string; valueText: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-32 shrink-0 text-[10px] uppercase tracking-wider text-ink-subtle">{label}</span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
+      </div>
+      <span className="w-16 shrink-0 text-right text-[10px] tabular-nums text-ink-subtle">{valueText}</span>
+    </div>
+  )
+}
+
 const PALETTE = ['#2563eb', '#0ea5e9', '#7c3aed', '#f59e0b', '#10b981', '#94a3b8']
 
 // ---------------------------------------------------------------------------
@@ -723,34 +756,85 @@ function ClosureScatter({ onExplore }: { onExplore: (f: CaseExplorerFilters) => 
     [data],
   )
   return (
-    <SectionShell name="the volume vs closure view" title="High volume + slow closure" subtitle="Each point is a complaint type. Top-right = busy and slow." loading={loading} error={error} empty={points.length === 0}>
+    <SectionShell name="the volume vs closure view" title="Volume vs closure time" subtitle="Each point is a complaint type. Upper-right means high volume and slower closure." loading={loading} error={error} empty={points.length === 0}>
       {data && points.length > 0 && <Scatter points={points} onExplore={onExplore} />}
     </SectionShell>
   )
 }
 
 function Scatter({ points, onExplore }: { points: ClosureBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
-  const W = 520
-  const H = 240
-  const pad = 34
-  const maxX = Math.max(1, ...points.map((p) => p.total_cases))
+  const W = 560
+  const H = 260
+  const pad = 40
+  // Log-scaled x so one very high-volume type doesn't squash everything into the
+  // bottom-left. Y (avg closure days) stays linear and intuitive.
+  const xs = points.map((p) => p.total_cases)
+  const minX = Math.max(1, Math.min(...xs))
+  const maxX = Math.max(minX + 1, ...xs)
+  const lMinX = Math.log10(minX)
+  const lMaxX = Math.log10(maxX)
   const maxY = Math.max(1, ...points.map((p) => p.avg_closure_days ?? 0))
-  const x = (v: number) => pad + (v / maxX) * (W - pad * 1.5)
+  const x = (v: number) => pad + ((Math.log10(Math.max(1, v)) - lMinX) / (lMaxX - lMinX)) * (W - pad * 1.5)
   const y = (v: number) => H - pad - (v / maxY) * (H - pad * 1.5)
+
+  // Median crosshair splits the plot into four readable quadrants.
+  const sortedX = [...xs].sort((a, b) => a - b)
+  const sortedY = points.map((p) => p.avg_closure_days ?? 0).sort((a, b) => a - b)
+  const medX = sortedX[Math.floor(sortedX.length / 2)] ?? minX
+  const medY = sortedY[Math.floor(sortedY.length / 2)] ?? 0
+  const cx = x(medX)
+  const cy = y(medY)
+
+  // Top 5 "pressure" points (high volume × slow closure) get a text label.
+  const topLabels = new Set(
+    [...points]
+      .sort((a, b) => (b.total_cases * (b.avg_closure_days ?? 0)) - (a.total_cases * (a.avg_closure_days ?? 0)))
+      .slice(0, 5)
+      .map((p) => p.complaint_type),
+  )
+
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Total cases vs average closure days by complaint type">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Total cases (log scale) versus average closure days by complaint type">
+        {/* Median crosshair + quadrant labels */}
+        <line x1={cx} y1={6} x2={cx} y2={H - pad} stroke="#e2e8f0" strokeDasharray="3 3" />
+        <line x1={pad} y1={cy} x2={W - 6} y2={cy} stroke="#e2e8f0" strokeDasharray="3 3" />
+        <text x={pad + 4} y={14} className="fill-ink-subtle" style={{ fontSize: 8 }}>Lower volume / slower</text>
+        <text x={W - 8} y={14} textAnchor="end" className="fill-ink-subtle" style={{ fontSize: 8 }}>Higher volume / slower</text>
+        <text x={pad + 4} y={H - pad - 4} className="fill-ink-subtle" style={{ fontSize: 8 }}>Lower volume / faster</text>
+        <text x={W - 8} y={H - pad - 4} textAnchor="end" className="fill-ink-subtle" style={{ fontSize: 8 }}>Higher volume / faster</text>
+
+        {/* Axes */}
         <line x1={pad} y1={H - pad} x2={W - 6} y2={H - pad} stroke="#cbd5e1" />
         <line x1={pad} y1={6} x2={pad} y2={H - pad} stroke="#cbd5e1" />
-        <text x={(W + pad) / 2} y={H - 6} textAnchor="middle" className="fill-ink-subtle" style={{ fontSize: 9 }}>Total cases →</text>
+        <text x={(W + pad) / 2} y={H - 6} textAnchor="middle" className="fill-ink-subtle" style={{ fontSize: 9 }}>Total cases (log scale) →</text>
         <text x={10} y={H / 2} textAnchor="middle" transform={`rotate(-90 10 ${H / 2})`} className="fill-ink-subtle" style={{ fontSize: 9 }}>Avg closure days →</text>
-        {points.map((p) => (
-          <circle key={p.complaint_type} cx={x(p.total_cases)} cy={y(p.avg_closure_days ?? 0)} r={4.5} fill="#2563eb" fillOpacity={0.65} className="cursor-pointer" onClick={() => onExplore({ complaintType: p.complaint_type })}>
-            <title>{`${p.complaint_type}\nCases: ${fmtInt(p.total_cases)}\nAvg closure: ${fmtDays(p.avg_closure_days)}`}</title>
-          </circle>
-        ))}
+
+        {points.map((p) => {
+          const px = x(p.total_cases)
+          const py = y(p.avg_closure_days ?? 0)
+          const dot = PRESSURE_META[closurePressure(p.p90_closure_days, p.avg_closure_days)].dot
+          const labelled = topLabels.has(p.complaint_type)
+          return (
+            <g key={p.complaint_type}>
+              <circle cx={px} cy={py} r={labelled ? 5.5 : 4.5} fill={dot} fillOpacity={0.7} className="cursor-pointer" onClick={() => onExplore({ complaintType: p.complaint_type })}>
+                <title>{`${p.complaint_type}\nCases: ${fmtInt(p.total_cases)}\nAvg closure: ${fmtDays(p.avg_closure_days)}\n90% closed within: ${fmtDays(p.p90_closure_days)}`}</title>
+              </circle>
+              {labelled && (
+                <text x={px} y={py - 8} textAnchor={px > W * 0.7 ? 'end' : 'middle'} className="pointer-events-none fill-navy-900" style={{ fontSize: 8, fontWeight: 600 }}>
+                  {p.complaint_type.length > 22 ? `${p.complaint_type.slice(0, 21)}…` : p.complaint_type}
+                </text>
+              )}
+            </g>
+          )
+        })}
       </svg>
-      <p className="mt-1 text-[11px] text-ink-subtle">Select a point to explore that complaint type’s cases.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-subtle">
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.normal.dot }} /> Normal</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.watch.dot }} /> Watch</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.critical.dot }} /> Critical</span>
+        <span>Select a point to explore that complaint type’s cases.</span>
+      </div>
     </div>
   )
 }
@@ -839,32 +923,89 @@ const HIGH_VOLUME_MIN = 1000
 function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(40))
   const [highVolumeOnly, setHighVolumeOnly] = useState(true)
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   const rows = useMemo(() => {
     const all = data ?? []
     const filtered = highVolumeOnly ? all.filter((r) => r.total_cases >= HIGH_VOLUME_MIN) : all
     return filtered.slice(0, 12)
   }, [data, highVolumeOnly])
   return (
-    <SectionShell name="closure bottlenecks" title="Closure bottlenecks by complaint type" subtitle="Where closure is slowest. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}
+    <SectionShell name="the closure leaderboard" title="Where closure takes longest" subtitle="Complaint types with high volume and longer closure times. These are historical closure patterns, not predictions." loading={loading} error={error} empty={data?.length === 0}
       action={
-        <label className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-          <input type="checkbox" checked={highVolumeOnly} onChange={(e) => setHighVolumeOnly(e.target.checked)} />
-          High volume only (≥ {fmtInt(HIGH_VOLUME_MIN)})
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
+            <input type="checkbox" checked={highVolumeOnly} onChange={(e) => setHighVolumeOnly(e.target.checked)} />
+            High volume only (≥ {fmtInt(HIGH_VOLUME_MIN)})
+          </label>
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+            {(['leaderboard', 'table'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={`rounded-md px-2.5 py-1 capitalize transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+              >
+                {v === 'leaderboard' ? 'Leaderboard' : 'Table'}
+              </button>
+            ))}
+          </div>
+        </div>
       }
     >
-      {data && (
+      {data && view === 'leaderboard' && <ClosureLeaderboard rows={rows} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
-          head={['Complaint type', 'Total', 'Closed', 'Avg', 'Median', 'Slow case']}
-          align={['left', 'right', 'right', 'right', 'right', 'right']}
+          head={['Complaint type', 'Total', 'Avg', 'Median', '90% closed within', 'Pressure']}
+          align={['left', 'right', 'right', 'right', 'right', 'left']}
           rows={rows.map((row) => ({
             key: row.complaint_type,
             onClick: () => onExplore({ complaintType: row.complaint_type }),
-            cells: [row.complaint_type, fmtInt(row.total_cases), fmtInt(row.closed_cases), fmtDays(row.avg_closure_days), fmtDays(row.median_closure_days), fmtDays(row.p90_closure_days)],
+            cells: [row.complaint_type, fmtInt(row.total_cases), fmtDays(row.avg_closure_days), fmtDays(row.median_closure_days), fmtDays(row.p90_closure_days), PRESSURE_META[closurePressure(row.p90_closure_days, row.avg_closure_days)].label],
           }))}
         />
       )}
     </SectionShell>
+  )
+}
+
+/** Visual leaderboard of the slowest-closing complaint types (default view). */
+function ClosureLeaderboard({ rows, onExplore }: { rows: ClosureBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  const maxDuration = Math.max(1, ...rows.map((r) => r.p90_closure_days ?? 0))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => {
+        const meta = PRESSURE_META[closurePressure(row.p90_closure_days, row.avg_closure_days)]
+        const volPct = Math.round((row.total_cases / maxVolume) * 100)
+        const durPct = Math.round(((row.p90_closure_days ?? 0) / maxDuration) * 100)
+        return (
+          <li key={row.complaint_type}>
+            <button
+              type="button"
+              onClick={() => onExplore({ complaintType: row.complaint_type })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                  <span className="truncate text-sm font-medium text-navy-900">{row.complaint_type}</span>
+                  <span className={`badge ${meta.badge}`}>{meta.label}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-4 text-[11px] tabular-nums text-ink-subtle">
+                  <span><span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases</span>
+                  <span>Median <span className="font-semibold text-ink">{fmtDays(row.median_closure_days)}</span></span>
+                  <span>90% within <span className="font-semibold text-ink">{fmtDays(row.p90_closure_days)}</span></span>
+                </div>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                <MetricBar label="Volume" pct={volPct} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+                <MetricBar label="90% closed within" pct={durPct} barClass={meta.bar} valueText={fmtDays(row.p90_closure_days)} />
+              </div>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -873,10 +1014,10 @@ function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(12))
   return (
-    <SectionShell name="area bottlenecks" title="Area bottlenecks by council district" subtitle="Workload and closure pressure by the ward-like unit. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}>
+    <SectionShell name="district workload pressure" title="District workload pressure" subtitle="Districts with the highest case volume and closure pressure." loading={loading} error={error} empty={data?.length === 0}>
       {data && (
         <Table
-          head={['Council district', 'Total', 'Avg', 'Slow case', 'Top complaint type']}
+          head={['Council district', 'Total', 'Avg', '90% closed within', 'Top complaint type']}
           align={['left', 'right', 'right', 'right', 'left']}
           rows={data.map((row) => ({
             key: row.council_district,
