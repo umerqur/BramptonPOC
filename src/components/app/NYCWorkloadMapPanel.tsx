@@ -687,17 +687,26 @@ function NYCWorkload3DScene({
 
   // Only the walls facing the viewer (outward normal pointing down-screen) are
   // drawn, so blocks look solid instead of showing a skirt on the far side.
+  //
+  // Each contiguous run of viewer-facing edges is emitted as ONE merged
+  // silhouette polygon (base chain outward, top chain back) instead of one quad
+  // per edge. Merging removes the thin anti-aliased seams that otherwise showed
+  // as white vertical striping along a tall block's side (e.g. District 11) when
+  // the view was rotated.
   const wallPath = (base: [number, number][], top: [number, number][]) => {
     const n = base.length
+    if (n < 2) return ''
     let cx = 0
     let cy = 0
     for (const [x, y] of base) {
       cx += x
       cy += y
     }
-    cx /= n || 1
-    cy /= n || 1
-    let d = ''
+    cx /= n
+    cy /= n
+
+    // Mark each edge i→(i+1) that faces the viewer (outward normal down-screen).
+    const faces: boolean[] = new Array(n)
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n
       const [x1, y1] = base[i]
@@ -711,12 +720,52 @@ function NYCWorkload3DScene({
         nx = -nx
         ny = -ny
       }
-      // Visible when the wall faces toward the viewer (down the screen).
-      if (ny <= 0) continue
-      const [tx1, ty1] = top[i]
-      const [tx2, ty2] = top[j]
-      d += `M${px(x1)} ${py(y1)} L${px(x2)} ${py(y2)} L${px(tx2)} ${py(ty2)} L${px(tx1)} ${py(ty1)} Z `
+      faces[i] = ny > 0
     }
+
+    // Break the ring at a non-facing edge so runs don't wrap. If every edge
+    // faces the viewer (degenerate sliver), fall back to per-edge quads.
+    let brk = -1
+    for (let i = 0; i < n; i++) {
+      if (!faces[i]) {
+        brk = i
+        break
+      }
+    }
+    if (brk === -1) {
+      let d = ''
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n
+        d += `M${px(base[i][0])} ${py(base[i][1])} L${px(base[j][0])} ${py(base[j][1])} L${px(top[j][0])} ${py(top[j][1])} L${px(top[i][0])} ${py(top[i][1])} Z `
+      }
+      return d
+    }
+
+    // Walk edges starting just after the break, emitting one filled polygon per
+    // contiguous run of viewer-facing edges.
+    let d = ''
+    let run: number[] | null = null
+    const flush = () => {
+      if (run && run.length >= 2) {
+        const v = run
+        let seg = `M${px(base[v[0]][0])} ${py(base[v[0]][1])}`
+        for (let k = 1; k < v.length; k++) seg += ` L${px(base[v[k]][0])} ${py(base[v[k]][1])}`
+        for (let k = v.length - 1; k >= 0; k--) seg += ` L${px(top[v[k]][0])} ${py(top[v[k]][1])}`
+        d += seg + ' Z '
+      }
+      run = null
+    }
+    for (let s = 1; s <= n; s++) {
+      const i = (brk + s) % n
+      if (faces[i]) {
+        const j = (i + 1) % n
+        if (!run) run = [i]
+        run.push(j)
+      } else {
+        flush()
+      }
+    }
+    flush()
     return d
   }
 
@@ -758,12 +807,23 @@ function NYCWorkload3DScene({
           return (
             <g key={shape.id}>
               {walls && (
-                <path d={walls} fill={sideFill} fillOpacity={0.95} stroke={sideFill} strokeWidth={0.4} pointerEvents="none" />
+                // Fully opaque side faces with a same-color stroke so no light
+                // background bleeds through and the silhouette stays seam-free at
+                // every rotation/tilt.
+                <path
+                  d={walls}
+                  fill={sideFill}
+                  stroke={sideFill}
+                  strokeWidth={0.75}
+                  strokeLinejoin="round"
+                  shapeRendering="geometricPrecision"
+                  pointerEvents="none"
+                />
               )}
               <path
                 d={ringPath(top)}
                 fill={topFill}
-                fillOpacity={hasWorkload ? (isActive ? 0.96 : 0.82) : 0.5}
+                fillOpacity={hasWorkload ? 1 : 0.6}
                 stroke={isActive ? '#0f172a' : '#1e3a5f'}
                 strokeWidth={isActive ? 1.8 : map.shapes.length > 20 ? 0.5 : 0.9}
                 strokeLinejoin="round"
