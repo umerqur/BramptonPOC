@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
@@ -6,17 +6,19 @@ import { can, rolesAllowed, officerProfiles, officerDisplayName } from '../../li
 import { FIELD_OUTCOME_LABELS, fieldOutcomeNeedsStructuredAction, formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { getResidentRequestAttachmentsForCases, isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import { computeResidentPriority, normalizeTier } from '../../services/workQueue'
-import DecisionLogicPanel, { type DecisionLogicData } from '../../components/app/DecisionLogicPanel'
+import { DecisionLogicBody, type DecisionLogicData } from '../../components/app/DecisionLogicPanel'
 import {
   AutomationBadge,
   CaseSwitcher,
   ConfidenceMeter,
   GuardrailFooter,
   NoCaseState,
+  StageBadge,
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 import SimilarHistoricalCasesCard from '../../components/app/SimilarHistoricalCasesCard'
+import { useSimilarCases } from '../../components/app/useSimilarCases'
 import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
@@ -42,6 +44,24 @@ export default function AppCaseWorkbenchPage() {
   const c = useDemoCase()
   const navigate = useNavigate()
   const [flash, setFlash] = useState<string | null>(null)
+
+  // Optional, on-demand staff support tools. The similar-cases search is lifted
+  // here so the top "Decision support tools" strip and the card lower on the page
+  // share one search. Decision logic is collapsed by default and opened from the
+  // strip.
+  const similar = useSimilarCases(c)
+  const similarRef = useRef<HTMLElement>(null)
+  const logicRef = useRef<HTMLElement>(null)
+  const [logicOpen, setLogicOpen] = useState(false)
+
+  function findSimilar() {
+    similar.runSearch()
+    requestAnimationFrame(() => similarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+  function viewLogic() {
+    setLogicOpen(true)
+    requestAnimationFrame(() => logicRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 
   // Resident evidence count — feeds the deterministic decision-logic breakdown so
   // the workbench shows the same rules-based score as the Work Queue row.
@@ -151,8 +171,27 @@ export default function AppCaseWorkbenchPage() {
         </div>
       )}
 
-      <div className="mt-6 card p-5">
-        <WorkflowStepper stage={c.stage} />
+      {/* Decision support tools — optional staff helpers, surfaced near the top. */}
+      <div className="mt-4 card p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="stat-label mr-1">Decision support tools</span>
+            <button onClick={findSimilar} className="btn-primary text-sm py-1.5 px-3">
+              Find similar cases
+            </button>
+            <button onClick={viewLogic} className="btn-secondary text-sm py-1.5 px-3">
+              View decision logic
+            </button>
+          </div>
+          <span className="text-[11px] text-ink-subtle">Optional staff support. Does not decide outcome.</span>
+        </div>
+      </div>
+
+      {/* Full lifecycle collapsed behind the prominent current stage. */}
+      <div className="mt-4">
+        <CollapsibleCard title="Workflow steps" headerRight={<StageBadge stage={c.stage} />}>
+          <WorkflowStepper stage={c.stage} />
+        </CollapsibleCard>
       </div>
 
       <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -187,7 +226,7 @@ export default function AppCaseWorkbenchPage() {
 
           {!isBenchmark && <ResidentAttachments caseId={c.id} variant="full" />}
 
-          <Panel title="Case summary" subtitle="Decision support summary, staff review required">
+          <CollapsibleCard title="Case summary" subtitle="Decision support summary, staff review required">
             <p className="text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
             <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2">
               {summary.structuredFacts.map((f) => (
@@ -197,9 +236,9 @@ export default function AppCaseWorkbenchPage() {
                 </div>
               ))}
             </div>
-          </Panel>
+          </CollapsibleCard>
 
-          <Panel title="Enforcement context" subtitle="Related records and context for this case">
+          <CollapsibleCard title="Enforcement context" subtitle="Related records and context for this case">
             <Sub label="Related complaint history">
               {ctx.complaintHistory.length === 0 ? (
                 <Empty>No prior complaints on record for this location.</Empty>
@@ -268,16 +307,24 @@ export default function AppCaseWorkbenchPage() {
                 ))}
               </ul>
             </Sub>
-          </Panel>
+          </CollapsibleCard>
 
-          <SimilarHistoricalCasesCard c={c} />
+          <SimilarHistoricalCasesCard c={c} controller={similar} sectionRef={similarRef} />
         </div>
 
         {/* Right: confidence gate + staff actions */}
         <div className="space-y-6">
           {nyc && <NycReviewPriorityPanel nyc={nyc} />}
 
-          <DecisionLogicPanel data={decisionLogic} />
+          <CollapsibleCard
+            title="Decision logic"
+            subtitle="Rules based review priority"
+            controlledOpen={logicOpen}
+            onToggle={setLogicOpen}
+            sectionRef={logicRef}
+          >
+            <DecisionLogicBody {...decisionLogic} />
+          </CollapsibleCard>
 
           <Panel title="Review readiness" subtitle="Rules based file readiness, staff confirm and decide">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />
@@ -298,7 +345,7 @@ export default function AppCaseWorkbenchPage() {
             </div>
           </Panel>
 
-          <Panel title="Attention drivers">
+          <CollapsibleCard title="Attention drivers">
             <ul className="space-y-1.5">
               {summary.attentionDrivers.map((d) => (
                 <li key={d} className="flex gap-2 text-sm text-ink-muted">
@@ -317,7 +364,7 @@ export default function AppCaseWorkbenchPage() {
                 </ul>
               </div>
             )}
-          </Panel>
+          </CollapsibleCard>
 
           {isClosed ? (
             <Panel title="Case closed">
@@ -738,7 +785,7 @@ const ACTOR_STYLES: Record<string, string> = {
 function ActionLogPanel({ c }: { c: DemoCase }) {
   const events = [...c.audit].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
   return (
-    <details className="group mt-6 card p-0" open>
+    <details className="group mt-6 card p-0">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-4">
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-navy-900">Action log</span>
@@ -797,6 +844,65 @@ function Panel({ title, subtitle, children }: { title: string; subtitle?: string
       <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
       {subtitle && <p className="text-xs text-ink-subtle">{subtitle}</p>}
       <div className="mt-3">{children}</div>
+    </section>
+  )
+}
+
+// A card whose body collapses behind its header, keeping lower-priority context
+// out of the way by default. Uncontrolled (own open state) unless `controlledOpen`
+// + `onToggle` are supplied, which lets the top action strip open a specific
+// section and scroll to it.
+function CollapsibleCard({
+  title,
+  subtitle,
+  headerRight,
+  children,
+  defaultOpen = false,
+  controlledOpen,
+  onToggle,
+  sectionRef,
+}: {
+  title: string
+  subtitle?: string
+  headerRight?: React.ReactNode
+  children: React.ReactNode
+  defaultOpen?: boolean
+  controlledOpen?: boolean
+  onToggle?: (open: boolean) => void
+  sectionRef?: React.Ref<HTMLElement>
+}) {
+  const [internalOpen, setInternalOpen] = useState(defaultOpen)
+  const open = controlledOpen ?? internalOpen
+  const toggle = () => (onToggle ? onToggle(!open) : setInternalOpen((o) => !o))
+  return (
+    <section ref={sectionRef} className="card p-0">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 px-5 py-4 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-navy-900">{title}</span>
+          {subtitle && <span className="block text-xs text-ink-subtle">{subtitle}</span>}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {headerRight}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+            className={`h-4 w-4 text-ink-subtle transition-transform ${open ? 'rotate-180' : ''}`}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+      </button>
+      {open && <div className="border-t border-slate-100 px-5 py-4">{children}</div>}
     </section>
   )
 }

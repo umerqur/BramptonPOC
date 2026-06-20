@@ -1,14 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState, type Ref } from 'react'
 import type { DemoCase } from '../../data/demoWorkflowTypes'
-import {
-  caseToSimilarQuery,
-  fetchSimilarCases,
-  SimilarCasesNotConfiguredError,
-  type SimilarCase,
-} from '../../services/similarCases'
+import type { SimilarCase } from '../../services/similarCases'
+import { useSimilarCases, type SimilarCasesController } from './useSimilarCases'
 import { ProvenanceBadge } from './ProvenanceLabels'
 
-// "Similar historical cases" — the first real AI feature on the workbench.
+// "Similar benchmark references" — optional, on-demand staff support.
 //
 // On demand, it embeds the active case's text fields (Cohere), retrieves nearby
 // closed benchmark records from Qdrant, and reranks them (Cohere Rerank). All of
@@ -17,69 +13,71 @@ import { ProvenanceBadge } from './ProvenanceLabels'
 //
 // This is staff reference only. It does NOT decide the outcome, and it is not
 // part of the resident closure message (which stays rules based and supervisor
-// approved).
+// approved). Low-relevance neighbours are filtered out so weak matches are never
+// presented as useful examples.
 
-type LoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; results: SimilarCase[] }
-  | { status: 'unconfigured'; message: string }
-  | { status: 'error'; message: string }
+// Default number of strong results shown before "Show more".
+const MAX_VISIBLE = 3
+// Below this Cohere rerank relevance a result is a weak semantic neighbour, not a
+// useful staff reference — filtered out before rendering so low scores (e.g. 8%)
+// are never shown as if they were matches.
+const MIN_VISIBLE_RERANK_SCORE = 0.2
 
-// How many reranked results we ask for, and the point below which the indexed
-// library looks sparse (likely still being indexed).
-const TOP_K = 5
-const SPARSE_RESULT_COUNT = 3
+export default function SimilarHistoricalCasesCard({
+  c,
+  controller,
+  sectionRef,
+}: {
+  c: DemoCase
+  controller?: SimilarCasesController
+  sectionRef?: Ref<HTMLElement>
+}) {
+  const own = useSimilarCases(c)
+  const { state, runSearch } = controller ?? own
+  const [showAll, setShowAll] = useState(false)
 
-export default function SimilarHistoricalCasesCard({ c }: { c: DemoCase }) {
-  const [state, setState] = useState<LoadState>({ status: 'idle' })
+  // Collapse "Show more" again whenever a new search runs or the case changes.
+  useEffect(() => {
+    setShowAll(false)
+  }, [c.id, state.status])
 
-  async function runSearch() {
-    setState({ status: 'loading' })
-    try {
-      const res = await fetchSimilarCases(caseToSimilarQuery(c), { caseId: c.id, topK: TOP_K })
-      setState({ status: 'ready', results: res.results })
-    } catch (err) {
-      if (err instanceof SimilarCasesNotConfiguredError) {
-        setState({ status: 'unconfigured', message: err.message })
-      } else {
-        setState({ status: 'error', message: err instanceof Error ? err.message : String(err) })
-      }
-    }
-  }
+  const loading = state.status === 'loading'
+
+  // Only results that clear the relevance threshold are useful staff references.
+  const strong =
+    state.status === 'ready'
+      ? [...state.results]
+          .filter((r) => (r.rerank_score ?? 0) >= MIN_VISIBLE_RERANK_SCORE)
+          .sort((a, b) => (b.rerank_score ?? 0) - (a.rerank_score ?? 0))
+      : []
+  const visible = showAll ? strong : strong.slice(0, MAX_VISIBLE)
 
   return (
-    <section className="card p-5">
+    <section ref={sectionRef} className="card p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-navy-900">Similar closed benchmark cases</h3>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-navy-900">Similar benchmark references</h3>
           <p className="text-xs text-ink-subtle">
-            Searches the indexed NYC 311 closed case library using Cohere embeddings, Qdrant vector search, and Cohere
-            rerank. These are reference examples only.
+            Optional semantic retrieval over closed NYC 311 benchmark records. Use only as background reference.
           </p>
         </div>
-        <ProvenanceBadge kind="ai-retrieval" />
-      </div>
-
-      <div className="mt-3">
-        <button
-          onClick={runSearch}
-          disabled={state.status === 'loading'}
-          className="btn-secondary text-sm py-2 px-4"
-        >
-          {state.status === 'loading'
-            ? 'Searching…'
-            : state.status === 'ready'
-              ? 'Refresh similar cases'
-              : 'Find similar cases'}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <ProvenanceBadge kind="ai-retrieval" />
+          <button
+            onClick={runSearch}
+            disabled={loading}
+            className="btn-primary text-sm py-1.5 px-3 disabled:opacity-60"
+          >
+            {loading ? 'Searching…' : state.status === 'ready' ? 'Refresh search' : 'Find similar cases'}
+          </button>
+        </div>
       </div>
 
       <div className="mt-4">
         {state.status === 'idle' && (
           <p className="text-xs text-ink-subtle">
-            Retrieval runs on demand. Cohere embeds the case text, Qdrant returns the nearest closed records, and Cohere
-            Rerank orders the top matches.
+            Runs on demand: Cohere embeds the case text, Qdrant returns nearby closed records, and Cohere rerank orders
+            the strongest matches. Only relevant matches are shown.
           </p>
         )}
 
@@ -98,26 +96,36 @@ export default function SimilarHistoricalCasesCard({ c }: { c: DemoCase }) {
           </div>
         )}
 
-        {state.status === 'ready' && state.results.length === 0 && (
-          <div className="space-y-2">
-            <p className="text-xs text-ink-subtle">No similar closed benchmark cases were found for this record.</p>
-            <PartialIndexNote />
+        {state.status === 'ready' && strong.length === 0 && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-ink-muted">
+            <p className="font-semibold text-ink">No strong similar benchmark case found.</p>
+            <p className="mt-1">
+              The retrieval system found weak semantic neighbours, but none were relevant enough to display as staff
+              reference.
+            </p>
           </div>
         )}
 
-        {state.status === 'ready' && state.results.length > 0 && (
+        {state.status === 'ready' && strong.length > 0 && (
           <>
             <ul className="space-y-2">
-              {state.results.map((r, i) => (
+              {visible.map((r, i) => (
                 <SimilarCaseRow key={r.case_id ?? i} r={r} />
               ))}
             </ul>
 
-            {state.results.length < SPARSE_RESULT_COUNT && <PartialIndexNote className="mt-3" />}
+            {!showAll && strong.length > MAX_VISIBLE && (
+              <button
+                onClick={() => setShowAll(true)}
+                className="mt-2 text-xs font-semibold text-accent-600 hover:text-accent-700"
+              >
+                Show more ({strong.length - MAX_VISIBLE} more)
+              </button>
+            )}
 
             <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-              These records are retrieved examples from closed NYC benchmark cases. They are not Brampton policy
-              guidance, not recommended enforcement action, and not closure language.
+              Retrieved examples from closed NYC benchmark cases — not Brampton policy guidance, not recommended
+              enforcement action, and not closure language.
             </p>
           </>
         )}
@@ -126,30 +134,21 @@ export default function SimilarHistoricalCasesCard({ c }: { c: DemoCase }) {
   )
 }
 
-/** Shown when the index looks sparse or empty — likely still being built. */
-function PartialIndexNote({ className = '' }: { className?: string }) {
-  return (
-    <p className={`text-[11px] leading-relaxed text-amber-800 ${className}`}>
-      The indexed library may still be loading. Retrieval quality improves as more closed cases are indexed.
-    </p>
-  )
-}
-
 function SimilarCaseRow({ r }: { r: SimilarCase }) {
   const meta = [r.borough, r.council_district ? `District ${r.council_district}` : null, r.agency]
     .filter(Boolean)
     .join(' · ')
-  const rerankPct = Math.round((r.rerank_score ?? 0) * 100)
+  const relevancePct = Math.round((r.rerank_score ?? 0) * 100)
 
   return (
     <li className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
       <div className="flex items-start justify-between gap-2">
         <span className="font-medium text-navy-900">{r.complaint_type || r.case_id || 'Case'}</span>
         <span
-          className="badge bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200 shrink-0"
-          title="Cohere rerank relevance score. Not accuracy, not confidence, not an enforcement recommendation."
+          className="badge bg-slate-100 text-slate-600 shrink-0"
+          title="Cohere rerank relevance score. Not accuracy, not confidence, not a recommendation."
         >
-          Rerank {rerankPct}%
+          Relevance {relevancePct}%
         </span>
       </div>
       {r.request_detail && <div className="text-xs text-ink-muted">{r.request_detail}</div>}
