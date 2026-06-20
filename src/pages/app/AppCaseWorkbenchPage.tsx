@@ -682,8 +682,8 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-3 border-b border-slate-100 py-1 text-sm">
-      <dt className="text-ink-subtle">{label}</dt>
-      <dd className="text-right font-medium text-navy-900">{value}</dd>
+      <dt className="shrink-0 text-ink-subtle">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-medium text-navy-900">{value}</dd>
     </div>
   )
 }

@@ -169,7 +169,7 @@ function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs uppercase tracking-wide text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-ink">{value}</dd>
+      <dd className="mt-0.5 break-words text-ink">{value}</dd>
     </div>
   )
 }

@@ -333,7 +333,7 @@ export function PreviewPanel({
         </div>
 
         <div className="px-5 py-4">
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
             <Field label="Complaint type" value={row.complaintType} />
             <Field label="Priority" value={row.priority} />
             <Field label="Workflow stage" value={row.workflowStage} />
@@ -387,7 +387,7 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs font-medium uppercase tracking-wide text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-ink">{value || '—'}</dd>
+      <dd className="mt-0.5 break-words text-ink">{value || '—'}</dd>
     </div>
   )
 }
@@ -396,7 +396,7 @@ function PanelLine({ label, value, emphasis }: { label: string; value: string; e
   return (
     <div>
       <div className="text-xs font-medium uppercase tracking-wide text-ink-subtle">{label}</div>
-      <p className={`mt-0.5 text-sm ${emphasis ? 'font-medium text-navy-900' : 'text-ink-muted'}`}>{value || '—'}</p>
+      <p className={`mt-0.5 break-words text-sm ${emphasis ? 'font-medium text-navy-900' : 'text-ink-muted'}`}>{value || '—'}</p>
     </div>
   )
 }
