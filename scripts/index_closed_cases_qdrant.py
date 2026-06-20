@@ -63,7 +63,7 @@ QDRANT_BATCH = 256
 POINT_NAMESPACE = uuid.UUID("a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
 
 DEFAULT_MAX_ROWS = 15_000
-HARD_CAP = 25_000
+HARD_CAP = 100_000
 
 # Columns pulled from municipal_complaints. `complaint_type` is the generic
 # column (populated from NYC complaint_type); `request_detail` is the descriptor.

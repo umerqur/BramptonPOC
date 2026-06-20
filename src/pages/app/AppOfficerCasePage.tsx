@@ -8,6 +8,7 @@ import {
   formatDateTime,
 } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
+import { sanitizeResidentDescription } from '../../lib/residentDescription'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 import OfficerCaseAssistant from '../../components/app/OfficerCaseAssistant'
 import type { DemoCase, EnforcementAction, ServiceMethod } from '../../data/demoWorkflowTypes'
@@ -180,8 +181,10 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
           </Panel>
 
           <Panel title="Resident complaint" subtitle="The resident's own description, in their words">
-            {row.description?.trim() ? (
-              <p className="whitespace-pre-line text-sm leading-relaxed text-ink">{row.description.trim()}</p>
+            {sanitizeResidentDescription(row.description) ? (
+              <p className="whitespace-pre-line text-sm leading-relaxed text-ink">
+                {sanitizeResidentDescription(row.description)}
+              </p>
             ) : (
               <p className="text-sm italic text-ink-subtle">No resident description was provided.</p>
             )}
@@ -209,7 +212,7 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
               category: support?.triage.category ?? 'Property Standards',
               complaintType: row.request_type,
               location: [row.location, row.city, row.province].filter(Boolean).join(', '),
-              description: row.description ?? '',
+              description: sanitizeResidentDescription(row.description),
               assignedOfficer: row.assigned_officer_name ?? null,
             }}
           />
