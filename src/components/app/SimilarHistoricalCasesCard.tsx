@@ -26,13 +26,18 @@ type LoadState =
   | { status: 'unconfigured'; message: string }
   | { status: 'error'; message: string }
 
+// How many reranked results we ask for, and the point below which the indexed
+// library looks sparse (likely still being indexed).
+const TOP_K = 5
+const SPARSE_RESULT_COUNT = 3
+
 export default function SimilarHistoricalCasesCard({ c }: { c: DemoCase }) {
   const [state, setState] = useState<LoadState>({ status: 'idle' })
 
   async function runSearch() {
     setState({ status: 'loading' })
     try {
-      const res = await fetchSimilarCases(caseToSimilarQuery(c), { caseId: c.id, topK: 5 })
+      const res = await fetchSimilarCases(caseToSimilarQuery(c), { caseId: c.id, topK: TOP_K })
       setState({ status: 'ready', results: res.results })
     } catch (err) {
       if (err instanceof SimilarCasesNotConfiguredError) {
@@ -47,9 +52,10 @@ export default function SimilarHistoricalCasesCard({ c }: { c: DemoCase }) {
     <section className="card p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-navy-900">Similar historical cases</h3>
+          <h3 className="text-sm font-semibold text-navy-900">Similar closed benchmark cases</h3>
           <p className="text-xs text-ink-subtle">
-            Finds similar closed benchmark records for staff reference. It does not decide the outcome.
+            Searches the indexed NYC 311 closed case library using Cohere embeddings, Qdrant vector search, and Cohere
+            rerank. These are reference examples only.
           </p>
         </div>
         <ProvenanceBadge kind="ai-retrieval" />
@@ -93,18 +99,39 @@ export default function SimilarHistoricalCasesCard({ c }: { c: DemoCase }) {
         )}
 
         {state.status === 'ready' && state.results.length === 0 && (
-          <p className="text-xs text-ink-subtle">No similar closed benchmark cases were found for this record.</p>
+          <div className="space-y-2">
+            <p className="text-xs text-ink-subtle">No similar closed benchmark cases were found for this record.</p>
+            <PartialIndexNote />
+          </div>
         )}
 
         {state.status === 'ready' && state.results.length > 0 && (
-          <ul className="space-y-2">
-            {state.results.map((r, i) => (
-              <SimilarCaseRow key={r.case_id ?? i} r={r} />
-            ))}
-          </ul>
+          <>
+            <ul className="space-y-2">
+              {state.results.map((r, i) => (
+                <SimilarCaseRow key={r.case_id ?? i} r={r} />
+              ))}
+            </ul>
+
+            {state.results.length < SPARSE_RESULT_COUNT && <PartialIndexNote className="mt-3" />}
+
+            <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+              These records are retrieved examples from closed NYC benchmark cases. They are not Brampton policy
+              guidance, not recommended enforcement action, and not closure language.
+            </p>
+          </>
         )}
       </div>
     </section>
+  )
+}
+
+/** Shown when the index looks sparse or empty — likely still being built. */
+function PartialIndexNote({ className = '' }: { className?: string }) {
+  return (
+    <p className={`text-[11px] leading-relaxed text-amber-800 ${className}`}>
+      The indexed library may still be loading. Retrieval quality improves as more closed cases are indexed.
+    </p>
   )
 }
 
@@ -120,9 +147,9 @@ function SimilarCaseRow({ r }: { r: SimilarCase }) {
         <span className="font-medium text-navy-900">{r.complaint_type || r.case_id || 'Case'}</span>
         <span
           className="badge bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200 shrink-0"
-          title="Cohere Rerank relevance"
+          title="Cohere rerank relevance score. Not accuracy, not confidence, not an enforcement recommendation."
         >
-          {rerankPct}% match
+          Rerank {rerankPct}%
         </span>
       </div>
       {r.request_detail && <div className="text-xs text-ink-muted">{r.request_detail}</div>}
