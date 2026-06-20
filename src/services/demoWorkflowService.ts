@@ -20,9 +20,11 @@ import type {
   ClosureDraft,
   DemoCase,
   DemoCategory,
+  EnforcementAction,
   EnforcementContext,
   FieldVisitOutcome,
   OfficerFieldAction,
+  ServiceMethod,
   Priority,
   ResidentComplaintInput,
   SampleComplaint,
@@ -373,43 +375,64 @@ export const FIELD_OUTCOME_LABELS: Record<FieldVisitOutcome, string> = {
   warning_education: 'Warning or education provided',
 }
 
+/** Label for each structured enforcement action the officer can select. */
+export const ENFORCEMENT_ACTION_LABELS: Record<EnforcementAction, string> = {
+  warning_education: 'Education / warning provided',
+  notice_issued: 'Notice issued',
+  ticket_issued: 'Parking ticket / penalty notice issued',
+  no_action: 'No action taken',
+  other: 'Other',
+}
+
+/** Label for each method of service (ticket / penalty notice only). */
+export const SERVICE_METHOD_LABELS: Record<ServiceMethod, string> = {
+  placed_on_vehicle: 'Placed on vehicle',
+  handed_to_driver: 'Handed to driver / owner',
+  sent_by_mail: 'Sent by mail',
+  other: 'Other',
+}
+
 /**
  * Shared, deterministic mapping from the officer's recorded field finding
- * (violation observed + free-text action taken) to a standard by-law
- * disposition. BOTH the resident Supabase path and the local NYC benchmark path
- * use this single rule set, so the closure draft is grounded the same way:
+ * (violation observed + the STRUCTURED enforcement action they selected) to a
+ * standard by-law disposition. BOTH the resident Supabase path and the local
+ * NYC benchmark path use this single rule set, so the closure draft is grounded
+ * the same way:
  *
- *   ticket / fine / citation / summons / penalty → ticket_issued
- *   education / warning / advisory / verbal / guidance → warning_education
- *   notice / order / comply / compliance → notice_issued
- *   resolved / cleared / fixed / no further action → resolved
+ *   enforcementAction === ticket_issued    → ticket_issued
+ *   enforcementAction === notice_issued    → notice_issued
+ *   enforcementAction === warning_education → warning_education
+ *   enforcementAction === no_action        → resolved (no further action)
+ *   enforcementAction === other / unset    → resolved (no further action)
  *
- * A "yes" violation ALONE never implies a ticket: with generic wording it is
- * recorded as a warning/education (the real action text is carried into the
- * letter). A "no" violation is always no_violation.
+ * A "no" violation always takes precedence and is recorded as no_violation. A
+ * ticket is ONLY ever claimed when the officer explicitly selected the
+ * "Parking ticket / penalty notice issued" action — never inferred from a
+ * violation being observed.
  */
 export function deriveFieldVisitOutcome(
   violationObserved: string | null,
-  actionTaken: string | null,
+  enforcementAction: EnforcementAction | null,
 ): FieldVisitOutcome {
   const violation = (violationObserved ?? '').trim().toLowerCase()
-  const action = (actionTaken ?? '').trim().toLowerCase()
 
+  // "No violation observed" is the most truthful disposition regardless of action.
   if (violation === 'no') return 'no_violation'
 
-  // A ticket is only ever claimed when the recorded action EXPLICITLY says so.
-  if (/ticket|fine|citation|summons|penalt/.test(action)) return 'ticket_issued'
-  // Education / warning / advisory / guidance → a warning-or-education record.
-  if (/educat|warn|advisor|verbal|guidance/.test(action)) return 'warning_education'
-  // Formal notice / order to comply (non-ticket enforcement step).
-  if (/notice|order|comply|compliance/.test(action)) return 'notice_issued'
-  // Resolved / cleared / fixed / no further action on site.
-  if (/resolv|complied|cleared|cleaned|removed|fixed|corrected|no further|no action/.test(action))
-    return 'resolved'
-
-  // Violation seen but the action wording is generic → record as warning/education
-  // (never assume a ticket). Unclear with no clear action → no violation.
-  return violation === 'yes' ? 'warning_education' : 'no_violation'
+  switch (enforcementAction) {
+    // A ticket is only ever claimed when the officer explicitly selected it.
+    case 'ticket_issued':
+      return 'ticket_issued'
+    case 'notice_issued':
+      return 'notice_issued'
+    case 'warning_education':
+      return 'warning_education'
+    // No action taken, or any "other" action: nothing further was required.
+    case 'no_action':
+    case 'other':
+    default:
+      return 'resolved'
+  }
 }
 
 function fieldVisitDateLabel(action: OfficerFieldAction): string {
@@ -474,16 +497,21 @@ function closureOutcomeParagraph(
         `${recordedActionSentence} Your service request has been closed now that this action has been taken.` +
         inviteBack
       )
-    case 'ticket_issued':
+    case 'ticket_issued': {
+      // Only ever reached when the officer selected "Parking ticket / penalty
+      // notice issued". Include the notice number only if it was provided —
+      // never invent one.
+      const ticketRef = fieldAction.referenceNumber ? ` (number ${fieldAction.referenceNumber})` : ''
       return (
-        `A by-law enforcement officer attended the location${where} on ${date}, observed a violation of ${policy}, ` +
-        `and issued a ticket${ref} to the responsible party. This file has now been closed.${recordedActionSentence}` +
+        `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
+        `A parking penalty notice${ticketRef} was issued.${recordedActionSentence} This file has now been closed.` +
         inviteBack
       )
+    }
     case 'resolved':
       return (
         `A by-law enforcement officer attended the location${where} on ${date}. ` +
-        `The issue had already been resolved, so no further enforcement action under ${policy} was required and this file has been closed.` +
+        `After reviewing the matter, no further enforcement action under ${policy} was required at this time, so this file has been closed.` +
         `${recordedActionSentence} Thank you for reporting it.` +
         inviteBack
       )
@@ -525,7 +553,13 @@ export function buildClosureDraft(
     fieldAction
       ? `Field outcome on file: ${FIELD_OUTCOME_LABELS[fieldAction.outcome]} by ${fieldAction.officerName} on ${fieldVisitDateLabel(fieldAction)}${fieldAction.referenceNumber ? ` (ref ${fieldAction.referenceNumber})` : ''}.`
       : 'No officer field action on file — closure language is review-only and claims no site visit.',
-    ...(fieldAction?.actionTaken ? [`Officer recorded action taken: ${fieldAction.actionTaken}.`] : []),
+    ...(fieldAction?.enforcementAction
+      ? [`Officer selected enforcement action: ${ENFORCEMENT_ACTION_LABELS[fieldAction.enforcementAction]}.`]
+      : []),
+    ...(fieldAction?.enforcementAction === 'ticket_issued' && fieldAction.serviceMethod
+      ? [`Method of service: ${SERVICE_METHOD_LABELS[fieldAction.serviceMethod]}.`]
+      : []),
+    ...(fieldAction?.actionTaken ? [`Officer recorded action taken notes: ${fieldAction.actionTaken}.`] : []),
     ...(fieldAction?.violationObserved ? [`Officer recorded violation observed: ${fieldAction.violationObserved}.`] : []),
     'Staff must review and approve before any resident communication is sent.',
   ]
@@ -774,6 +808,8 @@ export function buildSeedCases(): DemoCase[] {
       followUpRequired: false,
       recordedAt: visitedAt,
       violationObserved: 'no',
+      enforcementAction: 'no_action',
+      serviceMethod: null,
       actionTaken: 'No further action required — issue already resolved on arrival',
       observedCondition: 'No active noise at the time of the visit.',
       officerNotes: null,

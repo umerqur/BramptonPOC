@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { useWorkflow, type FieldActionInput } from '../../lib/workflowStore'
-import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
+import {
+  ENFORCEMENT_ACTION_LABELS,
+  FIELD_OUTCOME_LABELS,
+  SERVICE_METHOD_LABELS,
+  formatDateTime,
+} from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 import OfficerCaseAssistant from '../../components/app/OfficerCaseAssistant'
-import type { DemoCase } from '../../data/demoWorkflowTypes'
+import type { DemoCase, EnforcementAction, ServiceMethod } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
   getResidentRequestByCaseId,
@@ -255,7 +260,14 @@ function FieldOutcomeSection({
         </span>
         <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
           <Detail label="Violation observed" value={row.field_violation_observed ?? '—'} />
-          <Detail label="Action taken" value={row.field_action_taken ?? '—'} />
+          <Detail label="Enforcement action" value={enforcementActionLabel(row.field_enforcement_action)} />
+          {row.field_enforcement_action === 'ticket_issued' && (
+            <>
+              <Detail label="Ticket / penalty notice no." value={row.field_reference_number ?? '—'} />
+              <Detail label="Method of service" value={serviceMethodLabel(row.field_service_method)} />
+            </>
+          )}
+          <Detail label="Action taken notes" value={row.field_action_taken ?? '—'} />
           <Detail label="Follow-up required" value={row.field_follow_up_required ? 'Yes' : 'No'} />
           <Detail
             label="Recorded"
@@ -301,6 +313,9 @@ function FieldOutcomeForm({
 }) {
   const [observedCondition, setObservedCondition] = useState('')
   const [violationObserved, setViolationObserved] = useState<'yes' | 'no' | 'unclear'>('unclear')
+  const [enforcementAction, setEnforcementAction] = useState<EnforcementAction | ''>('')
+  const [referenceNumber, setReferenceNumber] = useState('')
+  const [serviceMethod, setServiceMethod] = useState<ServiceMethod>('placed_on_vehicle')
   const [actionTaken, setActionTaken] = useState('')
   const [officerNotes, setOfficerNotes] = useState('')
   const [followUpRequired, setFollowUpRequired] = useState(false)
@@ -312,15 +327,19 @@ function FieldOutcomeForm({
       setError('Describe the observed condition before completing the field outcome.')
       return
     }
-    if (!actionTaken.trim()) {
-      setError('Record the action taken before completing the field outcome.')
+    if (!enforcementAction) {
+      setError('Select the enforcement action you took before completing the field outcome.')
       return
     }
     setBusy(true)
     setError(null)
+    const isTicket = enforcementAction === 'ticket_issued'
     const input: FieldOutcomeInput = {
       observedCondition,
       violationObserved,
+      enforcementAction,
+      serviceMethod: isTicket ? serviceMethod : undefined,
+      referenceNumber: isTicket ? referenceNumber : undefined,
       actionTaken,
       officerNotes,
       followUpRequired,
@@ -363,12 +382,22 @@ function FieldOutcomeForm({
           </select>
         </label>
 
+        <EnforcementActionFields
+          enforcementAction={enforcementAction}
+          setEnforcementAction={setEnforcementAction}
+          referenceNumber={referenceNumber}
+          setReferenceNumber={setReferenceNumber}
+          serviceMethod={serviceMethod}
+          setServiceMethod={setServiceMethod}
+        />
+
         <label className="block">
-          <span className="stat-label">Action taken</span>
-          <input
+          <span className="stat-label">Action taken notes (optional)</span>
+          <textarea
             value={actionTaken}
             onChange={(e) => setActionTaken(e.target.value)}
-            placeholder="e.g. Notice issued, education provided, no action needed"
+            rows={2}
+            placeholder="Optional supporting detail on the action taken…"
             className={fieldClass}
           />
         </label>
@@ -412,6 +441,98 @@ function FieldOutcomeForm({
 
 const fieldClass =
   'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none'
+
+// Display order for the structured field-outcome dropdowns.
+const ENFORCEMENT_ACTION_ORDER: EnforcementAction[] = [
+  'warning_education',
+  'notice_issued',
+  'ticket_issued',
+  'no_action',
+  'other',
+]
+const SERVICE_METHOD_ORDER: ServiceMethod[] = ['placed_on_vehicle', 'handed_to_driver', 'sent_by_mail', 'other']
+
+/** Resolve a stored enforcement-action / service-method code to its label, or '—'. */
+function enforcementActionLabel(value: string | null): string {
+  return value && value in ENFORCEMENT_ACTION_LABELS
+    ? ENFORCEMENT_ACTION_LABELS[value as EnforcementAction]
+    : '—'
+}
+function serviceMethodLabel(value: string | null): string {
+  return value && value in SERVICE_METHOD_LABELS ? SERVICE_METHOD_LABELS[value as ServiceMethod] : '—'
+}
+
+// Shared structured enforcement-action fields, used by BOTH the resident
+// Supabase form and the local NYC benchmark form so the two paths capture the
+// same disposition. Selecting "Parking ticket / penalty notice issued" reveals
+// the notice number and method-of-service fields. This only records what the
+// officer did — it is not a payment or ticket-issuance system.
+function EnforcementActionFields({
+  enforcementAction,
+  setEnforcementAction,
+  referenceNumber,
+  setReferenceNumber,
+  serviceMethod,
+  setServiceMethod,
+}: {
+  enforcementAction: EnforcementAction | ''
+  setEnforcementAction: (v: EnforcementAction | '') => void
+  referenceNumber: string
+  setReferenceNumber: (v: string) => void
+  serviceMethod: ServiceMethod
+  setServiceMethod: (v: ServiceMethod) => void
+}) {
+  return (
+    <>
+      <label className="block">
+        <span className="stat-label">Enforcement action</span>
+        <select
+          value={enforcementAction}
+          onChange={(e) => setEnforcementAction(e.target.value as EnforcementAction | '')}
+          className={fieldClass}
+        >
+          <option value="">Select an enforcement action…</option>
+          {ENFORCEMENT_ACTION_ORDER.map((a) => (
+            <option key={a} value={a}>
+              {ENFORCEMENT_ACTION_LABELS[a]}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {enforcementAction === 'ticket_issued' && (
+        <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+          <label className="block">
+            <span className="stat-label">Ticket / penalty notice number</span>
+            <input
+              value={referenceNumber}
+              onChange={(e) => setReferenceNumber(e.target.value)}
+              placeholder="e.g. PN-0001234 (optional)"
+              className={fieldClass}
+            />
+          </label>
+          <label className="block">
+            <span className="stat-label">Method of service</span>
+            <select
+              value={serviceMethod}
+              onChange={(e) => setServiceMethod(e.target.value as ServiceMethod)}
+              className={fieldClass}
+            >
+              {SERVICE_METHOD_ORDER.map((m) => (
+                <option key={m} value={m}>
+                  {SERVICE_METHOD_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-[11px] text-ink-subtle">
+            Records what the officer did on site. This does not issue a ticket or take a payment.
+          </p>
+        </div>
+      )}
+    </>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Local (NYC open benchmark) officer case view — records the field outcome
@@ -557,7 +678,17 @@ function LocalFieldOutcomeSection({
         <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
           <Detail label="Officer" value={fa.officerName} />
           <Detail label="Recorded" value={formatDateTime(fa.recordedAt)} />
-          {fa.referenceNumber && <Detail label="Reference" value={fa.referenceNumber} />}
+          {fa.enforcementAction && (
+            <Detail label="Enforcement action" value={ENFORCEMENT_ACTION_LABELS[fa.enforcementAction]} />
+          )}
+          {fa.enforcementAction === 'ticket_issued' && (
+            <>
+              <Detail label="Ticket / penalty notice no." value={fa.referenceNumber ?? '—'} />
+              {fa.serviceMethod && (
+                <Detail label="Method of service" value={SERVICE_METHOD_LABELS[fa.serviceMethod]} />
+              )}
+            </>
+          )}
           <Detail label="Follow-up required" value={fa.followUpRequired ? 'Yes' : 'No'} />
         </dl>
         {fa.observations && (
@@ -588,28 +719,36 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
   const { recordFieldAction } = useWorkflow()
   const [observedCondition, setObservedCondition] = useState('')
   const [violationObserved, setViolationObserved] = useState<'yes' | 'no' | 'unclear'>('unclear')
+  const [enforcementAction, setEnforcementAction] = useState<EnforcementAction | ''>('')
+  const [referenceNumber, setReferenceNumber] = useState('')
+  const [serviceMethod, setServiceMethod] = useState<ServiceMethod>('placed_on_vehicle')
   const [actionTaken, setActionTaken] = useState('')
   const [officerNotes, setOfficerNotes] = useState('')
   const [followUpRequired, setFollowUpRequired] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Same structure as Officer Oakley's resident field-outcome form. The closure
-  // disposition is derived from violation + action; the officer never picks
-  // "ticket" from a dropdown.
+  // disposition is derived from the violation + the STRUCTURED enforcement
+  // action; the officer never types the disposition into a free-text box, and a
+  // ticket is only recorded when explicitly selected.
   function submit() {
     if (!observedCondition.trim()) {
       setError('Describe the observed condition before completing the field outcome.')
       return
     }
-    if (!actionTaken.trim()) {
-      setError('Record the action taken before completing the field outcome.')
+    if (!enforcementAction) {
+      setError('Select the enforcement action you took before completing the field outcome.')
       return
     }
     setError(null)
+    const isTicket = enforcementAction === 'ticket_issued'
     const input: FieldActionInput = {
       observedCondition: observedCondition.trim(),
       violationObserved,
-      actionTaken: actionTaken.trim(),
+      enforcementAction,
+      serviceMethod: isTicket ? serviceMethod : undefined,
+      referenceNumber: isTicket ? referenceNumber.trim() : undefined,
+      actionTaken: actionTaken.trim() || undefined,
       officerNotes: officerNotes.trim() || undefined,
       followUpRequired,
     }
@@ -644,12 +783,22 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
           </select>
         </label>
 
+        <EnforcementActionFields
+          enforcementAction={enforcementAction}
+          setEnforcementAction={setEnforcementAction}
+          referenceNumber={referenceNumber}
+          setReferenceNumber={setReferenceNumber}
+          serviceMethod={serviceMethod}
+          setServiceMethod={setServiceMethod}
+        />
+
         <label className="block">
-          <span className="stat-label">Action taken</span>
-          <input
+          <span className="stat-label">Action taken notes (optional)</span>
+          <textarea
             value={actionTaken}
             onChange={(e) => setActionTaken(e.target.value)}
-            placeholder="e.g. Education provided, warning issued, notice to comply, ticket issued, no action needed"
+            rows={2}
+            placeholder="Optional supporting detail on the action taken…"
             className={fieldClass}
           />
         </label>

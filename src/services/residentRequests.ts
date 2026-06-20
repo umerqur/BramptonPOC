@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { addWorkflowEvent } from './municipalServiceRequests'
+import type { EnforcementAction, ServiceMethod } from '../data/demoWorkflowTypes'
 
 // Resident Intake Demo — service layer for the public resident simulation flow
 // and the staff-side intake workbench.
@@ -168,6 +169,9 @@ export type ResidentRequestRow = {
   field_visit_completed: boolean
   field_observed_condition: string | null
   field_violation_observed: string | null
+  field_enforcement_action: string | null
+  field_service_method: string | null
+  field_reference_number: string | null
   field_action_taken: string | null
   field_officer_notes: string | null
   field_follow_up_required: boolean
@@ -178,7 +182,14 @@ export type ResidentRequestRow = {
 export type FieldOutcomeInput = {
   observedCondition: string
   violationObserved: 'yes' | 'no' | 'unclear'
-  actionTaken: string
+  /** Structured enforcement action — what the officer actually did. */
+  enforcementAction: EnforcementAction
+  /** How the ticket / penalty notice was served (ticket_issued only). */
+  serviceMethod?: ServiceMethod
+  /** Ticket / penalty notice number (ticket_issued only, optional). */
+  referenceNumber?: string
+  /** Optional supporting "action taken" notes. */
+  actionTaken?: string
   officerNotes?: string
   followUpRequired: boolean
 }
@@ -488,7 +499,7 @@ export async function getResidentRequestStatus(caseId: string): Promise<Resident
 const RESIDENT_REQUEST_BASE_COLUMNS =
   'id, case_id, address_type, location, city, province, request_type, description, first_name, last_name, resident_name, unit_number, postal_code, country, resident_phone, resident_email, resolution_followup, method_of_contact, status, is_demo, created_at, updated_at'
 
-const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_BASE_COLUMNS}, assigned_officer_email, assigned_officer_name, assigned_at, field_visit_completed, field_observed_condition, field_violation_observed, field_action_taken, field_officer_notes, field_follow_up_required, field_outcome_recorded_at`
+const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_BASE_COLUMNS}, assigned_officer_email, assigned_officer_name, assigned_at, field_visit_completed, field_observed_condition, field_violation_observed, field_enforcement_action, field_service_method, field_reference_number, field_action_taken, field_officer_notes, field_follow_up_required, field_outcome_recorded_at`
 
 /** Postgres "undefined_column" — migration 017 not applied yet. */
 function isUndefinedColumnError(err: unknown): boolean {
@@ -505,6 +516,9 @@ function withAssignmentDefaults(row: Record<string, unknown>): ResidentRequestRo
     field_visit_completed: (row.field_visit_completed as boolean | undefined) ?? false,
     field_observed_condition: (row.field_observed_condition as string | null) ?? null,
     field_violation_observed: (row.field_violation_observed as string | null) ?? null,
+    field_enforcement_action: (row.field_enforcement_action as string | null) ?? null,
+    field_service_method: (row.field_service_method as string | null) ?? null,
+    field_reference_number: (row.field_reference_number as string | null) ?? null,
     field_action_taken: (row.field_action_taken as string | null) ?? null,
     field_officer_notes: (row.field_officer_notes as string | null) ?? null,
     field_follow_up_required: (row.field_follow_up_required as boolean | undefined) ?? false,
@@ -777,7 +791,15 @@ export async function recordResidentFieldOutcome(
       field_visit_completed: true,
       field_observed_condition: outcome.observedCondition.trim() || null,
       field_violation_observed: outcome.violationObserved,
-      field_action_taken: outcome.actionTaken.trim() || null,
+      field_enforcement_action: outcome.enforcementAction,
+      // Method of service and notice number only apply to a ticket / penalty notice.
+      field_service_method:
+        outcome.enforcementAction === 'ticket_issued' ? outcome.serviceMethod ?? null : null,
+      field_reference_number:
+        outcome.enforcementAction === 'ticket_issued'
+          ? outcome.referenceNumber?.trim() || null
+          : null,
+      field_action_taken: outcome.actionTaken?.trim() ? outcome.actionTaken.trim() : null,
       field_officer_notes: outcome.officerNotes?.trim() ? outcome.officerNotes.trim() : null,
       field_follow_up_required: outcome.followUpRequired,
       field_outcome_recorded_at: now,
@@ -796,8 +818,14 @@ export async function recordResidentFieldOutcome(
     from_status: STATUS_LABELS.assigned,
     to_status: STATUS_LABELS.in_review,
     actor_type: 'officer',
-    notes: `Violation observed: ${outcome.violationObserved}. Action taken: ${
-      outcome.actionTaken.trim() || '—'
+    notes: `Violation observed: ${outcome.violationObserved}. Enforcement action: ${
+      outcome.enforcementAction
+    }${
+      outcome.enforcementAction === 'ticket_issued' && outcome.referenceNumber?.trim()
+        ? ` (notice ${outcome.referenceNumber.trim()})`
+        : ''
+    }. Action notes: ${
+      outcome.actionTaken?.trim() || '—'
     }. Follow-up required: ${outcome.followUpRequired ? 'yes' : 'no'}.`,
   })
 
