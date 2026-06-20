@@ -105,6 +105,20 @@ export const STAFF_PROFILES: StaffProfile[] = [
     roleDisplayNames: { supervisor: 'Supervisor Levin', csr: 'CSR Levin', officer: 'Officer Levin' },
   },
   {
+    name: 'Ceren Kolsarici',
+    email: 'ceren.kolsarici@queensu.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Ceren', csr: 'CSR Ceren', officer: 'Officer Ceren' },
+  },
+  {
+    name: 'Stephen Thomas',
+    email: 'stephen.thomas@queensu.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Stephen', csr: 'CSR Stephen', officer: 'Officer Stephen' },
+  },
+  {
     // The dedicated demo By-law Officer. This profile can ONLY be an officer.
     name: 'Officer Oakley',
     email: 'oakley.carpentry_worker@yahoo.com',
@@ -169,11 +183,10 @@ export function officerDisplayName(profile: StaffProfile): string {
 }
 
 /**
- * The assignable By-law Officers — every staff profile that may act as an
- * officer, deduplicated by officer display name. Two Umer logins share the one
- * "Officer Qureshi" identity, so the assignable list stays: Officer Qureshi,
- * Officer Mann, Officer Ahmed, Officer Oakley. The first matching login is the
- * canonical assignable identity for that officer name.
+ * The assignable By-law Officers — the assignable list is generated from all
+ * named staff profiles with officer access, deduplicated by officer display
+ * name. Two Umer logins share the one "Officer Qureshi" identity, so the first
+ * matching login is the canonical assignable identity for that officer name.
  */
 export function officerProfiles(): StaffProfile[] {
   const seen = new Set<string>()
