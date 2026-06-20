@@ -433,9 +433,10 @@ export default function AppCaseWorkbenchPage() {
 
 // Officer field-investigation panel — the real-world step between triage and
 // closure. The supervisor/CSR assigns the case to an assignable By-law Officer
-// profile (for now only Officer Oakley); assignment is tied to that officer's
-// login email. The officer records the actual on-site outcome from their own
-// Officer Field Console. The supervisor never records a field outcome here.
+// profile (Officer Qureshi, Officer Mann, Officer Ahmed, or Officer Oakley);
+// assignment is tied to that officer's login email. The officer records the
+// actual on-site outcome from their own Officer Field Console. The supervisor
+// never records a field outcome here.
 function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnly?: boolean }) {
   const { role, assignToOfficer } = useWorkflow()
   const canAssign = !readOnly && can(role, 'assignOfficer')

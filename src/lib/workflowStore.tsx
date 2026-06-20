@@ -44,10 +44,13 @@ import {
   type StaffRole,
 } from './roles'
 
-// Bumped to v3 when cases gained a `source` + normalized service-request shape
-// (unified resident intake + NYC open benchmark lifecycle), so older persisted
-// cases without those fields are reseeded rather than rendered half-populated.
-const STORAGE_KEY = 'brampton-demo-workflow-v3'
+// Bumped to v4 when officer assignment gained `assignedOfficerEmail` (cases are
+// now tied to a specific officer login so the officer queue can filter to its
+// own cases). Older persisted cases lack that field, so they are reseeded rather
+// than rendered half-populated — stale localStorage would break officer queue
+// testing. (v3 added a `source` + normalized service-request shape: unified
+// resident intake + NYC open benchmark lifecycle.)
+const STORAGE_KEY = 'brampton-demo-workflow-v4'
 
 /**
  * What an officer enters when recording a field investigation. This mirrors the

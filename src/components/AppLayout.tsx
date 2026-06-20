@@ -136,10 +136,13 @@ function RoleBadge({ role, canSwitchRole }: { role: StaffRole; canSwitchRole: bo
 }
 
 // Acting-as role switcher. It renders ONLY the roles the signed-in user's staff
-// profile allows — not every possible role. A supervisor/CSR account sees only
-// Supervisor + CSR (never By-law Officer); a By-law Officer account has a single
-// allowed role, so the switcher is hidden for them entirely (canSwitchRole is
-// false). This is staff-profile-based access control, not a free persona switcher.
+// profile allows — not every possible role. Umer, Balraj, and Ousmaan are
+// allowed Supervisor + CSR + By-law Officer (each acting only as their own
+// officer identity), so they can switch into officer; Yuri is supervisor/CSR
+// only and never sees By-law Officer; an officer-only account (Officer Oakley)
+// has a single allowed role, so the switcher is hidden entirely (canSwitchRole
+// is false). This is staff-profile-based access control, not a free persona
+// switcher.
 function RoleSwitcher({ className = '' }: { className?: string }) {
   const { role, setRole, allowedRoles } = useWorkflow()
   return (
