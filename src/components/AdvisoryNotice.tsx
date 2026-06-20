@@ -1,7 +1,7 @@
 import { TRIAGE_ADVISORY } from '../services/municipalServiceRequests'
 
 /**
- * Standard advisory banner shown wherever AI-assisted triage outputs appear.
+ * Standard advisory banner shown wherever decision-support triage outputs appear.
  * Makes explicit that the rule based POC triage is decision support only and
  * not a final enforcement decision. Use `variant="inline"` for a compact note.
  */

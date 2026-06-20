@@ -11,8 +11,8 @@ import {
 } from '../../components/workflow/WorkflowUI'
 import type { DemoCase } from '../../data/demoWorkflowTypes'
 
-// Triage Automation — shows everything the AI workflow system did automatically
-// from the raw intake: classification, location extraction, key facts, a
+// Triage Automation — shows everything the deterministic decision-support
+// workflow produced from the raw intake: classification, location extraction, key facts, a
 // missing-information check, duplicate risk, recommended department / priority /
 // stage, confidence level, and reasoning notes. Badges make it obvious which
 // outputs are automated vs. where staff review / approval is required.
@@ -78,7 +78,7 @@ export default function AppTriageAutomationPage() {
         <div className="lg:col-span-2 space-y-6">
           <Panel title="Classification & routing">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Stat label="Complaint type" value={t.category} sub={`${(t.categoryConfidence * 100).toFixed(0)}% model confidence`} />
+              <Stat label="Complaint type" value={t.category} sub={`${(t.categoryConfidence * 100).toFixed(0)}% classification confidence`} />
               <Stat label="Extracted location" value={t.extractedLocation ?? 'Not detected'} />
               <Stat label="Recommended department" value={t.recommendedDepartment} />
               <Stat label="Recommended priority" value={t.recommendedPriority} />

@@ -1,10 +1,10 @@
 # Proactive Enforcement Intelligence — Brampton compatible POC
 
-A **Closure Review Workbench** for Enforcement and By-law complaint responses — AI automates research, analysis, and draft preparation for staff approved closure responses.
+A **Closure Review Workbench** for Enforcement and By-law complaint responses — a hybrid POC where AI supports semantic retrieval and reranking over indexed benchmark cases, a rules-based workflow handles next action, workflow gates, readiness checks, and closure templates, and humans approve every enforcement decision and resident communication.
 
 This repository contains the proof of concept (POC) website: a Vite + React + TypeScript application styled with Tailwind CSS and routed with React Router. It is designed to be demo-ready for a City of Brampton conversation and deploys cleanly on Netlify.
 
-> **Positioning.** This is a **Brampton compatible Proactive Enforcement Intelligence POC modelled using NYC 311 Open Data as a public benchmark source**. It is **not Brampton operational data**. Real public NYC 311 service request data is normalized into a Brampton compatible municipal enforcement schema and used to demonstrate the core buyer workflow: supporting the **closure of Enforcement and By-law complaint responses** by gathering enforcement context, complaint trends, and patrol or ticket style records, and drafting personalized resident friendly closure messages. **AI automates research, analysis, and draft preparation for staff approved closure responses** — it does not make enforcement decisions, close cases on its own, or contact residents without staff approval. No private City data is required for the POC, and the schema is ready for Brampton enforcement data later.
+> **Positioning.** This is a **Brampton compatible Proactive Enforcement Intelligence POC modelled using NYC 311 Open Data as a public benchmark source**. It is **not Brampton operational data**. Real public NYC 311 service request data is normalized into a Brampton compatible municipal enforcement schema and used to demonstrate the core buyer workflow: supporting the **closure of Enforcement and By-law complaint responses** by gathering enforcement context, complaint trends, and patrol or ticket style records, and assembling personalized resident friendly closure messages from rules-based templates. **AI is limited to semantic retrieval and reranking (Cohere embeddings + Qdrant + Cohere rerank) over indexed closed benchmark cases; a rules-based workflow handles classification checks, readiness checks, next action guidance, and closure templates; and staff approve every enforcement decision and resident communication.** AI does not draft closure language, make enforcement decisions, close cases on its own, or contact residents without staff approval. No private City data is required for the POC, and the schema is ready for Brampton enforcement data later.
 
 ## The Closure Review Workbench workflow
 
@@ -31,7 +31,7 @@ Demo script:
 4. Staff explicitly advance the request through Received, Assigned, Under review, and Closed.
 5. Each staff action writes a workflow event and sends a resident status update.
 6. The resident can check `/resident/status/:caseId` at any time.
-7. The Closure Review Workbench remains the internal AI assisted staff review layer for enforcement context, complaint trends, and staff approved closure language.
+7. The Closure Review Workbench remains the internal staff review layer for enforcement context, complaint trends, and staff-approved, rules-based closure language.
 
 This is not the 311 Self Serve Customer Service Agent use case. It is a Proactive Enforcement Response POC with a resident intake simulation.
 
@@ -100,7 +100,7 @@ The Supabase schema lives in `supabase/migrations/` (001–010, applied in order
 
 ## What it demonstrates
 
-- A public marketing site (landing, how-it-works, methodology, privacy) explaining the POC and the **assistive** role of AI — no public operational data demo.
+- A public marketing site (landing, methodology, privacy) explaining the POC and the **supporting** role of AI — `/how-it-works` redirects to `/methodology`, the single explanation page — no public operational data demo.
 - An authenticated app (`/app`, Supabase magic-link login) centred on:
   - **Staff Inbox** (the staff landing page) — the queue of real resident submissions staff work into the Case Workbench and Closure Review.
   - **Closure Review Workbench** — the six-step workflow above: attention-ranked complaint review queue, case file workspace with context and trend signals, deterministic rule flags, **AI Review Packet** (staff summary, next step, resident update, closure language), an "Ask this case" assistant, and human review controls. Every draft requires staff approval.
@@ -124,7 +124,7 @@ The scored queue is delivered as a single CSV (`statistical_attention_queue_uplo
 
 ## Positioning principles
 
-- **AI automates research, analysis, and draft preparation — staff approve closure responses.** The AI never closes a case by itself, never issues notices or penalties, and never contacts residents on its own.
+- **AI supports semantic retrieval and reranking; rules handle next action, workflow gates, readiness checks, and closure templates; staff approve closure responses.** The system never drafts closure language with an LLM, never closes a case by itself, never issues notices or penalties, and never contacts residents on its own.
 - **Human review by design.** Every score, rule flag, and AI-drafted review packet is advisory; authorized municipal staff make every final decision.
 - **Explainable scoring.** Scores are published with the drivers and provenance that produced them — no black box. Model outputs carry source city, dataset, model version, and scoring period on every row.
 - **Staff-ready summaries.** Outputs are framed as briefing material for officers to review, not as decisions.
@@ -209,8 +209,8 @@ tailwind.config.js  Design tokens (navy + accent palette)
 | Route                 | Page                                  |
 | --------------------- | ------------------------------------- |
 | `/`                   | Landing                               |
-| `/how-it-works`       | How It Works                          |
-| `/methodology`        | POC Methodology                       |
+| `/how-it-works`       | Redirects to `/methodology`           |
+| `/methodology`        | POC Methodology (single explanation)  |
 | `/privacy`            | Privacy & Security                    |
 | `/login`              | Login (Supabase magic-link)           |
 | `/app/insights`       | Insights (live complaint workload dashboard + supervisor workflow impact + NYC service request workload heat map) |
@@ -260,13 +260,13 @@ Full version lives on the in-app `/methodology` page. Short form:
 2. **Normalize.** Standardize addresses, categories, and timestamps into the Brampton compatible enforcement schema (`municipal_complaints`) so complaints across channels can be compared.
 3. **Detect patterns.** Identify repeat complaints, geographic clusters, and ward-level workload concentration across rolling time windows.
 4. **Score.** Transparent rule-based triage plus the **Review Attention Score** (`statistical_case_scores`) — a classical statistical queue rank built from EDA, aging z-scores, percentiles, repeat-location counts, area-trend signals, and correlation checks (no black-box model). The v1 workload-density layer (`workload_insights_v1`) remains for location density. Every output carries provenance and an advisory disclaimer, and the score is decision support only.
-5. **Summarize.** Generate AI Review Packets — staff summary, recommended next step, resident friendly update, and closure language when appropriate (server-side, on explicit staff request).
+5. **Summarize (optional).** On explicit staff request, an optional server-side AI Review Packet (LLM) produces an internal staff summary and suggested next step, clearly labelled for staff review. The resident-facing closure draft itself is rules-based, assembled from approved templates and structured case facts.
 6. **Recommend.** Suggest a next operational action (Monitor, Merge, Schedule inspection, Escalate for supervisor review, Send notice, Prepare officer visit) **for staff review**.
 
 ### Out of scope for this POC
 
 - Private City data integration (deferred to a later phase, under privacy and cybersecurity controls).
-- Automated notices, penalties, or external communications — AI drafts are never sent to residents.
+- Automated notices, penalties, or external communications — rules-based drafts are never sent to residents without explicit staff approval.
 - Fully autonomous enforcement workflows (a deliberate later phase, only after the data model, dashboards, governance, and human review are proven).
 - Production-grade authentication and role-based access beyond the Supabase magic-link login used for the demo.
 

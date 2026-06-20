@@ -188,7 +188,7 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
       )}
 
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
-        {/* AI summary recap */}
+        {/* Case summary recap */}
         <div className="space-y-6">
           <Panel title="Case summary">
             <p className="text-sm leading-relaxed text-ink">{c.summary.plainLanguage}</p>

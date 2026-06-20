@@ -11,8 +11,8 @@ import type {
 
 // Intake Agent — a mocked resident complaint intake form. Staff (or a reviewer)
 // can fill it in or load a realistic municipal by-law sample, then submit. On
-// submit, a synthetic case object is created and the AI workflow runs end-to-end
-// in the browser; the user is taken to the AI Triage result.
+// submit, a synthetic case object is created and the decision-support workflow
+// runs end-to-end in the browser; the user is taken to the triage result.
 
 const CHANNELS: ServiceChannel[] = ['311 Web', '311 Phone', 'Mobile App', 'Email', 'Walk-in']
 const CONTACT_PREFS: ContactPreference[] = ['Email', 'Phone', 'Text message', 'No follow-up']
@@ -162,7 +162,7 @@ export default function AppIntakeAgentPage() {
 
         <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
           <button type="submit" disabled={!canSubmit} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-            Submit complaint → run AI workflow
+            Submit complaint → run decision-support workflow
           </button>
           <button type="button" onClick={() => setForm(emptyForm())} className="btn-secondary text-sm">
             Clear
