@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import Logo from './Logo'
 import Footer from './Footer'
+import WorkflowRail from './app/WorkflowRail'
 import { useAuth } from '../lib/auth'
 import { useWorkflow, WorkflowProvider } from '../lib/workflowStore'
-import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLE_OPTIONS, type StaffRole } from '../lib/roles'
+import { ROLE_DESCRIPTIONS, ROLE_LABELS, type StaffRole } from '../lib/roles'
 
 // Authenticated app shell for the staff workflow. The top nav now depends on the
 // signed-in user's role (derived from their email):
@@ -61,17 +62,21 @@ function AppShell() {
             </div>
           </Link>
 
-          <nav className="hidden xl:flex items-center gap-1">
-            {nav.map((item) => (
-              <StaffLink key={item.to} to={item.to} end={item.end}>
-                {item.label}
-              </StaffLink>
-            ))}
-            {canSwitchRole && <RoleSwitcher className="ml-1" />}
-            <RoleBadge role={role} canSwitchRole={canSwitchRole} />
-            <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4 ml-1">
-              Sign out
-            </button>
+          <nav className="hidden items-center gap-5 xl:flex">
+            <div className="flex items-center gap-5">
+              {nav.map((item) => (
+                <StaffLink key={item.to} to={item.to} end={item.end}>
+                  {item.label}
+                </StaffLink>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
+              {canSwitchRole && <RoleSwitcher />}
+              <RoleBadge role={role} canSwitchRole={canSwitchRole} />
+              <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
+                Sign out
+              </button>
+            </div>
           </nav>
 
           <button
@@ -89,7 +94,7 @@ function AppShell() {
           <div className="xl:hidden border-t border-slate-200 bg-white">
             <div className="container-page py-3 flex flex-col gap-1">
               {nav.map((item) => (
-                <StaffLink key={item.to} to={item.to} end={item.end} onClick={() => setOpen(false)}>
+                <StaffLink key={item.to} to={item.to} end={item.end} mobile onClick={() => setOpen(false)}>
                   {item.label}
                 </StaffLink>
               ))}
@@ -108,9 +113,12 @@ function AppShell() {
         )}
       </header>
 
-      <main className="flex-1">
-        <Outlet />
-      </main>
+      <div className="flex flex-1">
+        <WorkflowRail />
+        <main className="min-w-0 flex-1">
+          <Outlet />
+        </main>
+      </div>
       <Footer />
     </div>
   )
@@ -127,10 +135,13 @@ function RoleBadge({ role, canSwitchRole }: { role: StaffRole; canSwitchRole: bo
   )
 }
 
-// Acting-as role switcher, shown only to supervisor/dev accounts for demo
-// testing. A By-law Officer account never sees this and cannot escalate.
+// Acting-as role switcher. It renders ONLY the roles the signed-in user's staff
+// profile allows — not every possible role. A supervisor/CSR account sees only
+// Supervisor + CSR (never By-law Officer); a By-law Officer account has a single
+// allowed role, so the switcher is hidden for them entirely (canSwitchRole is
+// false). This is staff-profile-based access control, not a free persona switcher.
 function RoleSwitcher({ className = '' }: { className?: string }) {
-  const { role, setRole } = useWorkflow()
+  const { role, setRole, allowedRoles } = useWorkflow()
   return (
     <label className={`flex items-center gap-1.5 text-xs text-ink-subtle ${className}`}>
       <span className="hidden 2xl:inline whitespace-nowrap">Acting as</span>
@@ -140,7 +151,7 @@ function RoleSwitcher({ className = '' }: { className?: string }) {
         title={ROLE_DESCRIPTIONS[role]}
         className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-navy-900 focus:border-accent-500 focus:outline-none"
       >
-        {ROLE_OPTIONS.map((r) => (
+        {allowedRoles.map((r) => (
           <option key={r} value={r}>
             {ROLE_LABELS[r]}
           </option>
@@ -150,15 +161,50 @@ function RoleSwitcher({ className = '' }: { className?: string }) {
   )
 }
 
-function StaffLink({ to, children, onClick, end }: { to: string; children: React.ReactNode; onClick?: () => void; end?: boolean }) {
+// Top-nav link. Two clean, non-pill treatments that make the active page obvious:
+//   * desktop — an underline tab (bottom accent rule under the active label).
+//   * mobile  — a left accent rule beside the active row in the dropdown.
+function StaffLink({
+  to,
+  children,
+  onClick,
+  end,
+  mobile = false,
+}: {
+  to: string
+  children: React.ReactNode
+  onClick?: () => void
+  end?: boolean
+  mobile?: boolean
+}) {
+  if (mobile) {
+    return (
+      <NavLink
+        to={to}
+        end={end}
+        onClick={onClick}
+        className={({ isActive }) =>
+          `block border-l-2 px-3 py-2 text-sm font-semibold transition-colors ${
+            isActive
+              ? 'border-navy-900 bg-slate-50 text-navy-900'
+              : 'border-transparent text-ink-muted hover:bg-slate-50 hover:text-navy-900'
+          }`
+        }
+      >
+        {children}
+      </NavLink>
+    )
+  }
   return (
     <NavLink
       to={to}
       end={end}
       onClick={onClick}
       className={({ isActive }) =>
-        `px-3 py-2 rounded-md text-sm font-medium transition ${
-          isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
+        `inline-flex items-center border-b-2 px-0.5 pb-1.5 pt-2 text-sm font-semibold transition-colors ${
+          isActive
+            ? 'border-navy-900 text-navy-900'
+            : 'border-transparent text-ink-muted hover:border-slate-300 hover:text-navy-900'
         }`
       }
     >

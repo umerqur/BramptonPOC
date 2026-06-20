@@ -122,7 +122,11 @@ export function residentRowToCase(row: ResidentRequestRow): DemoCase {
   // schema (the resident form stays friendly; the record is normalized here).
   demoCase.normalized = residentRowToNormalized(row, demoCase.triage.recommendedDepartment)
 
+  // Resident cases already carry the assigned officer email in Supabase — keep
+  // that as the officer identity the Field Console filters on.
   if (row.assigned_officer_name) demoCase.assignedOfficer = row.assigned_officer_name
+  if (row.assigned_officer_email)
+    demoCase.assignedOfficerEmail = row.assigned_officer_email.trim().toLowerCase()
 
   // When the officer has recorded a field outcome, pull it into the case so
   // closure review reflects it: rebuild the closure draft from the recorded

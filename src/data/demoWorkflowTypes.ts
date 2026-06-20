@@ -176,8 +176,14 @@ export type DemoCase = {
   summary: CaseSummary
   draft: ClosureDraft | null
   priorityOverride: Priority | null
-  /** Officer assigned to investigate (set by a supervisor/CSR), or null. */
+  /** Display name of the officer assigned to investigate (set by a supervisor/CSR), or null. */
   assignedOfficer: string | null
+  /**
+   * Login email of the assigned officer — the real identity the Officer Field
+   * Console filters on. A case only appears for the officer whose signed-in
+   * email matches this. Null when unassigned.
+   */
+  assignedOfficerEmail: string | null
   /** Recorded officer field investigation outcome, or null if none yet. */
   fieldAction: OfficerFieldAction | null
   decisions: StaffDecision[]

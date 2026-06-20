@@ -35,7 +35,14 @@ import { residentRowToCase } from '../services/residentCaseBridge'
 import { openRowToCase } from '../services/openCaseBridge'
 import type { ResidentRequestRow } from '../services/residentRequests'
 import type { OpenReviewRow } from '../services/caseExplorer'
-import { ROLE_ACTOR_NAME, canSwitchRoleForEmail, roleForEmail, type StaffRole } from './roles'
+import {
+  ROLE_ACTOR_NAME,
+  allowedRolesForEmail,
+  canUseRole,
+  defaultRoleForEmail,
+  type StaffProfile,
+  type StaffRole,
+} from './roles'
 
 // Bumped to v3 when cases gained a `source` + normalized service-request shape
 // (unified resident intake + NYC open benchmark lifecycle), so older persisted
@@ -57,6 +64,13 @@ export type FieldActionInput = {
   followUpRequired: boolean
 }
 
+/**
+ * An officer assignment target. Accepts a full StaffProfile (from
+ * officerProfiles()) or any object carrying the officer's name + login email —
+ * assignment is always tied to a specific officer email, never a fake name.
+ */
+export type OfficerAssignment = Pick<StaffProfile, 'name' | 'email'>
+
 type WorkflowState = {
   cases: DemoCase[]
   activeCaseId: string | null
@@ -69,12 +83,14 @@ type WorkflowContextValue = {
   activeCase: DemoCase | null
   metrics: SupervisorMetrics
   staffName: string
-  /** Current role (derived from the signed-in email) + setter. */
+  /** Current role (constrained to the signed-in user's staff profile) + setter. */
   role: StaffRole
   setRole: (role: StaffRole) => void
-  /** Email of the signed-in user (drives role separation). */
+  /** Email of the signed-in user (drives staff identity + role separation). */
   userEmail: string | null
-  /** Whether this user may switch the demo role (officers cannot). */
+  /** The roles the signed-in user's staff profile allows them to act as. */
+  allowedRoles: StaffRole[]
+  /** Whether this user may switch roles (true only when >1 allowed role). */
   canSwitchRole: boolean
   submitComplaint: (input: ResidentComplaintInput) => string
   ingestResidentCase: (row: ResidentRequestRow) => string
@@ -83,7 +99,7 @@ type WorkflowContextValue = {
   approveRouting: (id: string) => void
   requestMoreInfo: (id: string, note?: string) => void
   overridePriority: (id: string, priority: Priority) => void
-  assignToOfficer: (id: string, officerName: string) => void
+  assignToOfficer: (id: string, officer: OfficerAssignment) => void
   recordFieldAction: (id: string, input: FieldActionInput) => void
   sendToStaffReview: (id: string) => void
   editDraftBody: (id: string, body: string) => void
@@ -138,20 +154,22 @@ export function WorkflowProvider({
   userEmail?: string | null
 }) {
   const [state, setState] = useState<WorkflowState>(loadState)
-  const canSwitchRole = canSwitchRoleForEmail(userEmail)
+  // Roles are constrained to the signed-in user's staff profile. Switching is
+  // only offered when the profile allows more than one role. This is POC
+  // staff-profile-based access control, not a free persona switcher.
+  const allowedRoles = useMemo(() => allowedRolesForEmail(userEmail), [userEmail])
+  const canSwitchRole = allowedRoles.length > 1
 
-  // Role comes from the signed-in email. A By-law Officer account is locked to
-  // the officer role; supervisors/coordinators default to supervisor but may use
-  // the "Acting as" selector for demo testing.
+  // Keep the active role inside the profile's allowed set. If the persisted role
+  // is not allowed for this email (e.g. a stale 'officer' from a previous
+  // session, or a supervisor whose profile never allows officer), snap back to
+  // the profile's default role. This is what prevents a supervisor account from
+  // acting as Officer Oakley.
   useEffect(() => {
-    if (!canSwitchRole) {
-      setState((s) => (s.role === 'officer' ? s : { ...s, role: 'officer' }))
-    } else {
-      // Ensure a locked officer session that later signs in as supervisor is not
-      // stuck on 'officer' from persisted state.
-      setState((s) => (s.role === 'officer' ? { ...s, role: roleForEmail(userEmail) } : s))
-    }
-  }, [userEmail, canSwitchRole])
+    setState((s) =>
+      allowedRoles.includes(s.role) ? s : { ...s, role: defaultRoleForEmail(userEmail) },
+    )
+  }, [userEmail, allowedRoles])
 
   useEffect(() => {
     try {
@@ -174,11 +192,12 @@ export function WorkflowProvider({
 
   const setRole = useCallback(
     (role: StaffRole) => {
-      // Officers cannot switch roles (no escalating to supervisor).
-      if (!canSwitchRole) return
+      // Refuse any role the signed-in user's staff profile does not allow. A
+      // supervisor/CSR account can never select By-law Officer this way.
+      if (!canUseRole(userEmail, role)) return
       setState((s) => ({ ...s, role }))
     },
-    [canSwitchRole],
+    [userEmail],
   )
 
   // Bridge a resident Supabase submission into the workbench. Reuses the case if
@@ -280,16 +299,21 @@ export function WorkflowProvider({
     [updateCase],
   )
 
-  // Supervisor / CSR assigns the case to a named officer for a field visit.
+  // Supervisor / CSR assigns the case to a specific officer for a field visit.
+  // Assignment is tied to the officer's login email (assignedOfficerEmail) — the
+  // Officer Field Console filters on that email — not just a display name.
   const assignToOfficer = useCallback(
-    (id: string, officerName: string) => {
+    (id: string, officer: OfficerAssignment) => {
       const now = new Date().toISOString()
+      const officerName = officer.name
+      const officerEmail = officer.email.trim().toLowerCase()
       updateCase(id, (c) => {
         if (c.stage === 'closed') return c
         return {
         ...c,
         stage: 'assigned',
         assignedOfficer: officerName,
+        assignedOfficerEmail: officerEmail,
         decisions: [...c.decisions, { action: `Assigned to ${officerName}`, by: STAFF_NAME, at: now }],
         audit: [
           ...c.audit,
@@ -449,6 +473,7 @@ export function WorkflowProvider({
     role: state.role,
     setRole,
     userEmail,
+    allowedRoles,
     canSwitchRole,
     submitComplaint,
     ingestResidentCase,

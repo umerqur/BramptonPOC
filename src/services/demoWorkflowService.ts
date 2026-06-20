@@ -613,6 +613,7 @@ export function runWorkflow(
     draft,
     priorityOverride: null,
     assignedOfficer: null,
+    assignedOfficerEmail: null,
     fieldAction: null,
     decisions: [],
     audit,
@@ -752,6 +753,7 @@ export function buildSeedCases(): DemoCase[] {
   const closed = runWorkflowAt(SEED_CLOSED_INPUT, daysAgo(2))
   if (closed.draft) {
     const officerName = DEMO_OFFICER.name
+    const officerEmail = DEMO_OFFICER.email
     const assignedAt = addSeconds(closed.createdAt, 200)
     const visitedAt = addSeconds(closed.createdAt, 480)
     const fieldAction: OfficerFieldAction = {
@@ -772,6 +774,7 @@ export function buildSeedCases(): DemoCase[] {
     // states what the officer actually found.
     const draft = buildClosureDraft(closed.input, closed.triage, closed.context, approvedAt, fieldAction)
     closed.assignedOfficer = officerName
+    closed.assignedOfficerEmail = officerEmail
     closed.fieldAction = fieldAction
     closed.draft = draft
     closed.stage = 'closed'

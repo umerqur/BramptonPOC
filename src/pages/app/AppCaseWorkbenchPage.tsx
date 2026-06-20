@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
-import { can, rolesAllowed, DEMO_OFFICER } from '../../lib/roles'
+import { can, rolesAllowed, officerProfiles } from '../../lib/roles'
 import { FIELD_OUTCOME_LABELS, formatDate, formatDateTime } from '../../services/demoWorkflowService'
-import { isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
+import { getResidentRequestAttachmentsForCases, isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
+import { computeResidentPriority, normalizeTier } from '../../services/workQueue'
+import DecisionLogicPanel, { type DecisionLogicData } from '../../components/app/DecisionLogicPanel'
 import {
   AutomationBadge,
   CaseSwitcher,
@@ -23,12 +25,39 @@ import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWork
 
 const PRIORITIES: Priority[] = ['P1', 'P2', 'P3', 'P4']
 
+/** Whole days since an ISO timestamp (0 when missing/unparseable). */
+function daysSince(iso: string | null): number {
+  if (!iso) return 0
+  const ms = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(ms)) return 0
+  return Math.max(0, Math.floor(ms / 86_400_000))
+}
+
 export default function AppCaseWorkbenchPage() {
   const { cases, activeCase, setActiveCase, approveRouting, requestMoreInfo, overridePriority, sendToStaffReview, role } =
     useWorkflow()
   const c = useDemoCase()
   const navigate = useNavigate()
   const [flash, setFlash] = useState<string | null>(null)
+
+  // Resident evidence count — feeds the deterministic decision-logic breakdown so
+  // the workbench shows the same rules-based score as the Work Queue row.
+  const [residentAttachmentCount, setResidentAttachmentCount] = useState<number | null>(null)
+  const caseId = c?.id ?? null
+  const sourceKind = c?.source.kind ?? null
+  useEffect(() => {
+    if (!caseId || sourceKind !== 'resident') {
+      setResidentAttachmentCount(null)
+      return
+    }
+    let active = true
+    getResidentRequestAttachmentsForCases([caseId])
+      .then((atts) => active && setResidentAttachmentCount(atts.length))
+      .catch(() => active && setResidentAttachmentCount(0))
+    return () => {
+      active = false
+    }
+  }, [caseId, sourceKind])
 
   // The Case Workbench is a supervisor/coordinator surface. Officers work from
   // their Officer Field Console instead.
@@ -52,6 +81,43 @@ export default function AppCaseWorkbenchPage() {
   const isClosed = c.stage === 'closed'
   const nyc = c.source.kind === 'nyc_open' ? c.source.nyc : undefined
   const isBenchmark = c.source.kind === 'nyc_open'
+
+  // Rules-based decision logic for this case. NYC open benchmark cases carry a
+  // precomputed queue score (no exposed component weights), so we show the
+  // available source fields; resident intakes are fully decomposable.
+  const decisionLogic: DecisionLogicData = nyc
+    ? {
+        score: nyc.priorityScore,
+        tier: normalizeTier(nyc.priorityTier),
+        reason: nyc.priorityReason,
+        sourceFields: [
+          { label: 'Priority score', value: nyc.priorityScore == null ? '—' : nyc.priorityScore.toFixed(0) },
+          { label: 'Priority tier', value: nyc.priorityTier ?? '—' },
+          { label: 'Complaint type', value: nyc.complaintType ?? '—' },
+          { label: 'Age in queue', value: nyc.ageDays == null ? '—' : `${nyc.ageDays} day${nyc.ageDays === 1 ? '' : 's'}` },
+          { label: 'Due date', value: nyc.dueDate ? formatDate(nyc.dueDate) : '—' },
+          {
+            label: 'Borough / district',
+            value:
+              [nyc.borough, nyc.councilDistrict ? `District ${Number(nyc.councilDistrict)}` : null]
+                .filter(Boolean)
+                .join(' · ') || '—',
+          },
+        ],
+      }
+    : (() => {
+        const readyForClosure = Boolean(c.fieldAction) && c.stage !== 'closed'
+        const inProgress = Boolean(c.assignedOfficer) && !readyForClosure && c.stage !== 'closed'
+        const r = computeResidentPriority({
+          priority: c.triage.recommendedPriority,
+          category: c.triage.category,
+          ageDays: daysSince(c.normalized.submitted_at ?? c.createdAt),
+          attachmentCount: residentAttachmentCount ?? 0,
+          readyForClosure,
+          inProgress,
+        })
+        return { score: r.score, tier: r.tier, reason: r.reason, components: r.components }
+      })()
 
   function note(msg: string) {
     setFlash(msg)
@@ -205,6 +271,8 @@ export default function AppCaseWorkbenchPage() {
         {/* Right: confidence gate + staff actions */}
         <div className="space-y-6">
           {nyc && <NycReviewPriorityPanel nyc={nyc} />}
+
+          <DecisionLogicPanel data={decisionLogic} />
 
           <Panel title="AI review readiness" subtitle="AI assisted file readiness, staff confirm and decide">
             <ConfidenceMeter value={c.triage.confidence} level={c.triage.confidenceLevel} />
@@ -364,13 +432,19 @@ export default function AppCaseWorkbenchPage() {
 }
 
 // Officer field-investigation panel — the real-world step between triage and
-// closure. The supervisor/CSR assigns the case to the single demo By-law Officer
-// (Officer Oakley); the officer records the actual on-site outcome from their
-// own Officer Field Console. The supervisor never records a field outcome here.
+// closure. The supervisor/CSR assigns the case to an assignable By-law Officer
+// profile (for now only Officer Oakley); assignment is tied to that officer's
+// login email. The officer records the actual on-site outcome from their own
+// Officer Field Console. The supervisor never records a field outcome here.
 function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnly?: boolean }) {
   const { role, assignToOfficer } = useWorkflow()
   const canAssign = !readOnly && can(role, 'assignOfficer')
   const assigned = Boolean(c.assignedOfficer)
+
+  // Assignable officers come from the staff profile list (officer-role profiles).
+  const officers = officerProfiles()
+  const [selectedEmail, setSelectedEmail] = useState(officers[0]?.email ?? '')
+  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? officers[0] ?? null
 
   const [flash, setFlash] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -389,9 +463,11 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
   }
 
   async function handleAssign() {
+    if (!selectedOfficer) return
     setBusy(true)
-    // One demo officer: always Officer Oakley. No invented officer identities.
-    assignToOfficer(c.id, DEMO_OFFICER.name)
+    // Assign to a real officer profile (name + login email) — never an invented
+    // officer identity. The assignment is tied to the officer's email.
+    assignToOfficer(c.id, { name: selectedOfficer.name, email: selectedOfficer.email })
     const suffix = await emailResident({
       type: 'status_update',
       status: 'assigned',
@@ -401,7 +477,7 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
       requestType: c.triage.category,
       location: c.input.location,
     })
-    setFlash(`Assigned to ${DEMO_OFFICER.name}.${suffix}`)
+    setFlash(`Assigned to ${selectedOfficer.name}.${suffix}`)
     setBusy(false)
   }
 
@@ -444,21 +520,41 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
 
   return (
     <Panel title="Field investigation" subtitle="Supervisor assigns; the officer records the on-site outcome">
-      <dl className="space-y-1.5 text-sm">
-        <Row label="Assigned officer" value={DEMO_OFFICER.name} />
-      </dl>
-
       {assigned ? (
-        <p className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
-          Assigned to {DEMO_OFFICER.name}. Officer can record the field outcome from the Officer Field Console.
-        </p>
+        <>
+          <dl className="space-y-1.5 text-sm">
+            <Row label="Assigned officer" value={c.assignedOfficer ?? '—'} />
+          </dl>
+          <p className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+            Assigned to {c.assignedOfficer}. The officer can record the field outcome from their Officer Field Console.
+          </p>
+        </>
       ) : canAssign ? (
-        <div className="mt-3">
-          <button onClick={handleAssign} disabled={busy} className="btn-primary text-sm disabled:opacity-60">
-            {busy ? 'Assigning…' : `Assign to ${DEMO_OFFICER.name}`}
+        <div>
+          <label className="block text-sm">
+            <span className="stat-label">Assign to officer</span>
+            <select
+              value={selectedEmail}
+              onChange={(e) => setSelectedEmail(e.target.value)}
+              disabled={busy || officers.length <= 1}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+            >
+              {officers.map((o) => (
+                <option key={o.email} value={o.email}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={handleAssign}
+            disabled={busy || !selectedOfficer}
+            className="btn-primary mt-3 text-sm disabled:opacity-60"
+          >
+            {busy ? 'Assigning…' : `Assign to ${selectedOfficer?.name ?? 'officer'}`}
           </button>
           <p className="mt-2 text-[11px] text-ink-subtle">
-            The supervisor assigns the case; {DEMO_OFFICER.name} records the field outcome from the Officer Field
+            The supervisor assigns the case; the assigned officer records the field outcome from their Officer Field
             Console. Supervisors do not record field outcomes here.
           </p>
         </div>
