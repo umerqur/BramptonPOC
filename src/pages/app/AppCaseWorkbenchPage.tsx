@@ -16,6 +16,7 @@ import {
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import SimilarHistoricalCasesCard from '../../components/app/SimilarHistoricalCasesCard'
 import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
@@ -266,6 +267,8 @@ export default function AppCaseWorkbenchPage() {
               </ul>
             </Sub>
           </Panel>
+
+          <SimilarHistoricalCasesCard c={c} />
         </div>
 
         {/* Right: confidence gate + staff actions */}
