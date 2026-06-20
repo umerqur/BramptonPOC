@@ -13,7 +13,7 @@
 // the resident through the server-side Netlify email function, and passes the
 // delivery result into approveClosure so the audit trail records what happened.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
   DemoCase,
@@ -36,9 +36,9 @@ import { openRowToCase } from '../services/openCaseBridge'
 import type { ResidentRequestRow } from '../services/residentRequests'
 import type { OpenReviewRow } from '../services/caseExplorer'
 import {
-  ROLE_ACTOR_NAME,
   allowedRolesForEmail,
   canUseRole,
+  currentActorName,
   defaultRoleForEmail,
   type StaffProfile,
   type StaffRole,
@@ -48,7 +48,6 @@ import {
 // (unified resident intake + NYC open benchmark lifecycle), so older persisted
 // cases without those fields are reseeded rather than rendered half-populated.
 const STORAGE_KEY = 'brampton-demo-workflow-v3'
-const STAFF_NAME = 'M. Okafor (By-law Officer)'
 
 /**
  * What an officer enters when recording a field investigation. This mirrors the
@@ -160,6 +159,15 @@ export function WorkflowProvider({
   const allowedRoles = useMemo(() => allowedRolesForEmail(userEmail), [userEmail])
   const canSwitchRole = allowedRoles.length > 1
 
+  // The display name the signed-in user records actions under, in their CURRENT
+  // role — their own role identity (e.g. "Supervisor Mann", "Officer Qureshi"),
+  // never another person's. Recorded on decisions, assignments, and approvals.
+  const actingName = useMemo(() => currentActorName(userEmail, state.role), [userEmail, state.role])
+  // Kept in a ref so the stable action callbacks below always record under the
+  // CURRENT acting identity without needing to be re-created on every role change.
+  const actingNameRef = useRef(actingName)
+  actingNameRef.current = actingName
+
   // Keep the active role inside the profile's allowed set. If the persisted role
   // is not allowed for this email (e.g. a stale 'officer' from a previous
   // session, or a supervisor whose profile never allows officer), snap back to
@@ -259,7 +267,7 @@ export function WorkflowProvider({
         if (c.stage === 'closed') return c
         return {
         ...c,
-        decisions: [...c.decisions, { action: 'Approved AI routing', by: STAFF_NAME, at: now }],
+        decisions: [...c.decisions, { action: 'Approved AI routing', by: actingNameRef.current, at: now }],
         audit: [...c.audit, auditEvent('staff', 'Routing approved', `Staff confirmed the ${c.triage.category} classification and routing to ${c.triage.recommendedDepartment}.`, now)],
         }
       })
@@ -275,7 +283,7 @@ export function WorkflowProvider({
         return {
         ...c,
         stage: 'needs-staff-attention',
-        decisions: [...c.decisions, { action: 'Requested more information', by: STAFF_NAME, at: now, note }],
+        decisions: [...c.decisions, { action: 'Requested more information', by: actingNameRef.current, at: now, note }],
         audit: [...c.audit, auditEvent('staff', 'More information requested', note || 'Staff requested additional details from the resident before closure.', now)],
         }
       })
@@ -291,7 +299,7 @@ export function WorkflowProvider({
         return {
         ...c,
         priorityOverride: priority,
-        decisions: [...c.decisions, { action: `Overrode priority to ${priority}`, by: STAFF_NAME, at: now }],
+        decisions: [...c.decisions, { action: `Overrode priority to ${priority}`, by: actingNameRef.current, at: now }],
         audit: [...c.audit, auditEvent('staff', 'Priority overridden', `Staff changed priority from ${c.triage.recommendedPriority} to ${priority}.`, now)],
         }
       })
@@ -314,7 +322,7 @@ export function WorkflowProvider({
         stage: 'assigned',
         assignedOfficer: officerName,
         assignedOfficerEmail: officerEmail,
-        decisions: [...c.decisions, { action: `Assigned to ${officerName}`, by: STAFF_NAME, at: now }],
+        decisions: [...c.decisions, { action: `Assigned to ${officerName}`, by: actingNameRef.current, at: now }],
         audit: [
           ...c.audit,
           auditEvent('staff', 'Assigned to officer', `Case assigned to ${officerName} for a field investigation.`, now),
@@ -332,7 +340,7 @@ export function WorkflowProvider({
       const now = new Date().toISOString()
       updateCase(id, (c) => {
         if (c.stage === 'closed') return c
-        const officerName = c.assignedOfficer ?? ROLE_ACTOR_NAME.officer
+        const officerName = c.assignedOfficer ?? actingNameRef.current
         const observedCondition = input.observedCondition.trim()
         const actionTaken = input.actionTaken.trim()
         const officerNotes = input.officerNotes?.trim() ?? ''
@@ -389,7 +397,7 @@ export function WorkflowProvider({
           ...c,
           stage: 'staff-review',
           draft,
-          decisions: [...c.decisions, { action: 'Sent to staff review', by: STAFF_NAME, at: now }],
+          decisions: [...c.decisions, { action: 'Sent to staff review', by: actingNameRef.current, at: now }],
           audit,
         }
       })
@@ -438,12 +446,12 @@ export function WorkflowProvider({
           ...c,
           stage: 'closed',
           closureMessage: c.draft.body,
-          approvedBy: STAFF_NAME,
+          approvedBy: actingNameRef.current,
           approvedAt: now,
-          decisions: [...c.decisions, { action: 'Approved closure response', by: STAFF_NAME, at: now }],
+          decisions: [...c.decisions, { action: 'Approved closure response', by: actingNameRef.current, at: now }],
           audit: [
             ...c.audit,
-            auditEvent('staff', 'Closure approved', `Final closure response approved by ${STAFF_NAME}.`, now),
+            auditEvent('staff', 'Closure approved', `Final closure response approved by ${actingNameRef.current}.`, now),
             residentAudit,
             auditEvent('system', 'Case closed', 'Case status changed to Closed and logged in the audit trail.', now),
           ],
@@ -469,7 +477,7 @@ export function WorkflowProvider({
     cases: state.cases,
     activeCase,
     metrics,
-    staffName: STAFF_NAME,
+    staffName: actingName,
     role: state.role,
     setRole,
     userEmail,

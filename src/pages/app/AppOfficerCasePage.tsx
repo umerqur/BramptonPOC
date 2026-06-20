@@ -4,6 +4,7 @@ import { useWorkflow, type FieldActionInput } from '../../lib/workflowStore'
 import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import OfficerCaseAssistant from '../../components/app/OfficerCaseAssistant'
 import type { DemoCase } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
@@ -193,9 +194,21 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
           />
         </div>
 
-        {/* Right: assignment + secondary, collapsed decision support. Operational
-            first — governance/disclaimer detail stays out of the officer's way. */}
+        {/* Right: the Officer Assistant (case-grounded guidance) plus assignment
+            and secondary, collapsed decision support. The officer surface is
+            intentionally workflow-driven — assistant + field-outcome form. */}
         <div className="space-y-6">
+          <OfficerCaseAssistant
+            ctx={{
+              caseId: row.case_id,
+              category: support?.triage.category ?? 'Property Standards',
+              complaintType: row.request_type,
+              location: [row.location, row.city, row.province].filter(Boolean).join(', '),
+              description: row.description ?? '',
+              assignedOfficer: row.assigned_officer_name ?? null,
+            }}
+          />
+
           {row.assigned_officer_name && (
             <Panel title="Assignment">
               <dl className="space-y-2">
@@ -497,6 +510,17 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
         </div>
 
         <div className="space-y-6">
+          <OfficerCaseAssistant
+            ctx={{
+              caseId: c.id,
+              category: c.triage.category,
+              complaintType,
+              location: c.input.location,
+              description: c.input.description,
+              assignedOfficer: c.assignedOfficer,
+            }}
+          />
+
           <details className="card p-5">
             <summary className="cursor-pointer select-none text-sm font-semibold text-navy-900">
               Decision support summary

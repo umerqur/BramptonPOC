@@ -446,37 +446,46 @@ function closureOutcomeParagraph(
   const action = plainAction(fieldAction.actionTaken)
   const recordedActionSentence = action ? ` The officer's recorded action was: ${action}.` : ''
 
+  // Friendly, forward-looking invitation to re-engage 311 with the case number —
+  // appended to every grounded outcome so the resident always has a clear path
+  // back if the issue returns or new information comes up.
+  const inviteBack =
+    ` If the issue continues or returns, please contact 311 with your case number so the City can review the matter again.`
+
   switch (fieldAction.outcome) {
     case 'no_violation':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} to investigate. ` +
-        `At the time of inspection, no violation of ${policy} was observed. ` +
-        `Based on that inspection, this file has been closed.${recordedActionSentence} ` +
-        `If the issue recurs, please submit a new request so we can schedule a follow-up.`
+        `At the time of inspection, no violation of ${policy} was observed, so no further action was required and this file has been closed.${recordedActionSentence}` +
+        inviteBack
       )
     case 'warning_education':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and ` +
         `${fieldAction.violationObserved === 'yes' ? `observed a concern related to ${policy}` : `reviewed the reported concern`}. ` +
-        `The officer addressed the matter by providing education or a warning to the responsible party rather than issuing a ticket.` +
-        `${recordedActionSentence} Your service request has been closed.`
+        `The officer addressed the matter by providing education or a warning to the responsible party. ` +
+        `No ticket was recorded on this file.${recordedActionSentence} Your service request has been closed.` +
+        inviteBack
       )
     case 'notice_issued':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
         `A notice to comply${ref} was issued to the responsible party, and the location will be re-inspected after the compliance period.` +
-        `${recordedActionSentence} Your service request has been closed now that this action has been taken.`
+        `${recordedActionSentence} Your service request has been closed now that this action has been taken.` +
+        inviteBack
       )
     case 'ticket_issued':
       return (
         `A by-law enforcement officer attended the location${where} on ${date}, observed a violation of ${policy}, ` +
-        `and issued a ticket${ref} to the responsible party. This file has now been closed.${recordedActionSentence}`
+        `and issued a ticket${ref} to the responsible party. This file has now been closed.${recordedActionSentence}` +
+        inviteBack
       )
     case 'resolved':
       return (
         `A by-law enforcement officer attended the location${where} on ${date}. ` +
-        `The issue had been resolved, so no further enforcement action under ${policy} was required and this file has been closed.` +
-        `${recordedActionSentence} Thank you for reporting it.`
+        `The issue had already been resolved, so no further enforcement action under ${policy} was required and this file has been closed.` +
+        `${recordedActionSentence} Thank you for reporting it.` +
+        inviteBack
       )
   }
 }
