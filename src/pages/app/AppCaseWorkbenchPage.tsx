@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
-import { can, rolesAllowed, officerProfiles } from '../../lib/roles'
+import { can, rolesAllowed, officerProfiles, officerDisplayName } from '../../lib/roles'
 import { FIELD_OUTCOME_LABELS, formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { getResidentRequestAttachmentsForCases, isSendableEmail, sendResidentEmail } from '../../services/residentRequests'
 import { computeResidentPriority, normalizeTier } from '../../services/workQueue'
@@ -465,9 +465,10 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
   async function handleAssign() {
     if (!selectedOfficer) return
     setBusy(true)
-    // Assign to a real officer profile (name + login email) — never an invented
-    // officer identity. The assignment is tied to the officer's email.
-    assignToOfficer(c.id, { name: selectedOfficer.name, email: selectedOfficer.email })
+    // Assign to a real officer profile (officer display name + login email) —
+    // never an invented identity. The assignment is tied to the officer's email,
+    // so only that signed-in officer can record the field outcome.
+    assignToOfficer(c.id, { name: officerDisplayName(selectedOfficer), email: selectedOfficer.email })
     const suffix = await emailResident({
       type: 'status_update',
       status: 'assigned',
@@ -477,7 +478,7 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
       requestType: c.triage.category,
       location: c.input.location,
     })
-    setFlash(`Assigned to ${selectedOfficer.name}.${suffix}`)
+    setFlash(`Assigned to ${officerDisplayName(selectedOfficer)}.${suffix}`)
     setBusy(false)
   }
 
@@ -541,7 +542,7 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
             >
               {officers.map((o) => (
                 <option key={o.email} value={o.email}>
-                  {o.name}
+                  {officerDisplayName(o)}
                 </option>
               ))}
             </select>
@@ -551,7 +552,7 @@ function FieldInvestigationPanel({ c, readOnly = false }: { c: DemoCase; readOnl
             disabled={busy || !selectedOfficer}
             className="btn-primary mt-3 text-sm disabled:opacity-60"
           >
-            {busy ? 'Assigning…' : `Assign to ${selectedOfficer?.name ?? 'officer'}`}
+            {busy ? 'Assigning…' : `Assign to ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
           </button>
           <p className="mt-2 text-[11px] text-ink-subtle">
             The supervisor assigns the case; the assigned officer records the field outcome from their Officer Field

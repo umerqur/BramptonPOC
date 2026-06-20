@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
-import { can, DEMO_OFFICER } from '../../lib/roles'
+import { can, officerProfiles, officerDisplayName, type StaffProfile } from '../../lib/roles'
 import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
 import { formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
@@ -165,12 +165,16 @@ export default function AppStaffInboxPage() {
     navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
   }
 
-  // Supervisor/coordinator action: explicit human assignment to the By-law
-  // Officer (never automated).
-  async function assignToOfficer(row: ResidentRequestRow) {
+  // Supervisor/CSR action: explicit human assignment to a chosen By-law Officer
+  // profile (never automated). Stores the officer display name + login email, so
+  // only that signed-in officer can record the field outcome (assigned_officer_email).
+  async function assignToOfficer(row: ResidentRequestRow, officer: StaffProfile) {
     setAssigningId(row.case_id)
     try {
-      await assignResidentRequestToOfficer(row.case_id, { name: DEMO_OFFICER.name, email: DEMO_OFFICER.email })
+      await assignResidentRequestToOfficer(row.case_id, {
+        name: officerDisplayName(officer),
+        email: officer.email,
+      })
       load()
     } catch (err) {
       console.error('Failed to assign case to officer:', err)
@@ -524,7 +528,7 @@ function ResidentIntakesView({
   attachmentsByCase: Record<string, ResidentRequestAttachment[]>
   canAssign: boolean
   assigningId: string | null
-  onAssign: (row: ResidentRequestRow) => void
+  onAssign: (row: ResidentRequestRow, officer: StaffProfile) => void
   onOpen: (row: ResidentRequestRow) => void
   onOpenClosureReview: (row: ResidentRequestRow) => void
 }) {
@@ -551,7 +555,7 @@ function ResidentIntakesView({
             attachments={attachmentsByCase[row.case_id] ?? []}
             canAssign={canAssign}
             assigning={assigningId === row.case_id}
-            onAssign={() => onAssign(row)}
+            onAssign={(officer) => onAssign(row, officer)}
             onOpen={() => onOpen(row)}
             onOpenClosureReview={() => onOpenClosureReview(row)}
           />
@@ -615,7 +619,7 @@ function InboxCard({
   attachments: ResidentRequestAttachment[]
   canAssign: boolean
   assigning: boolean
-  onAssign: () => void
+  onAssign: (officer: StaffProfile) => void
   onOpen: () => void
   onOpenClosureReview: () => void
 }) {
@@ -669,7 +673,7 @@ function InboxCard({
               </span>
             </div>
             <p className="mt-1 text-sm text-ink">
-              Field outcome recorded by {row.assigned_officer_name ?? 'Officer Oakley'}.
+              Field outcome recorded by {row.assigned_officer_name ?? 'the assigned officer'}.
             </p>
           </div>
           <button onClick={onOpenClosureReview} className="btn-primary text-sm py-2 px-4">
@@ -766,10 +770,15 @@ function AssignmentPanel({
   row: ResidentRequestRow
   canAssign: boolean
   assigning: boolean
-  onAssign: () => void
+  onAssign: (officer: StaffProfile) => void
   routingRecommendation: string
 }) {
   const assigned = Boolean(row.assigned_officer_name)
+  // The assignable By-law Officers (Officer Qureshi, Officer Mann, Officer Ahmed,
+  // Officer Oakley). Assignment stores the chosen officer's login email.
+  const officers = officerProfiles()
+  const [selectedEmail, setSelectedEmail] = useState(officers[0]?.email ?? '')
+  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? officers[0] ?? null
 
   if (assigned) {
     return (
@@ -779,7 +788,7 @@ function AssignmentPanel({
           <span className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Assignment</span>
         </div>
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'Officer Oakley'} />
+          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'the assigned officer'} />
           <Detail label="Role" value="Bylaw Officer" />
           <Detail label="Status" value="Assigned for field review" />
           <Detail label="Next step" value="Officer records field outcome" />
@@ -805,9 +814,26 @@ function AssignmentPanel({
         Routing recommendation does not dispatch an officer automatically.
       </p>
       {canAssign && row.status !== 'closed' && (
-        <div className="mt-3">
-          <button onClick={onAssign} disabled={assigning} className="btn-primary text-sm py-2 px-4 disabled:opacity-60">
-            {assigning ? 'Assigning…' : 'Assign to Bylaw Officer'}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <select
+            value={selectedEmail}
+            onChange={(e) => setSelectedEmail(e.target.value)}
+            disabled={assigning}
+            aria-label="Select By-law Officer"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+          >
+            {officers.map((o) => (
+              <option key={o.email} value={o.email}>
+                {officerDisplayName(o)}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => selectedOfficer && onAssign(selectedOfficer)}
+            disabled={assigning || !selectedOfficer}
+            className="btn-primary text-sm py-2 px-4 disabled:opacity-60"
+          >
+            {assigning ? 'Assigning…' : `Assign to ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
           </button>
         </div>
       )}
