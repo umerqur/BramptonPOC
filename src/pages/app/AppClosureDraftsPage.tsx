@@ -17,6 +17,7 @@ import {
   NoCaseState,
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
+import { ProvenanceStrip } from '../../components/app/ProvenanceLabels'
 import type { DemoCase } from '../../data/demoWorkflowTypes'
 
 // Closure Drafts — the staff review page. The system assembled a policy-aligned
@@ -149,6 +150,15 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
         <span className="text-xs text-ink-subtle">
           Assembled from approved templates and the recorded case facts. Staff review, edit, and approve.
         </span>
+      </div>
+
+      <div className="mt-4">
+        <ProvenanceStrip />
+      </div>
+
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-700">
+        <span className="font-semibold">AI assisted retrieval is reference only.</span> Similar case retrieval may
+        support staff review, but the resident closure message remains rules based and supervisor approved.
       </div>
 
       {c.source.kind === 'nyc_open' && (
