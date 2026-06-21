@@ -1092,14 +1092,54 @@ function DistrictLeaderboard({ rows, onExplore }: { rows: AreaBottleneck[]; onEx
 
 // --- Department / agency workload ------------------------------------------
 
+// Department workload is a part-to-whole composition: which department owns what
+// share of the total service request workload. A donut reads that share directly,
+// where a leaderboard only ranks. Up to 12 departments, so an extended palette
+// keeps neighbouring slices visually distinct.
+const DEPARTMENT_PALETTE = [
+  '#2563eb', '#0ea5e9', '#7c3aed', '#f59e0b', '#10b981', '#ef4444',
+  '#6366f1', '#14b8a6', '#db2777', '#84cc16', '#f97316', '#64748b',
+]
+
 function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<InsightsDepartmentWorkload[]>(() => getInsightsDepartmentWorkload(12))
-  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
+  const [view, setView] = useState<'donut' | 'table'>('donut')
+  const slices = useMemo<Slice[]>(
+    () =>
+      (data ?? []).map((row, i) => ({
+        label: row.department,
+        value: row.total_cases,
+        color: DEPARTMENT_PALETTE[i % DEPARTMENT_PALETTE.length],
+        onClick: () => onExplore({ agency: row.department }),
+      })),
+    [data, onExplore],
+  )
   return (
-    <SectionShell name="department / agency workload" title="Department / agency workload" subtitle="Which agencies carry the largest case volumes in the benchmark data." loading={loading} error={error} empty={data?.length === 0}
-      action={data && data.length > 0 ? <ViewToggle view={view} onChange={setView} /> : undefined}
+    <SectionShell
+      name="department workload share"
+      title="Department workload share"
+      subtitle="Share of total service request workload by department or agency. Select a slice to review matching cases."
+      loading={loading}
+      error={error}
+      empty={data?.length === 0}
+      action={
+        data && data.length > 0 ? (
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+            {(['donut', 'table'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={`rounded-md px-2.5 py-1 capitalize transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+              >
+                {v === 'donut' ? 'Donut' : 'Table'}
+              </button>
+            ))}
+          </div>
+        ) : undefined
+      }
     >
-      {data && view === 'leaderboard' && <DepartmentLeaderboard rows={data} onExplore={onExplore} />}
+      {data && view === 'donut' && <Donut slices={slices} showCounts />}
       {data && view === 'table' && (
         <Table
           head={['Department / agency', 'Total', 'Open', 'Closed', 'Avg closure']}
@@ -1112,41 +1152,6 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
         />
       )}
     </SectionShell>
-  )
-}
-
-/** Horizontal-bar leaderboard of agencies by case volume (default view). */
-function DepartmentLeaderboard({ rows, onExplore }: { rows: InsightsDepartmentWorkload[]; onExplore: (f: CaseExplorerFilters) => void }) {
-  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
-  return (
-    <ul className="space-y-2">
-      {rows.map((row, i) => (
-        <li key={row.department}>
-          <button
-            type="button"
-            onClick={() => onExplore({ agency: row.department })}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
-                <span className="truncate text-sm font-medium text-navy-900">{row.department}</span>
-              </div>
-              <div className="flex shrink-0 items-center gap-4 text-[11px] tabular-nums text-ink-subtle">
-                <span><span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases</span>
-                <span>Avg closure <span className="font-semibold text-ink">{fmtDays(row.avg_closure_days)}</span></span>
-              </div>
-            </div>
-            <div className="mt-2">
-              <MetricBar label="Volume" pct={Math.round((row.total_cases / maxVolume) * 100)} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
-            </div>
-            <p className="mt-1 text-[11px] text-ink-subtle">
-              Open {fmtInt(row.open_cases)} · Closed {fmtInt(row.closed_cases)}
-            </p>
-          </button>
-        </li>
-      ))}
-    </ul>
   )
 }
 
