@@ -320,7 +320,7 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
       <ClosureBottlenecks onExplore={onExplore} />
       {/* District workload (leaderboard) and department workload share (donut)
           sit side by side on desktop, and stack vertically on mobile. */}
-      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
         <AreaBottlenecks onExplore={onExplore} />
         <DepartmentWorkload onExplore={onExplore} />
       </div>
