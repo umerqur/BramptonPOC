@@ -634,16 +634,11 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
         </div>
 
         <div className="space-y-6">
-          <OfficerCaseAssistant
-            ctx={{
-              caseId: c.id,
-              category: c.triage.category,
-              complaintType,
-              location: c.input.location,
-              description: c.input.description,
-              assignedOfficer: c.assignedOfficer,
-            }}
-          />
+          <Panel title="Case assistant">
+            <p className="text-sm text-ink-subtle">
+              Assistant support is available for assigned resident cases. Benchmark source cases use the structured case details and field outcome form only.
+            </p>
+          </Panel>
 
           <details className="card p-5">
             <summary className="cursor-pointer select-none text-sm font-semibold text-navy-900">
