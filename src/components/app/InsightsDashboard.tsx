@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWorkflow } from '../../lib/workflowStore'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
   getInsightsKpis,
@@ -331,39 +330,29 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
 // --- Operational snapshot --------------------------------------------------
 
 /**
- * Operational snapshot — six KPI cards, each with a current value, a benchmark
- * or target, a plain-language direction/status badge, and a helper line. Below
- * the cards sits a small benchmark-context strip with the historical NYC 311
- * reference figures in plain operational language (no statistical jargon).
- *
- * Live open-queue figures come from v_nyc_open_review_queue; the workflow
- * throughput figures (readiness, drafts, time saved, approved closures) come
- * from the in-app workflow store; the historical benchmark comes from
- * v_insights_kpis.
+ * Operational snapshot — six KPI cards that summarize the live analytics shown
+ * below. Grounded only in live aggregate services (no synthetic workflow-store
+ * figures): the open review queue (v_nyc_open_review_queue) and the closed NYC
+ * 311 benchmark (v_insights_kpis, v_insights_closure_bottlenecks).
  */
 function OperationalSnapshot() {
   const hist = useLive<InsightsKpis>(getInsightsKpis)
   const open = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
-  const { metrics, cases } = useWorkflow()
+  const slow = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(1))
 
-  const high = open.data?.highPriority ?? null
+  const k = hist.data
+  const slowRow = slow.data?.[0] ?? null
 
-  // Share of AI-summarized files that reached high review readiness (enough
-  // context to prepare a closure draft). AI assists readiness; staff still decide.
-  const readinessPct =
-    metrics.aiSummariesGenerated > 0
-      ? Math.round((metrics.closureDraftsPrepared / metrics.aiSummariesGenerated) * 100)
-      : null
-  // Assigned to an officer but no field outcome recorded yet — work stuck waiting
-  // on a field inspection.
-  const fieldPending = cases.filter((c) => c.assignedOfficer && !c.fieldAction && c.stage !== 'closed').length
-  // Closure drafts in staff-review (plus approved-awaiting-close) — work stuck
-  // waiting on a supervisor approval decision.
-  const approvalsPending = cases.filter((c) => c.stage === 'staff-review' || c.stage === 'approved').length
+  // Each value cell degrades to "…" while loading and "—" on error or null.
+  const fromOpen = (n: number | null | undefined) =>
+    open.loading ? '…' : open.error || n == null ? '—' : fmtInt(n)
+  const fromHist = (s: string | null) => (hist.loading ? '…' : hist.error ? '—' : s ?? '—')
+  const fromSlow = (s: string | null) => (slow.loading ? '…' : slow.error ? '—' : s ?? '—')
 
-  // Open-queue value cells degrade to "—" with a clear note when not loaded.
-  const openValue = open.loading ? '…' : open.error ? '—' : fmtInt(open.data?.total ?? 0)
-  const highValue = open.loading ? '…' : open.error || high == null ? '—' : fmtInt(high)
+  const topPressure =
+    [k?.top_complaint_type, k?.busiest_council_district ? `District ${k.busiest_council_district}` : null]
+      .filter(Boolean)
+      .join(' · ') || null
 
   return (
     <section className="card p-5">
@@ -371,8 +360,8 @@ function OperationalSnapshot() {
         <div>
           <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
           <p className="mt-0.5 text-xs text-ink-subtle">
-            Where work is stuck across the enforcement response workflow — each KPI shows a value, a benchmark, and
-            whether it is on track.
+            A live summary of the workload analytics below — drawn only from the open review queue and closed NYC 311
+            benchmark records.
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
@@ -383,185 +372,72 @@ function OperationalSnapshot() {
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <KpiCard
           title="Open cases waiting"
-          value={openValue}
-          direction="lower"
-          status="neutral"
-          benchmark={open.error ? 'Open queue not loaded' : 'Monitor vs. last refresh or operational target'}
-          helper="Current backlog of open cases that may need review"
+          value={fromOpen(open.data?.total)}
+          helper="Current open case backlog in the review queue"
         />
         <KpiCard
           title="High priority cases"
-          value={highValue}
-          direction="lower"
-          status={high == null || open.error ? 'neutral' : high >= 20 ? 'attention' : high >= 15 ? 'watch' : 'good'}
-          benchmark="Target below 20"
-          helper="Urgent cases surfaced first for review"
-          note="Lower is better after staff action"
+          value={fromOpen(open.data?.highPriority)}
+          helper="Open cases currently surfaced for priority review"
         />
         <KpiCard
-          title="AI ready for staff review"
-          value={readinessPct == null ? '—' : `${readinessPct}%`}
-          direction="higher"
-          status={readinessPct == null ? 'neutral' : readinessPct >= 80 ? 'good' : readinessPct >= 60 ? 'watch' : 'attention'}
-          benchmark="Target 80% or higher"
-          helper="Files with enough context to prepare a closure draft"
+          title="Typical historical closure"
+          value={fromHist(k?.avg_closure_days == null ? null : `${k.avg_closure_days.toFixed(1)} d`)}
+          helper="Average closure time across closed benchmark records"
         />
         <KpiCard
-          title="Field investigation pending"
-          value={fmtInt(fieldPending)}
-          direction="lower"
-          status={fieldPending === 0 ? 'good' : 'neutral'}
-          benchmark="Target 0 pending overnight"
-          helper="Assigned cases waiting on officer outcome"
+          title="90% closed within"
+          value={fromHist(k?.p90_closure_days == null ? null : `${Math.round(k.p90_closure_days)} d`)}
+          helper="Long tail closure benchmark for closed records"
         />
         <KpiCard
-          title="Closure approvals pending"
-          value={fmtInt(approvalsPending)}
-          direction="lower"
-          status={approvalsPending === 0 ? 'good' : 'neutral'}
-          benchmark="Target 0 pending overnight"
-          helper="Drafts waiting for supervisor approval"
+          title="Top workload pressure"
+          value={fromHist(topPressure)}
+          valueClass="text-lg font-semibold leading-snug"
+          helper="Highest workload issue and district in the benchmark view"
         />
         <KpiCard
-          title="Estimated staff time saved"
-          value={`${fmtInt(metrics.manualResearchHoursAvoided)} hrs`}
-          direction="higher"
-          status="good"
-          benchmark="Compared with manual research and drafting baseline"
-          helper="Research and drafting effort avoided"
+          title="Slowest closure type"
+          value={fromSlow(slowRow?.complaint_type ?? null)}
+          valueClass="text-lg font-semibold leading-snug"
+          detail={slowRow?.avg_closure_days != null ? `Avg closure ${fmtDays(slowRow.avg_closure_days)}` : undefined}
+          helper="Complaint type with the longest average closure time"
         />
       </div>
 
-      <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        AI assists readiness, summaries, and drafting. Staff assign, inspect, approve, and close.
-      </p>
-
-      <BenchmarkContextStrip state={hist} />
+      {hist.data && (
+        <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+          Based on {fmtInt(hist.data.closed_requests)} closed NYC 311 benchmark records and the live open review queue.
+        </p>
+      )}
     </section>
   )
 }
 
-type KpiDirection = 'higher' | 'lower'
-// 'neutral' simply shows the orientation; 'good' is on-track; 'watch'/'attention'
-// flag a benchmark breach.
-type KpiStatus = 'neutral' | 'good' | 'watch' | 'attention'
-
-const KPI_BADGE: Record<KpiStatus, { className: string }> = {
-  neutral: { className: 'bg-slate-100 text-slate-600' },
-  good: { className: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200' },
-  watch: { className: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200' },
-  attention: { className: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200' },
-}
-
-/** Direction/status label: orientation by default, or Watch / Needs attention on a breach. */
-function kpiBadgeLabel(direction: KpiDirection, status: KpiStatus): string {
-  if (status === 'watch') return 'Watch'
-  if (status === 'attention') return 'Needs attention'
-  return direction === 'higher' ? 'Higher is better' : 'Lower is better'
-}
-
 /**
- * One KPI card: current value, benchmark/target, a plain-language direction or
- * status badge, and a helper line. No statistical jargon.
+ * One KPI card: a title, a live value, an optional secondary detail line, and a
+ * plain-language helper. Values come only from live aggregate services — no
+ * targets, benchmarks, or synthetic baselines.
  */
 function KpiCard({
   title,
   value,
-  benchmark,
   helper,
-  direction,
-  status,
-  note,
+  detail,
+  valueClass = 'text-3xl font-bold',
 }: {
   title: string
   value: string
-  benchmark: string
   helper: string
-  direction: KpiDirection
-  status: KpiStatus
-  note?: string
+  detail?: string
+  valueClass?: string
 }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${KPI_BADGE[status].className}`}
-        >
-          {kpiBadgeLabel(direction, status)}
-        </span>
-      </div>
-      <div className="mt-1.5 text-3xl font-bold tabular-nums text-navy-900">{value}</div>
-      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-muted">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-          className={`h-3 w-3 shrink-0 ${direction === 'higher' ? 'text-emerald-600' : 'text-sky-600'}`}
-        >
-          {direction === 'higher' ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M12 5v14M5 12l7 7 7-7" />}
-        </svg>
-        <span>Benchmark: {benchmark}</span>
-      </div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
+      <div className={`mt-1.5 tabular-nums text-navy-900 ${valueClass}`}>{value}</div>
+      {detail && <div className="mt-1 text-xs font-medium text-ink-muted">{detail}</div>}
       <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
-      {note && <p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">{note}</p>}
-    </div>
-  )
-}
-
-/**
- * Benchmark context strip — the historical NYC 311 reference figures in plain
- * operational language. Uses "Typical historical closure" instead of an average
- * label, and "90% closed within" instead of "P90".
- */
-function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
-  const { data, loading, error } = state
-  return (
-    <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Benchmark context</div>
-      {error ? (
-        <p className="mt-1 text-xs text-ink-subtle">Historical benchmark unavailable right now.</p>
-      ) : loading ? (
-        <p className="mt-1 text-xs text-ink-subtle">Loading historical benchmark…</p>
-      ) : data ? (
-        <>
-          <p className="mt-1 text-xs text-ink-muted">
-            {fmtInt(data.closed_requests)} closed public NYC 311 records used to compare workload patterns and closure
-            language.
-          </p>
-          <dl className="mt-2 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-3">
-            <BenchmarkItem
-              label="Typical historical closure"
-              value={data.avg_closure_days == null ? '—' : `${data.avg_closure_days.toFixed(1)} days`}
-            />
-            <BenchmarkItem
-              label="90% closed within"
-              value={data.p90_closure_days == null ? '—' : `${Math.round(data.p90_closure_days)} days`}
-            />
-            <BenchmarkItem
-              label="Top workload pressure"
-              value={
-                [data.top_complaint_type, data.busiest_council_district ? `District ${data.busiest_council_district}` : null]
-                  .filter(Boolean)
-                  .join(', ') || '—'
-              }
-            />
-          </dl>
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-function BenchmarkItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-navy-900">{value}</dd>
     </div>
   )
 }
