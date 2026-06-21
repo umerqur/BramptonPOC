@@ -42,6 +42,7 @@ import {
   type OpenStatusMixRow,
   type OpenQueueSummary,
 } from '../../services/caseExplorer'
+import { getNYCWorkloadByBorough, type NYCBoroughWorkload } from '../../services/municipalServiceRequests'
 
 // Insights — operational workload intelligence over the New York City 311 public
 // service request dataset. Three tabs: Overview (map, KPIs, charts), Case
@@ -50,7 +51,10 @@ import {
 // materialized view; the Case Explorer reads paginated, filtered rows — never the
 // full table. No fake placeholder values: a failed live read shows a clear error.
 
-type Tab = 'overview' | 'explorer' | 'open'
+type Tab = 'overview' | 'explorer' | 'open' | 'simulations'
+
+/** A geographic area selected on the workload map, for the bottleneck drilldown. */
+type SelectedArea = { mode: 'district' | 'borough'; value: string }
 
 // ---------------------------------------------------------------------------
 // Live-data hook (aggregates) — on failure expose a dev-friendly error.
@@ -109,6 +113,39 @@ const fmtPct = (value: number, total: number): string => {
   const pct = (value / total) * 100
   if (pct < 1) return '<1%'
   return `${pct.toFixed(pct < 10 ? 1 : 0)}%`
+}
+
+// --- Closure pressure classification (shared by leaderboard + scatter) -------
+//
+// Deterministic, explainable thresholds on historical closure times. Not a
+// prediction — just a plain-language label for how long closures take.
+type Pressure = 'normal' | 'watch' | 'critical'
+
+function closurePressure(p90: number | null, avg: number | null): Pressure {
+  const p = p90 ?? 0
+  const a = avg ?? 0
+  if (p >= 120 || a >= 60) return 'critical'
+  if (p >= 45 || a >= 30) return 'watch'
+  return 'normal'
+}
+
+const PRESSURE_META: Record<Pressure, { label: string; badge: string; bar: string; dot: string }> = {
+  normal: { label: 'Normal', badge: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200', bar: 'bg-emerald-400', dot: '#10b981' },
+  watch: { label: 'Watch', badge: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200', bar: 'bg-amber-400', dot: '#f59e0b' },
+  critical: { label: 'Critical', badge: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200', bar: 'bg-rose-500', dot: '#ef4444' },
+}
+
+/** A labelled horizontal bar (volume / duration) for the closure leaderboard. */
+function MetricBar({ label, pct, barClass, valueText }: { label: string; pct: number; barClass: string; valueText: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-32 shrink-0 text-[10px] uppercase tracking-wider text-ink-subtle">{label}</span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
+      </div>
+      <span className="w-16 shrink-0 text-right text-[10px] tabular-nums text-ink-subtle">{valueText}</span>
+    </div>
+  )
 }
 
 const PALETTE = ['#2563eb', '#0ea5e9', '#7c3aed', '#f59e0b', '#10b981', '#94a3b8']
@@ -173,6 +210,7 @@ export default function InsightsDashboard() {
       {tab === 'overview' && <Overview onExplore={explore} />}
       {tab === 'explorer' && <CaseExplorer filters={filters} onFiltersChange={setFilters} />}
       {tab === 'open' && <OpenCasesQueue />}
+      {tab === 'simulations' && <SimulationLab />}
     </div>
   )
 }
@@ -215,6 +253,18 @@ const INSIGHTS_TABS: InsightsTab[] = [
       </svg>
     ),
   },
+  {
+    id: 'simulations',
+    title: 'Stress Testing',
+    subtitle: 'Backlog clearance under staffing assumptions',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        <path d="M3 3v18h18" />
+        <path d="M7 16l3-4 3 2 4-6" />
+        <path d="M17 8h2v2" />
+      </svg>
+    ),
+  },
 ]
 
 /** Soft segmented tab-card: title + helper subtitle + icon, with a clear active state. */
@@ -251,14 +301,15 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
 // ---------------------------------------------------------------------------
 
 function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
+  // A map click updates the Bottleneck Drilldown panel below the map (it does NOT
+  // jump straight to the Case Explorer) so staff see the diagnosis first; the
+  // panel's own button opens the matching cases.
+  const [selectedArea, setSelectedArea] = useState<SelectedArea | null>(null)
   return (
     <div className="mt-6 space-y-6">
       <OperationalSnapshot />
-      <NYCWorkloadMapPanel
-        onSelectArea={(mode, value) =>
-          onExplore(mode === 'district' ? { councilDistrict: value } : { borough: value })
-        }
-      />
+      <NYCWorkloadMapPanel onSelectArea={(mode, value) => setSelectedArea({ mode, value })} />
+      <BottleneckDrilldownPanel selectedArea={selectedArea} onExplore={onExplore} />
       <ComplaintTypeRanked onExplore={onExplore} />
       <div className="grid gap-6 lg:grid-cols-2">
         <ChannelMixDonut />
@@ -461,7 +512,7 @@ function KpiCard({
 /**
  * Benchmark context strip — the historical NYC 311 reference figures in plain
  * operational language. Uses "Typical historical closure" instead of an average
- * label, and "Slow case threshold" instead of "P90".
+ * label, and "90% closed within" instead of "P90".
  */
 function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
   const { data, loading, error } = state
@@ -484,12 +535,8 @@ function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
               value={data.avg_closure_days == null ? '—' : `${data.avg_closure_days.toFixed(1)} days`}
             />
             <BenchmarkItem
-              label="Slow case threshold"
-              value={
-                data.p90_closure_days == null
-                  ? '—'
-                  : `most similar cases closed within ${Math.round(data.p90_closure_days)} days`
-              }
+              label="90% closed within"
+              value={data.p90_closure_days == null ? '—' : `${Math.round(data.p90_closure_days)} days`}
             />
             <BenchmarkItem
               label="Top workload pressure"
@@ -705,34 +752,85 @@ function ClosureScatter({ onExplore }: { onExplore: (f: CaseExplorerFilters) => 
     [data],
   )
   return (
-    <SectionShell name="the volume vs closure view" title="High volume + slow closure" subtitle="Each point is a complaint type. Top-right = busy and slow." loading={loading} error={error} empty={points.length === 0}>
+    <SectionShell name="the volume vs closure view" title="Volume vs closure time" subtitle="Each point is a complaint type. Upper-right means high volume and slower closure." loading={loading} error={error} empty={points.length === 0}>
       {data && points.length > 0 && <Scatter points={points} onExplore={onExplore} />}
     </SectionShell>
   )
 }
 
 function Scatter({ points, onExplore }: { points: ClosureBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
-  const W = 520
-  const H = 240
-  const pad = 34
-  const maxX = Math.max(1, ...points.map((p) => p.total_cases))
+  const W = 560
+  const H = 260
+  const pad = 40
+  // Log-scaled x so one very high-volume type doesn't squash everything into the
+  // bottom-left. Y (avg closure days) stays linear and intuitive.
+  const xs = points.map((p) => p.total_cases)
+  const minX = Math.max(1, Math.min(...xs))
+  const maxX = Math.max(minX + 1, ...xs)
+  const lMinX = Math.log10(minX)
+  const lMaxX = Math.log10(maxX)
   const maxY = Math.max(1, ...points.map((p) => p.avg_closure_days ?? 0))
-  const x = (v: number) => pad + (v / maxX) * (W - pad * 1.5)
+  const x = (v: number) => pad + ((Math.log10(Math.max(1, v)) - lMinX) / (lMaxX - lMinX)) * (W - pad * 1.5)
   const y = (v: number) => H - pad - (v / maxY) * (H - pad * 1.5)
+
+  // Median crosshair splits the plot into four readable quadrants.
+  const sortedX = [...xs].sort((a, b) => a - b)
+  const sortedY = points.map((p) => p.avg_closure_days ?? 0).sort((a, b) => a - b)
+  const medX = sortedX[Math.floor(sortedX.length / 2)] ?? minX
+  const medY = sortedY[Math.floor(sortedY.length / 2)] ?? 0
+  const cx = x(medX)
+  const cy = y(medY)
+
+  // Top 5 "pressure" points (high volume × slow closure) get a text label.
+  const topLabels = new Set(
+    [...points]
+      .sort((a, b) => (b.total_cases * (b.avg_closure_days ?? 0)) - (a.total_cases * (a.avg_closure_days ?? 0)))
+      .slice(0, 5)
+      .map((p) => p.complaint_type),
+  )
+
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Total cases vs average closure days by complaint type">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Total cases (log scale) versus average closure days by complaint type">
+        {/* Median crosshair + quadrant labels */}
+        <line x1={cx} y1={6} x2={cx} y2={H - pad} stroke="#e2e8f0" strokeDasharray="3 3" />
+        <line x1={pad} y1={cy} x2={W - 6} y2={cy} stroke="#e2e8f0" strokeDasharray="3 3" />
+        <text x={pad + 4} y={14} className="fill-ink-subtle" style={{ fontSize: 8 }}>Lower volume / slower</text>
+        <text x={W - 8} y={14} textAnchor="end" className="fill-ink-subtle" style={{ fontSize: 8 }}>Higher volume / slower</text>
+        <text x={pad + 4} y={H - pad - 4} className="fill-ink-subtle" style={{ fontSize: 8 }}>Lower volume / faster</text>
+        <text x={W - 8} y={H - pad - 4} textAnchor="end" className="fill-ink-subtle" style={{ fontSize: 8 }}>Higher volume / faster</text>
+
+        {/* Axes */}
         <line x1={pad} y1={H - pad} x2={W - 6} y2={H - pad} stroke="#cbd5e1" />
         <line x1={pad} y1={6} x2={pad} y2={H - pad} stroke="#cbd5e1" />
-        <text x={(W + pad) / 2} y={H - 6} textAnchor="middle" className="fill-ink-subtle" style={{ fontSize: 9 }}>Total cases →</text>
+        <text x={(W + pad) / 2} y={H - 6} textAnchor="middle" className="fill-ink-subtle" style={{ fontSize: 9 }}>Total cases (log scale) →</text>
         <text x={10} y={H / 2} textAnchor="middle" transform={`rotate(-90 10 ${H / 2})`} className="fill-ink-subtle" style={{ fontSize: 9 }}>Avg closure days →</text>
-        {points.map((p) => (
-          <circle key={p.complaint_type} cx={x(p.total_cases)} cy={y(p.avg_closure_days ?? 0)} r={4.5} fill="#2563eb" fillOpacity={0.65} className="cursor-pointer" onClick={() => onExplore({ complaintType: p.complaint_type })}>
-            <title>{`${p.complaint_type}\nCases: ${fmtInt(p.total_cases)}\nAvg closure: ${fmtDays(p.avg_closure_days)}`}</title>
-          </circle>
-        ))}
+
+        {points.map((p) => {
+          const px = x(p.total_cases)
+          const py = y(p.avg_closure_days ?? 0)
+          const dot = PRESSURE_META[closurePressure(p.p90_closure_days, p.avg_closure_days)].dot
+          const labelled = topLabels.has(p.complaint_type)
+          return (
+            <g key={p.complaint_type}>
+              <circle cx={px} cy={py} r={labelled ? 5.5 : 4.5} fill={dot} fillOpacity={0.7} className="cursor-pointer" onClick={() => onExplore({ complaintType: p.complaint_type })}>
+                <title>{`${p.complaint_type}\nCases: ${fmtInt(p.total_cases)}\nAvg closure: ${fmtDays(p.avg_closure_days)}\n90% closed within: ${fmtDays(p.p90_closure_days)}`}</title>
+              </circle>
+              {labelled && (
+                <text x={px} y={py - 8} textAnchor={px > W * 0.7 ? 'end' : 'middle'} className="pointer-events-none fill-navy-900" style={{ fontSize: 8, fontWeight: 600 }}>
+                  {p.complaint_type.length > 22 ? `${p.complaint_type.slice(0, 21)}…` : p.complaint_type}
+                </text>
+              )}
+            </g>
+          )
+        })}
       </svg>
-      <p className="mt-1 text-[11px] text-ink-subtle">Select a point to explore that complaint type’s cases.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-subtle">
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.normal.dot }} /> Normal</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.watch.dot }} /> Watch</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.critical.dot }} /> Critical</span>
+        <span>Select a point to explore that complaint type’s cases.</span>
+      </div>
     </div>
   )
 }
@@ -821,28 +919,44 @@ const HIGH_VOLUME_MIN = 1000
 function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(40))
   const [highVolumeOnly, setHighVolumeOnly] = useState(true)
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   const rows = useMemo(() => {
     const all = data ?? []
     const filtered = highVolumeOnly ? all.filter((r) => r.total_cases >= HIGH_VOLUME_MIN) : all
     return filtered.slice(0, 12)
   }, [data, highVolumeOnly])
   return (
-    <SectionShell name="closure bottlenecks" title="Closure bottlenecks by complaint type" subtitle="Where closure is slowest. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}
+    <SectionShell name="the closure leaderboard" title="Where closure takes longest" subtitle="Complaint types with high volume and longer closure times. These are historical closure patterns, not predictions." loading={loading} error={error} empty={data?.length === 0}
       action={
-        <label className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-          <input type="checkbox" checked={highVolumeOnly} onChange={(e) => setHighVolumeOnly(e.target.checked)} />
-          High volume only (≥ {fmtInt(HIGH_VOLUME_MIN)})
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
+            <input type="checkbox" checked={highVolumeOnly} onChange={(e) => setHighVolumeOnly(e.target.checked)} />
+            High volume only (≥ {fmtInt(HIGH_VOLUME_MIN)})
+          </label>
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+            {(['leaderboard', 'table'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={`rounded-md px-2.5 py-1 capitalize transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+              >
+                {v === 'leaderboard' ? 'Leaderboard' : 'Table'}
+              </button>
+            ))}
+          </div>
+        </div>
       }
     >
-      {data && (
+      {data && view === 'leaderboard' && <ClosureLeaderboard rows={rows} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
-          head={['Complaint type', 'Total', 'Closed', 'Avg', 'Median', 'Slow case']}
-          align={['left', 'right', 'right', 'right', 'right', 'right']}
+          head={['Complaint type', 'Total', 'Avg', 'Median', '90% closed within', 'Pressure']}
+          align={['left', 'right', 'right', 'right', 'right', 'left']}
           rows={rows.map((row) => ({
             key: row.complaint_type,
             onClick: () => onExplore({ complaintType: row.complaint_type }),
-            cells: [row.complaint_type, fmtInt(row.total_cases), fmtInt(row.closed_cases), fmtDays(row.avg_closure_days), fmtDays(row.median_closure_days), fmtDays(row.p90_closure_days)],
+            cells: [row.complaint_type, fmtInt(row.total_cases), fmtDays(row.avg_closure_days), fmtDays(row.median_closure_days), fmtDays(row.p90_closure_days), PRESSURE_META[closurePressure(row.p90_closure_days, row.avg_closure_days)].label],
           }))}
         />
       )}
@@ -850,15 +964,81 @@ function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters)
   )
 }
 
-// --- Area bottlenecks ------------------------------------------------------
+/** Visual leaderboard of the slowest-closing complaint types (default view). */
+function ClosureLeaderboard({ rows, onExplore }: { rows: ClosureBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  const maxDuration = Math.max(1, ...rows.map((r) => r.p90_closure_days ?? 0))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => {
+        const meta = PRESSURE_META[closurePressure(row.p90_closure_days, row.avg_closure_days)]
+        const volPct = Math.round((row.total_cases / maxVolume) * 100)
+        const durPct = Math.round(((row.p90_closure_days ?? 0) / maxDuration) * 100)
+        return (
+          <li key={row.complaint_type}>
+            <button
+              type="button"
+              onClick={() => onExplore({ complaintType: row.complaint_type })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                  <span className="truncate text-sm font-medium text-navy-900">{row.complaint_type}</span>
+                  <span className={`badge ${meta.badge}`}>{meta.label}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-4 text-[11px] tabular-nums text-ink-subtle">
+                  <span><span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases</span>
+                  <span>Median <span className="font-semibold text-ink">{fmtDays(row.median_closure_days)}</span></span>
+                  <span>90% within <span className="font-semibold text-ink">{fmtDays(row.p90_closure_days)}</span></span>
+                </div>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                <MetricBar label="Volume" pct={volPct} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+                <MetricBar label="90% closed within" pct={durPct} barClass={meta.bar} valueText={fmtDays(row.p90_closure_days)} />
+              </div>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+// --- Leaderboard / Table view toggle (shared) ------------------------------
+
+/** Small segmented control to switch a section between the visual leaderboard
+ *  (default) and the raw table — same control used on "Where closure takes longest". */
+function ViewToggle({ view, onChange }: { view: 'leaderboard' | 'table'; onChange: (v: 'leaderboard' | 'table') => void }) {
+  return (
+    <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+      {(['leaderboard', 'table'] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          className={`rounded-md px-2.5 py-1 transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+        >
+          {v === 'leaderboard' ? 'Leaderboard' : 'Table'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// --- District workload pressure --------------------------------------------
 
 function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(12))
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   return (
-    <SectionShell name="area bottlenecks" title="Area bottlenecks by council district" subtitle="Workload and closure pressure by the ward-like unit. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}>
-      {data && (
+    <SectionShell name="district workload pressure" title="District workload pressure" subtitle="Districts with the highest workload. Longer bars mean more cases; closure timing is shown as supporting context." loading={loading} error={error} empty={data?.length === 0}
+      action={data && data.length > 0 ? <ViewToggle view={view} onChange={setView} /> : undefined}
+    >
+      {data && view === 'leaderboard' && <DistrictLeaderboard rows={data} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
-          head={['Council district', 'Total', 'Avg', 'Slow case', 'Top complaint type']}
+          head={['Council district', 'Total', 'Avg', '90% closed within', 'Top complaint type']}
           align={['left', 'right', 'right', 'right', 'left']}
           rows={data.map((row) => ({
             key: row.council_district,
@@ -871,13 +1051,56 @@ function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) =>
   )
 }
 
-// --- Department workload ---------------------------------------------------
+/** Visual leaderboard of districts by workload (default view). */
+function DistrictLeaderboard({ rows, onExplore }: { rows: AreaBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => (
+        <li key={row.council_district}>
+          <button
+            type="button"
+            onClick={() => onExplore({ councilDistrict: row.council_district })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                <span className="truncate text-sm font-medium text-navy-900">District {row.council_district}</span>
+              </div>
+              <span className="shrink-0 text-[11px] tabular-nums text-ink-subtle">
+                <span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases
+              </span>
+            </div>
+            <div className="mt-1 text-[11px] text-ink-subtle">
+              Top issue: <span className="text-ink-muted">{row.top_complaint_type ?? '—'}</span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-subtle">
+              <span>Avg closure: <span className="font-medium text-ink">{fmtDays(row.avg_closure_days)}</span></span>
+              <span aria-hidden>·</span>
+              <span>90% closed within: <span className="font-medium text-ink">{fmtDays(row.p90_closure_days)}</span></span>
+            </div>
+            <div className="mt-2">
+              <MetricBar label="Volume" pct={Math.round((row.total_cases / maxVolume) * 100)} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+            </div>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// --- Department / agency workload ------------------------------------------
 
 function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<InsightsDepartmentWorkload[]>(() => getInsightsDepartmentWorkload(12))
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   return (
-    <SectionShell name="department workload" title="Department workload" subtitle="Caseload by agency / assigned department." loading={loading} error={error} empty={data?.length === 0}>
-      {data && (
+    <SectionShell name="department / agency workload" title="Department / agency workload" subtitle="Which agencies carry the largest case volumes in the benchmark data." loading={loading} error={error} empty={data?.length === 0}
+      action={data && data.length > 0 ? <ViewToggle view={view} onChange={setView} /> : undefined}
+    >
+      {data && view === 'leaderboard' && <DepartmentLeaderboard rows={data} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
           head={['Department / agency', 'Total', 'Open', 'Closed', 'Avg closure']}
           align={['left', 'right', 'right', 'right', 'right']}
@@ -892,11 +1115,546 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
   )
 }
 
+/** Horizontal-bar leaderboard of agencies by case volume (default view). */
+function DepartmentLeaderboard({ rows, onExplore }: { rows: InsightsDepartmentWorkload[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => (
+        <li key={row.department}>
+          <button
+            type="button"
+            onClick={() => onExplore({ agency: row.department })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                <span className="truncate text-sm font-medium text-navy-900">{row.department}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-4 text-[11px] tabular-nums text-ink-subtle">
+                <span><span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases</span>
+                <span>Avg closure <span className="font-semibold text-ink">{fmtDays(row.avg_closure_days)}</span></span>
+              </div>
+            </div>
+            <div className="mt-2">
+              <MetricBar label="Volume" pct={Math.round((row.total_cases / maxVolume) * 100)} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+            </div>
+            <p className="mt-1 text-[11px] text-ink-subtle">
+              Open {fmtInt(row.open_cases)} · Closed {fmtInt(row.closed_cases)}
+            </p>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Bottleneck drilldown (Overview) — diagnose a map-selected area
+// ---------------------------------------------------------------------------
+
+/** Normalize a council-district value to a plain number string ("05" → "5"). */
+const districtKey = (v: string | null): string => {
+  if (v == null) return ''
+  const n = Number(v)
+  return Number.isFinite(n) ? String(n) : String(v).trim()
+}
+
+/**
+ * Operational read for a council district — plain-language diagnosis derived from
+ * the area's volume, long-tail closure time, and top complaint type, RELATIVE to
+ * the other areas in the current benchmark view. This is decision support, not a
+ * recommendation engine: it says "Operational read", never "AI recommends".
+ */
+function districtOperationalRead(row: AreaBottleneck, areas: AreaBottleneck[]): string[] {
+  const reads: string[] = []
+  const maxTotal = Math.max(0, ...areas.map((a) => a.total_cases))
+  if (maxTotal > 0 && row.total_cases >= 0.66 * maxTotal) {
+    reads.push(
+      'This area has a heavier complaint load than most areas in the current benchmark view. Supervisor action could include earlier review sequencing or temporary reassignment.',
+    )
+  }
+  const p90s = areas
+    .map((a) => a.p90_closure_days)
+    .filter((v): v is number => v != null)
+    .sort((a, b) => a - b)
+  const medianP90 = p90s.length ? p90s[Math.floor(p90s.length / 2)] : null
+  if (row.p90_closure_days != null && medianP90 != null && row.p90_closure_days >= medianP90 * 1.25) {
+    reads.push('Long tail closure time is elevated. This points to complex or stale files rather than only volume.')
+  }
+  if (row.top_complaint_type) {
+    reads.push(
+      `Most pressure is concentrated in ${row.top_complaint_type}, so routing and template review can focus there first.`,
+    )
+  }
+  if (reads.length === 0) {
+    reads.push('Workload here is close to the benchmark average for this view. No single pressure signal stands out.')
+  }
+  return reads
+}
+
+function BottleneckDrilldownPanel({
+  selectedArea,
+  onExplore,
+}: {
+  selectedArea: SelectedArea | null
+  onExplore: (f: CaseExplorerFilters) => void
+}) {
+  // Small materialized aggregates — never a full-table scan. Pull enough council
+  // districts to cover any selected one (NYC has 51).
+  const areas = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(60))
+  const boroughVolumes = useLive<NYCBoroughWorkload[]>(getNYCWorkloadByBorough)
+
+  return (
+    <section className="card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-navy-900">Bottleneck drilldown</h2>
+          <p className="mt-0.5 text-xs text-ink-subtle">What is driving workload in the selected area.</p>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+          Live data
+        </span>
+      </div>
+
+      <div className="mt-4">
+        {!selectedArea ? (
+          <div className="rounded-md border border-dashed border-slate-300 bg-slate-50/70 px-4 py-6 text-center text-sm text-ink-subtle">
+            Select a council district or borough on the map above to see what is driving its workload.
+          </div>
+        ) : selectedArea.mode === 'district' ? (
+          <DistrictBottleneck area={areas} value={selectedArea.value} onExplore={onExplore} />
+        ) : (
+          <BoroughBottleneck volumes={boroughVolumes} value={selectedArea.value} onExplore={onExplore} />
+        )}
+      </div>
+    </section>
+  )
+}
+
+function DistrictBottleneck({
+  area,
+  value,
+  onExplore,
+}: {
+  area: LiveState<AreaBottleneck[]>
+  value: string
+  onExplore: (f: CaseExplorerFilters) => void
+}) {
+  const { data, loading, error } = area
+  if (loading) return <div className="animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading live data…</div>
+  if (error) return <SectionError name="the area bottleneck aggregate" error={error} />
+
+  const rows = data ?? []
+  const row = rows.find((r) => districtKey(r.council_district) === districtKey(value))
+  const openCases = () => onExplore({ councilDistrict: districtKey(value) })
+
+  if (!row) {
+    return (
+      <div className="space-y-3">
+        <AreaHeading label={`District ${districtKey(value)}`} sub="Selected council district" />
+        <p className="text-sm text-ink-muted">
+          No bottleneck aggregate is available for this district in the current benchmark view. You can still open its
+          cases directly.
+        </p>
+        <OpenCasesButton onClick={openCases} />
+      </div>
+    )
+  }
+
+  const reads = districtOperationalRead(row, rows)
+  return (
+    <div className="space-y-4">
+      <AreaHeading label={`District ${districtKey(row.council_district)}`} sub="Selected council district" />
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric label="Total cases" value={fmtInt(row.total_cases)} />
+        <Metric label="Avg closure" value={fmtDays(row.avg_closure_days)} />
+        <Metric label="90% closed within" value={fmtDays(row.p90_closure_days)} />
+        <Metric label="Top complaint type" value={row.top_complaint_type ?? '—'} />
+      </dl>
+      <OperationalRead reads={reads} />
+      <OpenCasesButton onClick={openCases} />
+    </div>
+  )
+}
+
+function BoroughBottleneck({
+  volumes,
+  value,
+  onExplore,
+}: {
+  volumes: LiveState<NYCBoroughWorkload[]>
+  value: string
+  onExplore: (f: CaseExplorerFilters) => void
+}) {
+  const { data, loading, error } = volumes
+  const openCases = () => onExplore({ borough: value })
+
+  const match = (data ?? []).find((b) => b.borough.trim().toLowerCase() === value.trim().toLowerCase())
+
+  return (
+    <div className="space-y-4">
+      <AreaHeading label={value} sub="Selected borough" />
+      {loading ? (
+        <div className="animate-pulse rounded-md bg-slate-100/70 py-6 text-center text-sm text-ink-subtle">Loading live data…</div>
+      ) : error ? (
+        <p className="text-sm text-ink-muted">Borough workload volume is unavailable right now.</p>
+      ) : match ? (
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Metric label="Complaint volume" value={fmtInt(match.complaint_volume)} />
+        </dl>
+      ) : (
+        <p className="text-sm text-ink-muted">No borough-level workload volume is available for {value}.</p>
+      )}
+      <div className="rounded-md border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs leading-relaxed text-ink-muted">
+        <span className="font-semibold text-ink">Operational read:</span> Borough is the broad executive view. Council
+        district carries deeper bottleneck metrics right now (average and long-tail closure time, top complaint type), so
+        drill into a council district for a sharper diagnosis. Use the button below to review this borough's cases.
+      </div>
+      <OpenCasesButton onClick={openCases} />
+    </div>
+  )
+}
+
+function AreaHeading({ label, sub }: { label: string; sub: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{sub}</div>
+      <div className="text-2xl font-semibold text-navy-900">{label}</div>
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-1 truncate text-base font-semibold tabular-nums text-navy-900">{value}</div>
+    </div>
+  )
+}
+
+function OperationalRead({ reads }: { reads: string[] }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/70 px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Operational read</div>
+      <ul className="mt-1.5 space-y-1.5 text-sm text-ink-muted">
+        {reads.map((r) => (
+          <li key={r} className="flex gap-2">
+            <span aria-hidden className="mt-0.5 text-accent-500">•</span>
+            <span>{r}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function OpenCasesButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="btn-primary text-sm py-2 px-4">
+      Open matching cases in Case Explorer →
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Simulations tab — capacity and backlog stress test
+// ---------------------------------------------------------------------------
+
+type Scenario = 'current' | 'reduced' | 'surge'
+
+const SCENARIO_LABEL: Record<Scenario, string> = {
+  current: 'Current capacity',
+  reduced: 'Reduced capacity',
+  surge: 'Surge week',
+}
+
+const SCENARIO_NOTE: Record<Scenario, string> = {
+  current: 'Baseline staffing assumption.',
+  reduced: 'Shows impact if fewer staff are available.',
+  surge: 'Shows effect of increased incoming workload. Uses a simple 1.25× multiplier on open cases.',
+}
+
+const SURGE_MULTIPLIER = 1.25
+
+/** True when a tier string is the High review-priority tier. */
+const isHighTier = (tier: string | null) => (tier ?? '').trim().toLowerCase() === 'high'
+
+/**
+ * SimulationLab — an operations-style capacity stress test over the live open
+ * review queue summary plus user-controlled planning assumptions. This is
+ * scenario math, not a forecast: it helps staff reason about capacity, backlog,
+ * and review sequencing. It never predicts enforcement outcomes.
+ */
+function SimulationLab() {
+  const summary = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
+  const aging = useLive<OpenAgingBucket[]>(getNycOpenAgingBuckets)
+  // A bounded, diversified sample — used as an honest fallback for the open/high
+  // counts if the summary aggregate is unavailable, and for the main pressure type.
+  const sample = useLive<OpenReviewRow[]>(() => getNycOpenQueueDiversified({}, 60))
+
+  const [staff, setStaff] = useState(3)
+  const [perStaff, setPerStaff] = useState(25)
+  const [highFocus, setHighFocus] = useState(100)
+  const [scenario, setScenario] = useState<Scenario>('current')
+
+  const sampleRows = sample.data ?? []
+  const summaryOk = !!summary.data
+  // Prefer the precomputed summary; fall back to the loaded sample (labeled).
+  const baseOpen = summary.data?.total ?? (sample.data ? sampleRows.length : null)
+  const baseHigh =
+    summary.data?.highPriority ?? (sample.data ? sampleRows.filter((r) => isHighTier(r.priority_tier)).length : null)
+  const sampled = !summaryOk && sample.data != null
+
+  const topPressure = useMemo(() => {
+    const rows = sample.data ?? []
+    if (!rows.length) return null
+    const counts = new Map<string, number>()
+    for (const r of rows) {
+      const k = r.complaint_type ?? 'Uncategorized'
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+    let top: string | null = null
+    let max = 0
+    for (const [k, v] of counts) if (v > max) { max = v; top = k }
+    return top
+  }, [sample.data])
+
+  const topAging = useMemo(() => {
+    const b = aging.data ?? []
+    if (!b.length) return null
+    return [...b].sort((x, y) => y.total_cases - x.total_cases)[0]
+  }, [aging.data])
+
+  // Scenario adjustments — deterministic planning assumptions, not predictions.
+  const effectiveStaff = scenario === 'reduced' ? Math.max(1, Math.ceil(staff * 0.66)) : staff
+  const openCases = baseOpen == null ? null : scenario === 'surge' ? Math.ceil(baseOpen * SURGE_MULTIPLIER) : baseOpen
+  const high = baseHigh
+
+  const dailyCapacity = Math.max(0, effectiveStaff) * Math.max(0, perStaff)
+  const highCapacity = dailyCapacity * (Math.max(0, Math.min(100, highFocus)) / 100)
+  const daysHigh = high != null && highCapacity > 0 ? Math.ceil(high / highCapacity) : null
+  const daysAll = openCases != null && dailyCapacity > 0 ? Math.ceil(openCases / dailyCapacity) : null
+  const capacityGap = openCases == null ? null : openCases - dailyCapacity
+
+  // Deterministic status colors for the result cards (green manageable, amber
+  // pressure, red critical). Thresholds are explicit and auditable.
+  const daysAllStatus: SimStatus =
+    daysAll == null ? 'neutral' : daysAll <= 14 ? 'good' : daysAll <= 60 ? 'watch' : 'critical'
+  const capacityGapStatus: SimStatus =
+    capacityGap == null || openCases == null
+      ? 'neutral'
+      : capacityGap <= 0
+        ? 'good'
+        : capacityGap >= openCases * 0.25
+          ? 'critical'
+          : 'watch'
+
+  const dataUnavailable = baseOpen == null && !summary.loading && !sample.loading
+  const loading = summary.loading && sample.loading
+
+  return (
+    <div className="mt-6 space-y-6">
+      <section className="card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-navy-900">Capacity Stress Testing</h2>
+            <p className="mt-0.5 text-xs text-ink-subtle">Backlog clearance under staffing assumptions — deterministic math, not a forecast.</p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+            Deterministic scenario
+          </span>
+        </div>
+
+        {/* Inputs */}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <NumberInput label="Staff available" value={staff} min={1} max={50} onChange={setStaff} />
+          <NumberInput label="Cases reviewed / staff / day" value={perStaff} min={1} max={200} onChange={setPerStaff} />
+          <NumberInput label="High priority focus (%)" value={highFocus} min={0} max={100} onChange={setHighFocus} />
+          <div>
+            <span className="text-[11px] font-medium text-ink-subtle">Scenario</span>
+            <div className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-1">
+              {(['current', 'reduced', 'surge'] as Scenario[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScenario(s)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                    scenario === s ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'
+                  }`}
+                >
+                  {SCENARIO_LABEL[s]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-xs text-ink-muted">
+          <span className="font-semibold text-ink">{SCENARIO_LABEL[scenario]}:</span> {SCENARIO_NOTE[scenario]}
+          {scenario === 'reduced' && (
+            <span className="text-ink-subtle"> Effective staff this scenario: {effectiveStaff}.</span>
+          )}
+        </div>
+
+        {dataUnavailable ? (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">Open queue data unavailable.</div>
+            <div className="mt-0.5">
+              The open review queue summary could not be loaded, so the scenario math has no live open-case counts to work
+              from. Capacity inputs above still apply once the open dataset is available.
+            </div>
+          </div>
+        ) : loading ? (
+          <div className="mt-4 animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
+        ) : (
+          <>
+            {sampled && (
+              <p className="mt-4 text-[11px] text-amber-800">
+                Open-case counts are sampled from the open review queue (the full-population summary is unavailable), so
+                these figures are a limited sample, not the full queue total.
+              </p>
+            )}
+            <p className="mt-4 text-[11px] leading-relaxed text-ink-muted">
+              This uses live open case counts and simple capacity math: staff available × cases per staff per day. It does
+              not predict enforcement outcomes.
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <SimCard label="Daily review capacity" value={fmtInt(dailyCapacity)} helper={`${effectiveStaff} staff × ${perStaff} cases/day`} />
+              <SimCard label="High priority cases" value={high == null ? '—' : fmtInt(high)} helper={high == null ? 'Tier breakdown unavailable' : `${highFocus}% of capacity directed here first`} />
+              <SimCard label="Days to clear high priority" value={daysHigh == null ? '—' : fmtInt(daysHigh)} helper="At current high-priority focus" />
+              <SimCard
+                label="Days to clear open queue"
+                value={daysAll == null ? '—' : fmtInt(daysAll)}
+                helper={openCases == null ? '—' : `${fmtInt(openCases)} open cases this scenario`}
+                status={daysAllStatus}
+              />
+              <SimCard
+                label="Capacity gap (day 1)"
+                value={capacityGap == null ? '—' : `${capacityGap > 0 ? '+' : ''}${fmtInt(capacityGap)}`}
+                helper={capacityGap == null ? '—' : capacityGap > 0 ? 'Open cases beyond one day of capacity' : 'Capacity covers the open queue in a day'}
+                status={capacityGapStatus}
+              />
+              <SimCard
+                label="Largest open case category"
+                value={topPressure ?? '—'}
+                helper={topPressure ? 'Most common type in the open sample' : 'Sample unavailable'}
+              />
+            </div>
+
+            {topAging && (
+              <p className="mt-3 text-[11px] text-ink-subtle">
+                Main aging bucket: <span className="font-medium text-ink-muted">{topAging.bucket}</span> ({fmtInt(topAging.total_cases)} open cases).
+              </p>
+            )}
+          </>
+        )}
+
+        <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
+          This is deterministic stress testing, not Monte Carlo simulation, not agent based modelling, and not a forecast.
+          It is intended to help supervisors test staffing and backlog assumptions.
+        </p>
+      </section>
+    </div>
+  )
+}
+
+function NumberInput({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="block">
+      <span className="text-[11px] font-medium text-ink-subtle">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          if (!Number.isFinite(n)) return
+          onChange(Math.max(min, Math.min(max, Math.round(n))))
+        }}
+        className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm tabular-nums focus:border-accent-500 focus:outline-none"
+      />
+    </label>
+  )
+}
+
+// Card status — deterministic green (manageable) / amber (pressure) / red
+// (critical), or neutral when no threshold applies.
+type SimStatus = 'neutral' | 'good' | 'watch' | 'critical'
+
+const SIM_CARD_STATUS: Record<SimStatus, { container: string; value: string }> = {
+  neutral: { container: 'border-slate-200 bg-white', value: 'text-navy-900' },
+  good: { container: 'border-emerald-200 bg-emerald-50/60', value: 'text-emerald-800' },
+  watch: { container: 'border-amber-200 bg-amber-50/60', value: 'text-amber-900' },
+  critical: { container: 'border-rose-200 bg-rose-50/60', value: 'text-rose-800' },
+}
+
+function SimCard({
+  label,
+  value,
+  helper,
+  status = 'neutral',
+}: {
+  label: string
+  value: string
+  helper: string
+  status?: SimStatus
+}) {
+  const s = SIM_CARD_STATUS[status]
+  return (
+    <div className={`rounded-xl border p-4 ${s.container}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className={`mt-1.5 truncate text-2xl font-bold tabular-nums ${s.value}`}>{value}</div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Case Explorer tab
 // ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 25
+
+/** A Postgres statement timeout (57014) — the Case Explorer's expected slow-query failure. */
+function isTimeoutError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null
+  const code = e?.code ?? ''
+  const msg = (e?.message ?? '').toLowerCase()
+  return code === '57014' || msg.includes('57014') || msg.includes('statement timeout') || msg.includes('canceling statement')
+}
+
+type ExplorerError = { message: string; timedOut: boolean }
+
+/** Calm, specific timeout state for the Case Explorer (does not imply Insights is down). */
+function CaseExplorerTimeout({ detail }: { detail: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm">
+      <div className="font-semibold text-navy-900">Case Explorer query timed out</div>
+      <p className="mt-1 text-ink-muted">Try a narrower filter, or search by exact case ID.</p>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[11px] text-ink-subtle">Technical detail</summary>
+        <p className="mt-1 font-mono text-[11px] text-ink-subtle">Postgres 57014 statement timeout</p>
+        {detail && <p className="mt-1 font-mono text-[11px] text-ink-subtle/80">{detail}</p>}
+      </details>
+    </div>
+  )
+}
 
 function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilters; onFiltersChange: (f: CaseExplorerFilters) => void }) {
   const navigate = useNavigate()
@@ -904,8 +1662,22 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ExplorerError | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [options, setOptions] = useState<CaseExplorerOptions | null>(null)
+
+  // True when no filter or search is set — the fast default view. A timeout here
+  // shows a friendly "add a filter" prompt rather than a scary error.
+  const hasAnyFilter = Boolean(
+    filters.search ||
+      filters.complaintType ||
+      filters.borough ||
+      filters.councilDistrict ||
+      filters.agency ||
+      filters.status ||
+      filters.dateFrom ||
+      filters.dateTo,
+  )
 
   // Last loaded page (zero-based) for "Load more", and a request token so a slow
   // response for stale filters can never overwrite the current results.
@@ -932,14 +1704,16 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           if (id !== reqRef.current) return
           setRows((prev) => (append ? [...prev, ...res.rows] : res.rows))
           setHasMore(res.hasMore)
+          setNotice(res.notice ?? null)
         })
         .catch((err: unknown) => {
           if (id !== reqRef.current) return
           console.error('Case Explorer load failed:', err)
-          setError(errorMessage(err))
+          setError({ message: errorMessage(err), timedOut: isTimeoutError(err) })
           if (!append) {
             setRows([])
             setHasMore(false)
+            setNotice(null)
           }
         })
         .finally(() => {
@@ -961,7 +1735,9 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
   // Count-free result label. We never claim an exact total over the 3.4M-row
   // table — just how many rows are loaded and whether more are available.
   const countLabel = error
-    ? 'Live data unavailable'
+    ? error.timedOut
+      ? 'Query timed out'
+      : 'Live data unavailable'
     : loading
       ? 'Loading…'
       : rows.length === 0
@@ -994,8 +1770,20 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider">Live data</span>
         </div>
 
+        {notice && !error && (
+          <div className="mb-3 rounded-md border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-900">{notice}</div>
+        )}
+
         {error ? (
-          <SectionError name="the case list" error={error} />
+          error.timedOut && !hasAnyFilter ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-ink-muted">
+              Select a complaint type, borough, district, or date range to search historical cases.
+            </div>
+          ) : error.timedOut ? (
+            <CaseExplorerTimeout detail={error.message} />
+          ) : (
+            <SectionError name="the case list" error={error.message} />
+          )
         ) : loading ? (
           <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
         ) : rows.length === 0 ? (

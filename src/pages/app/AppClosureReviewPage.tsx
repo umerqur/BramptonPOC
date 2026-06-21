@@ -1364,7 +1364,7 @@ function Field({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
       <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</dt>
-      <dd className={`mt-0.5 text-sm ${text ? 'text-navy-900' : 'text-ink-subtle italic'}`}>
+      <dd className={`mt-0.5 break-words text-sm ${text ? 'text-navy-900' : 'text-ink-subtle italic'}`}>
         {text || 'Not recorded'}
       </dd>
     </div>

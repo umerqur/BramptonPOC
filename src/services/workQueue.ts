@@ -38,6 +38,18 @@ export const SOURCE_LABELS: Record<WorkQueueSource, string> = {
 export type ReviewPriorityTier = 'High' | 'Medium' | 'Low' | 'Unscored'
 
 /**
+ * One transparent contribution to a deterministic review-priority score. This is
+ * decision-support feature engineering — never an ML weight, a risk score, or an
+ * automated decision. `points` is null when a source row does not expose the
+ * individual weight (e.g. the precomputed NYC open queue score).
+ */
+export type PriorityComponent = {
+  label: string
+  points: number | null
+  explanation: string
+}
+
+/**
  * The plain-language explanation of what review priority means. Framed as
  * decision support / routing support — never automated enforcement.
  */
@@ -72,6 +84,12 @@ export type WorkQueueRow = {
   priority_score: number | null
   priority_tier: ReviewPriorityTier
   priority_reason: string | null
+  /**
+   * Transparent breakdown of how the score was reached. Populated for resident
+   * intakes (deterministic, fully decomposable); omitted for NYC open rows whose
+   * precomputed score does not expose individual component weights.
+   */
+  priority_components?: PriorityComponent[]
   /** Assigned staff / officer where available (resident flow only). */
   assigned_to: string | null
   /** Human-readable workflow stage where available. */
@@ -94,6 +112,32 @@ const ACTIVE_RESIDENT_STATUSES: ResidentStatus[] = ['submitted', 'received', 'as
 /** Whether a resident request is active work (not yet closed). */
 export function isActiveResident(row: ResidentRequestRow): boolean {
   return ACTIVE_RESIDENT_STATUSES.includes(row.status)
+}
+
+/**
+ * Whether a resident request is assigned / in progress. A row counts as assigned
+ * if its status is 'assigned' or 'in_review', OR if it carries an assigned
+ * officer (email or name). The officer-field check keeps the "Assigned / in
+ * progress" tab consistent even if the status and the assignment ever drift.
+ */
+export function isAssignedResident(row: ResidentRequestRow): boolean {
+  return (
+    row.status === 'assigned' ||
+    row.status === 'in_review' ||
+    Boolean(row.assigned_officer_email) ||
+    Boolean(row.assigned_officer_name)
+  )
+}
+
+/**
+ * Whether a resident request is a new intake still awaiting supervisor
+ * assignment. True when it is active and NOT completely assigned (no assigned
+ * officer name on file). This deliberately INCLUDES rows whose status is
+ * 'assigned' but which have no officer recorded — an incomplete assignment that
+ * a supervisor must finish — so they remain actionable on the intake tab.
+ */
+export function needsOfficerAssignment(row: ResidentRequestRow): boolean {
+  return isActiveResident(row) && row.status !== 'closed' && !row.assigned_officer_name
 }
 
 /** Whole days since an ISO timestamp, or null when unparseable. */
@@ -133,6 +177,96 @@ function tierFromScore(score: number): ReviewPriorityTier {
 // Base contribution by the deterministic intake-triage priority (P1 highest).
 const PRIORITY_BASE: Record<Priority, number> = { P1: 72, P2: 56, P3: 42, P4: 28 }
 
+/** Inputs to the deterministic resident review-priority calculation. */
+export type ResidentPriorityInput = {
+  priority: Priority
+  category: string
+  ageDays: number
+  attachmentCount: number
+  readyForClosure: boolean
+  inProgress: boolean
+}
+
+export type ResidentPriorityResult = {
+  score: number
+  tier: ReviewPriorityTier
+  reason: string
+  components: PriorityComponent[]
+}
+
+/**
+ * The single, deterministic, transparent resident review-priority calculation —
+ * no model, no risk score. Shared by the Work Queue row mapping and the Case
+ * Workbench decision-logic panel so both show the SAME rules-based breakdown.
+ * Each component's points sum to the score (before the 0–100 clamp).
+ */
+export function computeResidentPriority(input: ResidentPriorityInput): ResidentPriorityResult {
+  const { priority, category, ageDays: age, attachmentCount, readyForClosure, inProgress } = input
+
+  const basePoints = PRIORITY_BASE[priority] ?? 30
+  const agePoints = Math.min(20, Math.max(0, age) * 2) // older intake → earlier review
+  const evidencePoints = attachmentCount > 0 ? 8 : 0 // evidence on file → more actionable
+  const closurePoints = readyForClosure ? 12 : 0 // recorded field outcome waiting on review
+  const stagePoints = !readyForClosure && inProgress ? 6 : 0 // assigned / under review
+
+  const score = Math.max(0, Math.min(100, Math.round(basePoints + agePoints + evidencePoints + closurePoints + stagePoints)))
+
+  const components: PriorityComponent[] = [
+    {
+      label: 'Base category pressure',
+      points: basePoints,
+      explanation:
+        priority === 'P1' || priority === 'P2'
+          ? `High-pressure intake category (${category}, ${priority}).`
+          : `Intake category ${category} (${priority}).`,
+    },
+    {
+      label: 'Age in queue',
+      points: agePoints,
+      explanation:
+        age <= 0
+          ? 'Submitted today — no age pressure yet.'
+          : `${age} day${age === 1 ? '' : 's'} waiting · 2 points per day, capped at 20.`,
+    },
+    {
+      label: 'Evidence attached',
+      points: evidencePoints,
+      explanation:
+        evidencePoints > 0
+          ? 'Resident attached photos or documents, so the file is more actionable.'
+          : 'No resident evidence on file.',
+    },
+    {
+      label: 'Closure readiness',
+      points: closurePoints,
+      explanation:
+        closurePoints > 0
+          ? 'A field outcome is recorded and waiting on closure review.'
+          : 'No field outcome is waiting on closure review.',
+    },
+    {
+      label: 'Workflow stage',
+      points: stagePoints,
+      explanation:
+        stagePoints > 0
+          ? 'Assigned or under active review.'
+          : readyForClosure
+            ? 'Counted under closure readiness above.'
+            : 'Not yet assigned or under review.',
+    },
+  ]
+
+  const reasonParts: string[] = []
+  if (priority === 'P1' || priority === 'P2') reasonParts.push(`High-pressure category (${category})`)
+  else reasonParts.push(`Category: ${category}`)
+  if (age >= 1) reasonParts.push(`${age} day${age === 1 ? '' : 's'} in queue`)
+  if (attachmentCount > 0) reasonParts.push('Evidence attached')
+  if (readyForClosure) reasonParts.push('Field outcome ready for closure review')
+  else if (inProgress) reasonParts.push('Under active review')
+
+  return { score, tier: tierFromScore(score), reason: reasonParts.join(' · '), components }
+}
+
 /**
  * Map a resident intake request to a normalized Work Queue row. The review
  * priority is DERIVED deterministically from: the intake category/urgency
@@ -146,23 +280,16 @@ export function mapResidentToWorkRow(row: ResidentRequestRow, attachmentCount = 
 
   const age = ageDays(row.created_at) ?? 0
   const readyForClosure = row.field_visit_completed && row.status !== 'closed'
-  const inProgress = row.status === 'assigned' || row.status === 'in_review'
+  const inProgress = isAssignedResident(row)
 
-  // Deterministic, transparent scoring — no model, no risk score.
-  let score = PRIORITY_BASE[priority] ?? 30
-  score += Math.min(20, age * 2) // older intake → earlier review
-  if (attachmentCount > 0) score += 8 // evidence on file → more actionable
-  if (readyForClosure) score += 12 // a recorded field outcome is waiting on review
-  else if (inProgress) score += 6
-  score = Math.max(0, Math.min(100, Math.round(score)))
-
-  const reasonParts: string[] = []
-  if (priority === 'P1' || priority === 'P2') reasonParts.push(`High-pressure category (${category})`)
-  else reasonParts.push(`Category: ${category}`)
-  if (age >= 1) reasonParts.push(`${age} day${age === 1 ? '' : 's'} in queue`)
-  if (attachmentCount > 0) reasonParts.push('Evidence attached')
-  if (readyForClosure) reasonParts.push('Field outcome ready for closure review')
-  else if (inProgress) reasonParts.push('Under active review')
+  const { score, tier, reason, components } = computeResidentPriority({
+    priority,
+    category,
+    ageDays: age,
+    attachmentCount,
+    readyForClosure,
+    inProgress,
+  })
 
   return {
     key: `resident:${row.case_id}`,
@@ -175,8 +302,9 @@ export function mapResidentToWorkRow(row: ResidentRequestRow, attachmentCount = 
     complaint_type: row.request_type,
     location: [row.location, row.city].filter(Boolean).join(', ') || null,
     priority_score: score,
-    priority_tier: tierFromScore(score),
-    priority_reason: reasonParts.join(' · '),
+    priority_tier: tier,
+    priority_reason: reason,
+    priority_components: components,
     assigned_to: row.assigned_officer_name,
     workflow_stage: STATUS_LABELS[row.status] ?? row.status,
     ready_for_closure: readyForClosure,

@@ -13,13 +13,15 @@
 // the resident through the server-side Netlify email function, and passes the
 // delivery result into approveClosure so the audit trail records what happened.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
   DemoCase,
+  EnforcementAction,
   OfficerFieldAction,
   Priority,
   ResidentComplaintInput,
+  ServiceMethod,
   SupervisorMetrics,
 } from '../data/demoWorkflowTypes'
 import {
@@ -35,27 +37,51 @@ import { residentRowToCase } from '../services/residentCaseBridge'
 import { openRowToCase } from '../services/openCaseBridge'
 import type { ResidentRequestRow } from '../services/residentRequests'
 import type { OpenReviewRow } from '../services/caseExplorer'
-import { ROLE_ACTOR_NAME, canSwitchRoleForEmail, roleForEmail, type StaffRole } from './roles'
+import {
+  allowedRolesForEmail,
+  canUseRole,
+  currentActorName,
+  defaultRoleForEmail,
+  type StaffProfile,
+  type StaffRole,
+} from './roles'
 
-// Bumped to v3 when cases gained a `source` + normalized service-request shape
-// (unified resident intake + NYC open benchmark lifecycle), so older persisted
-// cases without those fields are reseeded rather than rendered half-populated.
-const STORAGE_KEY = 'brampton-demo-workflow-v3'
-const STAFF_NAME = 'M. Okafor (By-law Officer)'
+// Bumped to v4 when officer assignment gained `assignedOfficerEmail` (cases are
+// now tied to a specific officer login so the officer queue can filter to its
+// own cases). Older persisted cases lack that field, so they are reseeded rather
+// than rendered half-populated — stale localStorage would break officer queue
+// testing. (v3 added a `source` + normalized service-request shape: unified
+// resident intake + NYC open benchmark lifecycle.)
+const STORAGE_KEY = 'brampton-demo-workflow-v4'
 
 /**
  * What an officer enters when recording a field investigation. This mirrors the
  * resident Supabase field-outcome form (Officer Oakley's structure), so the
  * local NYC benchmark path records the same fields and the outcome is DERIVED
- * from the recorded violation + action — not picked from a dropdown.
+ * from the recorded violation + the STRUCTURED enforcement action — the officer
+ * never types the disposition into a free-text box.
  */
 export type FieldActionInput = {
   observedCondition: string
   violationObserved: 'yes' | 'no' | 'unclear'
-  actionTaken: string
+  /** Structured enforcement action — what the officer actually did. */
+  enforcementAction: EnforcementAction
+  /** How the ticket / penalty notice was served (ticket_issued only). */
+  serviceMethod?: ServiceMethod
+  /** Ticket / penalty notice number (ticket_issued only, optional). */
+  referenceNumber?: string
+  /** Optional supporting "action taken" notes. */
+  actionTaken?: string
   officerNotes?: string
   followUpRequired: boolean
 }
+
+/**
+ * An officer assignment target. Accepts a full StaffProfile (from
+ * officerProfiles()) or any object carrying the officer's name + login email —
+ * assignment is always tied to a specific officer email, never a fake name.
+ */
+export type OfficerAssignment = Pick<StaffProfile, 'name' | 'email'>
 
 type WorkflowState = {
   cases: DemoCase[]
@@ -69,12 +95,14 @@ type WorkflowContextValue = {
   activeCase: DemoCase | null
   metrics: SupervisorMetrics
   staffName: string
-  /** Current role (derived from the signed-in email) + setter. */
+  /** Current role (constrained to the signed-in user's staff profile) + setter. */
   role: StaffRole
   setRole: (role: StaffRole) => void
-  /** Email of the signed-in user (drives role separation). */
+  /** Email of the signed-in user (drives staff identity + role separation). */
   userEmail: string | null
-  /** Whether this user may switch the demo role (officers cannot). */
+  /** The roles the signed-in user's staff profile allows them to act as. */
+  allowedRoles: StaffRole[]
+  /** Whether this user may switch roles (true only when >1 allowed role). */
   canSwitchRole: boolean
   submitComplaint: (input: ResidentComplaintInput) => string
   ingestResidentCase: (row: ResidentRequestRow) => string
@@ -83,7 +111,7 @@ type WorkflowContextValue = {
   approveRouting: (id: string) => void
   requestMoreInfo: (id: string, note?: string) => void
   overridePriority: (id: string, priority: Priority) => void
-  assignToOfficer: (id: string, officerName: string) => void
+  assignToOfficer: (id: string, officer: OfficerAssignment) => void
   recordFieldAction: (id: string, input: FieldActionInput) => void
   sendToStaffReview: (id: string) => void
   editDraftBody: (id: string, body: string) => void
@@ -138,20 +166,31 @@ export function WorkflowProvider({
   userEmail?: string | null
 }) {
   const [state, setState] = useState<WorkflowState>(loadState)
-  const canSwitchRole = canSwitchRoleForEmail(userEmail)
+  // Roles are constrained to the signed-in user's staff profile. Switching is
+  // only offered when the profile allows more than one role. This is POC
+  // staff-profile-based access control, not a free persona switcher.
+  const allowedRoles = useMemo(() => allowedRolesForEmail(userEmail), [userEmail])
+  const canSwitchRole = allowedRoles.length > 1
 
-  // Role comes from the signed-in email. A By-law Officer account is locked to
-  // the officer role; supervisors/coordinators default to supervisor but may use
-  // the "Acting as" selector for demo testing.
+  // The display name the signed-in user records actions under, in their CURRENT
+  // role — their own role identity (e.g. "Supervisor Mann", "Officer Qureshi"),
+  // never another person's. Recorded on decisions, assignments, and approvals.
+  const actingName = useMemo(() => currentActorName(userEmail, state.role), [userEmail, state.role])
+  // Kept in a ref so the stable action callbacks below always record under the
+  // CURRENT acting identity without needing to be re-created on every role change.
+  const actingNameRef = useRef(actingName)
+  actingNameRef.current = actingName
+
+  // Keep the active role inside the profile's allowed set. If the persisted role
+  // is not allowed for this email (e.g. a stale 'officer' from a previous
+  // session, or a supervisor whose profile never allows officer), snap back to
+  // the profile's default role. This is what prevents a supervisor account from
+  // acting as Officer Oakley.
   useEffect(() => {
-    if (!canSwitchRole) {
-      setState((s) => (s.role === 'officer' ? s : { ...s, role: 'officer' }))
-    } else {
-      // Ensure a locked officer session that later signs in as supervisor is not
-      // stuck on 'officer' from persisted state.
-      setState((s) => (s.role === 'officer' ? { ...s, role: roleForEmail(userEmail) } : s))
-    }
-  }, [userEmail, canSwitchRole])
+    setState((s) =>
+      allowedRoles.includes(s.role) ? s : { ...s, role: defaultRoleForEmail(userEmail) },
+    )
+  }, [userEmail, allowedRoles])
 
   useEffect(() => {
     try {
@@ -174,11 +213,12 @@ export function WorkflowProvider({
 
   const setRole = useCallback(
     (role: StaffRole) => {
-      // Officers cannot switch roles (no escalating to supervisor).
-      if (!canSwitchRole) return
+      // Refuse any role the signed-in user's staff profile does not allow. A
+      // supervisor/CSR account can never select By-law Officer this way.
+      if (!canUseRole(userEmail, role)) return
       setState((s) => ({ ...s, role }))
     },
-    [canSwitchRole],
+    [userEmail],
   )
 
   // Bridge a resident Supabase submission into the workbench. Reuses the case if
@@ -240,7 +280,7 @@ export function WorkflowProvider({
         if (c.stage === 'closed') return c
         return {
         ...c,
-        decisions: [...c.decisions, { action: 'Approved AI routing', by: STAFF_NAME, at: now }],
+        decisions: [...c.decisions, { action: 'Approved AI routing', by: actingNameRef.current, at: now }],
         audit: [...c.audit, auditEvent('staff', 'Routing approved', `Staff confirmed the ${c.triage.category} classification and routing to ${c.triage.recommendedDepartment}.`, now)],
         }
       })
@@ -256,7 +296,7 @@ export function WorkflowProvider({
         return {
         ...c,
         stage: 'needs-staff-attention',
-        decisions: [...c.decisions, { action: 'Requested more information', by: STAFF_NAME, at: now, note }],
+        decisions: [...c.decisions, { action: 'Requested more information', by: actingNameRef.current, at: now, note }],
         audit: [...c.audit, auditEvent('staff', 'More information requested', note || 'Staff requested additional details from the resident before closure.', now)],
         }
       })
@@ -272,7 +312,7 @@ export function WorkflowProvider({
         return {
         ...c,
         priorityOverride: priority,
-        decisions: [...c.decisions, { action: `Overrode priority to ${priority}`, by: STAFF_NAME, at: now }],
+        decisions: [...c.decisions, { action: `Overrode priority to ${priority}`, by: actingNameRef.current, at: now }],
         audit: [...c.audit, auditEvent('staff', 'Priority overridden', `Staff changed priority from ${c.triage.recommendedPriority} to ${priority}.`, now)],
         }
       })
@@ -280,17 +320,22 @@ export function WorkflowProvider({
     [updateCase],
   )
 
-  // Supervisor / CSR assigns the case to a named officer for a field visit.
+  // Supervisor / CSR assigns the case to a specific officer for a field visit.
+  // Assignment is tied to the officer's login email (assignedOfficerEmail) — the
+  // Officer Field Console filters on that email — not just a display name.
   const assignToOfficer = useCallback(
-    (id: string, officerName: string) => {
+    (id: string, officer: OfficerAssignment) => {
       const now = new Date().toISOString()
+      const officerName = officer.name
+      const officerEmail = officer.email.trim().toLowerCase()
       updateCase(id, (c) => {
         if (c.stage === 'closed') return c
         return {
         ...c,
         stage: 'assigned',
         assignedOfficer: officerName,
-        decisions: [...c.decisions, { action: `Assigned to ${officerName}`, by: STAFF_NAME, at: now }],
+        assignedOfficerEmail: officerEmail,
+        decisions: [...c.decisions, { action: `Assigned to ${officerName}`, by: actingNameRef.current, at: now }],
         audit: [
           ...c.audit,
           auditEvent('staff', 'Assigned to officer', `Case assigned to ${officerName} for a field investigation.`, now),
@@ -308,25 +353,31 @@ export function WorkflowProvider({
       const now = new Date().toISOString()
       updateCase(id, (c) => {
         if (c.stage === 'closed') return c
-        const officerName = c.assignedOfficer ?? ROLE_ACTOR_NAME.officer
+        const officerName = c.assignedOfficer ?? actingNameRef.current
         const observedCondition = input.observedCondition.trim()
-        const actionTaken = input.actionTaken.trim()
+        const actionTaken = input.actionTaken?.trim() ?? ''
         const officerNotes = input.officerNotes?.trim() ?? ''
-        // Derive the disposition from the recorded violation + action using the
-        // SAME shared rules as the resident Supabase path — a "yes" violation
-        // never implies a ticket.
-        const outcome = deriveFieldVisitOutcome(input.violationObserved, actionTaken)
+        const isTicket = input.enforcementAction === 'ticket_issued'
+        const referenceNumber = isTicket ? input.referenceNumber?.trim() || null : null
+        const serviceMethod = isTicket ? input.serviceMethod ?? null : null
+        // Derive the disposition from the recorded violation + the structured
+        // enforcement action using the SAME shared rules as the resident
+        // Supabase path — a "yes" violation never implies a ticket, and a ticket
+        // is only ever claimed when the officer explicitly selected it.
+        const outcome = deriveFieldVisitOutcome(input.violationObserved, input.enforcementAction)
         const fieldAction: OfficerFieldAction = {
           officerName,
           visitedAt: now,
           outcome,
           observations: [observedCondition, officerNotes].filter(Boolean).join(' — '),
-          referenceNumber: null,
+          referenceNumber,
           followUpRequired: input.followUpRequired,
           recordedAt: now,
           // Carry the verbatim recorded fields so the closure draft reflects the
           // real action taken, not an assumed disposition.
           violationObserved: input.violationObserved,
+          enforcementAction: input.enforcementAction,
+          serviceMethod,
           actionTaken: actionTaken || null,
           observedCondition: observedCondition || null,
           officerNotes: officerNotes || null,
@@ -365,7 +416,7 @@ export function WorkflowProvider({
           ...c,
           stage: 'staff-review',
           draft,
-          decisions: [...c.decisions, { action: 'Sent to staff review', by: STAFF_NAME, at: now }],
+          decisions: [...c.decisions, { action: 'Sent to staff review', by: actingNameRef.current, at: now }],
           audit,
         }
       })
@@ -414,12 +465,12 @@ export function WorkflowProvider({
           ...c,
           stage: 'closed',
           closureMessage: c.draft.body,
-          approvedBy: STAFF_NAME,
+          approvedBy: actingNameRef.current,
           approvedAt: now,
-          decisions: [...c.decisions, { action: 'Approved closure response', by: STAFF_NAME, at: now }],
+          decisions: [...c.decisions, { action: 'Approved closure response', by: actingNameRef.current, at: now }],
           audit: [
             ...c.audit,
-            auditEvent('staff', 'Closure approved', `Final closure response approved by ${STAFF_NAME}.`, now),
+            auditEvent('staff', 'Closure approved', `Final closure response approved by ${actingNameRef.current}.`, now),
             residentAudit,
             auditEvent('system', 'Case closed', 'Case status changed to Closed and logged in the audit trail.', now),
           ],
@@ -445,10 +496,11 @@ export function WorkflowProvider({
     cases: state.cases,
     activeCase,
     metrics,
-    staffName: STAFF_NAME,
+    staffName: actingName,
     role: state.role,
     setRole,
     userEmail,
+    allowedRoles,
     canSwitchRole,
     submitComplaint,
     ingestResidentCase,

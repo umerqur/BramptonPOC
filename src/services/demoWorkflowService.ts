@@ -1,13 +1,18 @@
-// Mock AI workflow engine for the Proactive Enforcement Response POC demo.
+// Deterministic workflow and decision-support helpers for the Proactive
+// Enforcement Response POC.
+//
+// The real AI-supported retrieval layer is separate: Cohere embeddings + Qdrant
+// + Cohere rerank. This service handles rules-based classification helpers,
+// missing-information checks, context assembly, readiness scoring, and
+// rules-based closure template assembly.
 //
 // This service is intentionally self-contained and synchronous: it lets the
 // end-to-end demo run entirely in the browser with synthetic data, without
 // waiting on Supabase. Given a raw resident complaint it deterministically
-// produces classification, extracted facts, a missing-information check,
-// enforcement context, a case summary, a confidence score, and a closure-
-// response draft — i.e. all the manual research and drafting the AI is taking
-// off staff. Staff actions (approve, edit, override, request info) are applied
-// on top via the workflow store.
+// produces a classification check, extracted facts, a missing-information check,
+// enforcement context, a case summary, a readiness score, and a rules-based
+// closure-response draft. Staff actions (approve, edit, override, request info)
+// are applied on top via the workflow store.
 //
 // DEMO POSITIONING: every output is decision support / closure-response
 // automation only. Final review remains with authorized staff. The numbers and
@@ -20,9 +25,11 @@ import type {
   ClosureDraft,
   DemoCase,
   DemoCategory,
+  EnforcementAction,
   EnforcementContext,
   FieldVisitOutcome,
   OfficerFieldAction,
+  ServiceMethod,
   Priority,
   ResidentComplaintInput,
   SampleComplaint,
@@ -55,7 +62,7 @@ function auditEvent(
 ): AuditEvent {
   const actorLabel =
     actor === 'ai'
-      ? 'AI workflow system'
+      ? 'Decision support engine'
       : actor === 'staff'
         ? 'By-law staff'
         : actor === 'officer'
@@ -190,18 +197,14 @@ function buildContext(input: ResidentComplaintInput, category: DemoCategory): En
   const repeatLocationSignal: EnforcementContext['repeatLocationSignal'] =
     repeatLocationCount >= 4 ? 'High' : repeatLocationCount >= 2 ? 'Emerging' : 'None'
 
-  const history =
-    repeatLocationCount > 0
-      ? Array.from({ length: Math.min(repeatLocationCount, 3) }).map((_, i) => ({
-          caseId: `BR-2025-${4100 + i}`,
-          date: formatDate(daysAgo(30 + i * 22)),
-          summary: `${category} complaint at or near this location`,
-          status: i === 0 ? 'Closed — resolved' : 'Closed — no action required',
-        }))
-      : []
-
+  // Verified complaint history and nearby records are NOT available in this POC:
+  // there is no Supabase per-location complaint-history query, and the previous
+  // synthetic BR-2025-* records made demo data look like real Brampton records.
+  // Leave these empty so the UI shows an honest "no verified records" state and
+  // never displays a fake record id. (Semantic context still comes from the real
+  // Cohere/Qdrant "Similar benchmark references" retrieval shown separately.)
   return {
-    complaintHistory: history,
+    complaintHistory: [],
     patrolLogs:
       repeatLocationCount > 0
         ? [`Patrol unit logged a drive-by of this area ${repeatLocationCount} times in the last 60 days.`, 'Last officer note: area flagged for periodic monitoring.']
@@ -217,13 +220,7 @@ function buildContext(input: ResidentComplaintInput, category: DemoCategory): En
           ? `${category} complaints in this area are slightly above the trailing 90-day average.`
           : `${category} complaint volume for this area is within the normal range.`,
     policyMatch: POLICY_BY_CATEGORY[category],
-    similarNearbyCases:
-      repeatLocationCount > 0
-        ? [
-            { caseId: `BR-2025-${4200}`, distance: '120 m', category, outcome: 'Closed — notice to comply met' },
-            { caseId: `BR-2025-${4221}`, distance: '340 m', category, outcome: 'Closed — no violation found' },
-          ]
-        : [{ caseId: `BR-2025-${4250}`, distance: '1.2 km', category, outcome: 'Closed — resolved on first visit' }],
+    similarNearbyCases: [],
     repeatLocationCount,
     repeatLocationSignal,
   }
@@ -253,7 +250,7 @@ function buildTriage(
   // --- Confidence rules (mirrors the diagram's "Enough confidence?" gate) ---
   let confidence = 0.94
   const reasoning: string[] = []
-  reasoning.push(`Classified as ${category} from complaint wording (model confidence ${(categoryConfidence * 100).toFixed(0)}%).`)
+  reasoning.push(`Classified as ${category} from complaint wording (classification confidence ${(categoryConfidence * 100).toFixed(0)}%).`)
 
   if (!input.location.trim()) {
     confidence -= 0.25
@@ -373,43 +370,64 @@ export const FIELD_OUTCOME_LABELS: Record<FieldVisitOutcome, string> = {
   warning_education: 'Warning or education provided',
 }
 
+/** Label for each structured enforcement action the officer can select. */
+export const ENFORCEMENT_ACTION_LABELS: Record<EnforcementAction, string> = {
+  warning_education: 'Education / warning provided',
+  notice_issued: 'Notice issued',
+  ticket_issued: 'Parking ticket / penalty notice issued',
+  no_action: 'No action taken',
+  other: 'Other',
+}
+
+/** Label for each method of service (ticket / penalty notice only). */
+export const SERVICE_METHOD_LABELS: Record<ServiceMethod, string> = {
+  placed_on_vehicle: 'Placed on vehicle',
+  handed_to_driver: 'Handed to driver / owner',
+  sent_by_mail: 'Sent by mail',
+  other: 'Other',
+}
+
 /**
  * Shared, deterministic mapping from the officer's recorded field finding
- * (violation observed + free-text action taken) to a standard by-law
- * disposition. BOTH the resident Supabase path and the local NYC benchmark path
- * use this single rule set, so the closure draft is grounded the same way:
+ * (violation observed + the STRUCTURED enforcement action they selected) to a
+ * standard by-law disposition. BOTH the resident Supabase path and the local
+ * NYC benchmark path use this single rule set, so the closure draft is grounded
+ * the same way:
  *
- *   ticket / fine / citation / summons / penalty → ticket_issued
- *   education / warning / advisory / verbal / guidance → warning_education
- *   notice / order / comply / compliance → notice_issued
- *   resolved / cleared / fixed / no further action → resolved
+ *   enforcementAction === ticket_issued    → ticket_issued
+ *   enforcementAction === notice_issued    → notice_issued
+ *   enforcementAction === warning_education → warning_education
+ *   enforcementAction === no_action        → resolved (no further action)
+ *   enforcementAction === other / unset    → resolved (no further action)
  *
- * A "yes" violation ALONE never implies a ticket: with generic wording it is
- * recorded as a warning/education (the real action text is carried into the
- * letter). A "no" violation is always no_violation.
+ * A "no" violation always takes precedence and is recorded as no_violation. A
+ * ticket is ONLY ever claimed when the officer explicitly selected the
+ * "Parking ticket / penalty notice issued" action — never inferred from a
+ * violation being observed.
  */
 export function deriveFieldVisitOutcome(
   violationObserved: string | null,
-  actionTaken: string | null,
+  enforcementAction: EnforcementAction | null,
 ): FieldVisitOutcome {
   const violation = (violationObserved ?? '').trim().toLowerCase()
-  const action = (actionTaken ?? '').trim().toLowerCase()
 
+  // "No violation observed" is the most truthful disposition regardless of action.
   if (violation === 'no') return 'no_violation'
 
-  // A ticket is only ever claimed when the recorded action EXPLICITLY says so.
-  if (/ticket|fine|citation|summons|penalt/.test(action)) return 'ticket_issued'
-  // Education / warning / advisory / guidance → a warning-or-education record.
-  if (/educat|warn|advisor|verbal|guidance/.test(action)) return 'warning_education'
-  // Formal notice / order to comply (non-ticket enforcement step).
-  if (/notice|order|comply|compliance/.test(action)) return 'notice_issued'
-  // Resolved / cleared / fixed / no further action on site.
-  if (/resolv|complied|cleared|cleaned|removed|fixed|corrected|no further|no action/.test(action))
-    return 'resolved'
-
-  // Violation seen but the action wording is generic → record as warning/education
-  // (never assume a ticket). Unclear with no clear action → no violation.
-  return violation === 'yes' ? 'warning_education' : 'no_violation'
+  switch (enforcementAction) {
+    // A ticket is only ever claimed when the officer explicitly selected it.
+    case 'ticket_issued':
+      return 'ticket_issued'
+    case 'notice_issued':
+      return 'notice_issued'
+    case 'warning_education':
+      return 'warning_education'
+    // No action taken, or any "other" action: nothing further was required.
+    case 'no_action':
+    case 'other':
+    default:
+      return 'resolved'
+  }
 }
 
 function fieldVisitDateLabel(action: OfficerFieldAction): string {
@@ -417,10 +435,22 @@ function fieldVisitDateLabel(action: OfficerFieldAction): string {
 }
 
 /**
- * The closure paragraph that describes what actually happened. When an officer
- * field action is on file it states the real outcome the officer recorded; with
- * no field action it stays strictly to the review that was performed and never
- * claims an officer attended.
+ * True when a field visit was recorded but no STRUCTURED enforcement action is on
+ * file — a legacy / incomplete outcome. The resident-facing disposition must NOT
+ * be inferred in this case: staff must set the structured enforcement action
+ * before a closure draft can be prepared or sent.
+ */
+export function fieldOutcomeNeedsStructuredAction(fieldAction: OfficerFieldAction | null): boolean {
+  return fieldAction != null && fieldAction.enforcementAction == null
+}
+
+/**
+ * The closure paragraph that describes what actually happened. It is driven ONLY
+ * by the STRUCTURED officer fields (violation observed + enforcement action +,
+ * for a ticket, the reference number). Officer free text (action taken, observed
+ * condition, notes) is NEVER copied into the resident-facing letter — it stays in
+ * internal notes only. With no field action it stays strictly to the review that
+ * was performed and never claims an officer attended.
  */
 function closureOutcomeParagraph(
   triage: AiTriageResult,
@@ -440,56 +470,66 @@ function closureOutcomeParagraph(
   }
 
   const date = fieldVisitDateLabel(fieldAction)
-  const ref = fieldAction.referenceNumber ? ` (${fieldAction.referenceNumber})` : ''
-  // A plain version of the officer's recorded action, appended where it adds
-  // detail so the letter reflects what the officer actually did.
-  const action = plainAction(fieldAction.actionTaken)
-  const recordedActionSentence = action ? ` The officer's recorded action was: ${action}.` : ''
+
+  // Friendly, forward-looking invitation to re-engage 311 with the case number —
+  // appended to every grounded outcome so the resident always has a clear path
+  // back if the issue returns or new information comes up.
+  const inviteBack =
+    ` If the issue continues or returns, please contact 311 with your case number so the City can review the matter again.`
+
+  // A completed field visit with NO structured enforcement action is a legacy /
+  // incomplete record. Do NOT imply any disposition (ticket, notice, or warning)
+  // — staff must set the structured action before this is sent (the Workbench and
+  // Closure Review block sending until they do).
+  if (fieldOutcomeNeedsStructuredAction(fieldAction)) {
+    return (
+      `A by-law enforcement officer attended the location${where} on ${date}. ` +
+      `The recorded enforcement outcome is being finalized before this file is closed.` +
+      inviteBack
+    )
+  }
 
   switch (fieldAction.outcome) {
     case 'no_violation':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} to investigate. ` +
-        `At the time of inspection, no violation of ${policy} was observed. ` +
-        `Based on that inspection, this file has been closed.${recordedActionSentence} ` +
-        `If the issue recurs, please submit a new request so we can schedule a follow-up.`
+        `At the time of inspection, no violation of ${policy} was observed, so no further action was required and this file has been closed.` +
+        inviteBack
       )
     case 'warning_education':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and ` +
         `${fieldAction.violationObserved === 'yes' ? `observed a concern related to ${policy}` : `reviewed the reported concern`}. ` +
-        `The officer addressed the matter by providing education or a warning to the responsible party rather than issuing a ticket.` +
-        `${recordedActionSentence} Your service request has been closed.`
+        `The officer addressed the matter by providing education or a warning. No ticket was recorded on this file.` +
+        ` Your service request has been closed.` +
+        inviteBack
       )
     case 'notice_issued':
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
-        `A notice to comply${ref} was issued to the responsible party, and the location will be re-inspected after the compliance period.` +
-        `${recordedActionSentence} Your service request has been closed now that this action has been taken.`
+        `A notice to comply was issued to the responsible party, and the location will be re-inspected after the compliance period.` +
+        ` Your service request has been closed now that this action has been taken.` +
+        inviteBack
       )
-    case 'ticket_issued':
+    case 'ticket_issued': {
+      // Only ever reached when the officer selected "Parking ticket / penalty
+      // notice issued" (deriveFieldVisitOutcome). Include the notice number only
+      // if it was provided — never invent one.
+      const ticketRef = fieldAction.referenceNumber ? ` (number ${fieldAction.referenceNumber})` : ''
       return (
-        `A by-law enforcement officer attended the location${where} on ${date}, observed a violation of ${policy}, ` +
-        `and issued a ticket${ref} to the responsible party. This file has now been closed.${recordedActionSentence}`
+        `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
+        `A parking penalty notice${ticketRef} was issued. This file has now been closed.` +
+        inviteBack
       )
+    }
     case 'resolved':
       return (
         `A by-law enforcement officer attended the location${where} on ${date}. ` +
-        `The issue had been resolved, so no further enforcement action under ${policy} was required and this file has been closed.` +
-        `${recordedActionSentence} Thank you for reporting it.`
+        `After reviewing the matter, no further enforcement action under ${policy} was required at this time, so this file has been closed.` +
+        ` Thank you for reporting it.` +
+        inviteBack
       )
   }
-}
-
-/**
- * A plain, resident-safe version of the officer's recorded action text, or null
- * when none was recorded. Lower-cases the first letter and trims trailing
- * punctuation so it reads naturally inside a sentence.
- */
-function plainAction(text: string | null): string | null {
-  const t = (text ?? '').trim().replace(/[.\s]+$/, '')
-  if (!t) return null
-  return t.charAt(0).toLowerCase() + t.slice(1)
 }
 
 export function buildClosureDraft(
@@ -516,10 +556,26 @@ export function buildClosureDraft(
     fieldAction
       ? `Field outcome on file: ${FIELD_OUTCOME_LABELS[fieldAction.outcome]} by ${fieldAction.officerName} on ${fieldVisitDateLabel(fieldAction)}${fieldAction.referenceNumber ? ` (ref ${fieldAction.referenceNumber})` : ''}.`
       : 'No officer field action on file — closure language is review-only and claims no site visit.',
-    ...(fieldAction?.actionTaken ? [`Officer recorded action taken: ${fieldAction.actionTaken}.`] : []),
+    // A completed visit with no structured enforcement action is incomplete:
+    // flag it so staff know to set the structured action before sending.
+    ...(fieldAction && fieldOutcomeNeedsStructuredAction(fieldAction)
+      ? ['Legacy field outcome: no structured enforcement action recorded. Set the enforcement action before preparing or sending closure.']
+      : []),
+    ...(fieldAction?.enforcementAction
+      ? [`Officer selected enforcement action: ${ENFORCEMENT_ACTION_LABELS[fieldAction.enforcementAction]}.`]
+      : []),
+    ...(fieldAction?.enforcementAction === 'ticket_issued' && fieldAction.serviceMethod
+      ? [`Method of service: ${SERVICE_METHOD_LABELS[fieldAction.serviceMethod]}.`]
+      : []),
+    // Officer free text is kept INTERNAL only — never copied into the resident letter.
     ...(fieldAction?.violationObserved ? [`Officer recorded violation observed: ${fieldAction.violationObserved}.`] : []),
+    ...(fieldAction?.actionTaken ? [`Officer action-taken notes (internal): ${fieldAction.actionTaken}.`] : []),
+    ...(fieldAction?.observedCondition ? [`Officer observed condition (internal): ${fieldAction.observedCondition}.`] : []),
+    ...(fieldAction?.officerNotes ? [`Officer notes (internal): ${fieldAction.officerNotes}.`] : []),
     'Staff must review and approve before any resident communication is sent.',
   ]
+
+  const structuredOutcomeOk = fieldAction ? !fieldOutcomeNeedsStructuredAction(fieldAction) : true
 
   return {
     subject: `Update on your service request — ${triage.category}`,
@@ -527,11 +583,15 @@ export function buildClosureDraft(
     policyChecklist: [
       { item: `Cites applicable by-law (${context.policyMatch.reference})`, ok: true },
       {
-        item: fieldAction ? 'States the recorded field action taken' : 'States the review performed (no field action claimed)',
-        ok: true,
+        item: !fieldAction
+          ? 'States the review performed (no field action claimed)'
+          : structuredOutcomeOk
+            ? 'States the structured enforcement outcome the officer recorded'
+            : 'Field outcome incomplete — set the structured enforcement action before sending',
+        ok: structuredOutcomeOk,
       },
       { item: 'Only claims a site visit when an officer recorded one', ok: true },
-      { item: 'Confirms the case status (closed)', ok: true },
+      { item: 'Resident letter uses structured fields only (no officer free text)', ok: true },
       { item: 'Provides a path to re-open if the issue recurs', ok: true },
     ],
     toneChecklist: [
@@ -547,7 +607,7 @@ export function buildClosureDraft(
 }
 
 // ---------------------------------------------------------------------------
-// Orchestration — run the full AI workflow on a fresh intake
+// Orchestration — run the full decision-support workflow on a fresh intake
 // ---------------------------------------------------------------------------
 
 /**
@@ -571,16 +631,16 @@ export function runWorkflow(
   const audit: AuditEvent[] = [
     auditEvent('resident', 'Complaint submitted', `Resident filed a ${triage.category} complaint via ${input.channel}.`, t0),
     auditEvent('ai', 'Intake captured', 'Intake fields parsed and a synthetic case object was created.', addSeconds(t0, 1)),
-    auditEvent('ai', 'AI classification', `Classified as ${triage.category} (${(triage.categoryConfidence * 100).toFixed(0)}% model confidence); routed to ${triage.recommendedDepartment}.`, addSeconds(t0, 2)),
+    auditEvent('ai', 'Classification check', `Classified as ${triage.category} (${(triage.categoryConfidence * 100).toFixed(0)}% classification confidence); routed to ${triage.recommendedDepartment}.`, addSeconds(t0, 2)),
     auditEvent('ai', 'Facts extracted', `${triage.keyFacts.length} key facts extracted; ${triage.missingInformation.length} missing-information flag(s).`, addSeconds(t0, 3)),
     auditEvent('ai', 'Context gathered', `Pulled ${context.complaintHistory.length} history record(s), patrol/ticket notes, trend summary, and policy match.`, addSeconds(t0, 4)),
-    auditEvent('ai', 'Case summary built', 'Plain-language summary and structured facts assembled for staff.', addSeconds(t0, 5)),
-    auditEvent('ai', 'Review readiness checked', `File readiness ${(triage.confidence * 100).toFixed(0)}% (${triage.confidenceLevel}).`, addSeconds(t0, 6)),
+    auditEvent('ai', 'Case summary assembled', 'Plain-language summary and structured facts assembled for staff.', addSeconds(t0, 5)),
+    auditEvent('ai', 'File readiness checked', `File readiness ${(triage.confidence * 100).toFixed(0)}% (${triage.confidenceLevel}).`, addSeconds(t0, 6)),
   ]
   if (draftReady) {
-    audit.push(auditEvent('ai', 'Closure draft prepared', 'High confidence — a closure-response draft was prepared for staff review.', addSeconds(t0, 7)))
+    audit.push(auditEvent('ai', 'Rules-based draft prepared', 'Rules-based template draft prepared for staff review.', addSeconds(t0, 7)))
   } else {
-    audit.push(auditEvent('ai', 'Routed to staff attention', 'Confidence below threshold — routed to a staff member to clarify before drafting.', addSeconds(t0, 7)))
+    audit.push(auditEvent('ai', 'Routed to staff attention', 'File readiness below threshold — routed to a staff member to clarify before drafting.', addSeconds(t0, 7)))
   }
 
   return {
@@ -613,6 +673,7 @@ export function runWorkflow(
     draft,
     priorityOverride: null,
     assignedOfficer: null,
+    assignedOfficerEmail: null,
     fieldAction: null,
     decisions: [],
     audit,
@@ -752,6 +813,7 @@ export function buildSeedCases(): DemoCase[] {
   const closed = runWorkflowAt(SEED_CLOSED_INPUT, daysAgo(2))
   if (closed.draft) {
     const officerName = DEMO_OFFICER.name
+    const officerEmail = DEMO_OFFICER.email
     const assignedAt = addSeconds(closed.createdAt, 200)
     const visitedAt = addSeconds(closed.createdAt, 480)
     const fieldAction: OfficerFieldAction = {
@@ -763,6 +825,8 @@ export function buildSeedCases(): DemoCase[] {
       followUpRequired: false,
       recordedAt: visitedAt,
       violationObserved: 'no',
+      enforcementAction: 'no_action',
+      serviceMethod: null,
       actionTaken: 'No further action required — issue already resolved on arrival',
       observedCondition: 'No active noise at the time of the visit.',
       officerNotes: null,
@@ -772,6 +836,7 @@ export function buildSeedCases(): DemoCase[] {
     // states what the officer actually found.
     const draft = buildClosureDraft(closed.input, closed.triage, closed.context, approvedAt, fieldAction)
     closed.assignedOfficer = officerName
+    closed.assignedOfficerEmail = officerEmail
     closed.fieldAction = fieldAction
     closed.draft = draft
     closed.stage = 'closed'

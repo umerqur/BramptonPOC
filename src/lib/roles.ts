@@ -1,14 +1,37 @@
-// Role-based access for the staff workflow, modelled on a standard municipal
-// by-law enforcement team. Roles are now derived from the authenticated user's
-// email (roleForEmail below) — not only the manual "Acting as" selector. The
-// selector remains for supervisor/dev demo testing; a real By-law Officer account
-// is locked to the officer role and cannot switch up to supervisor.
+// POC staff-profile-based access control for the by-law enforcement workflow.
 //
-//   * Supervisor / Coordinator — oversees the queue, assigns work to officers,
-//                      can investigate, and is the only role that approves a
-//                      closure response. (CSR is treated as a coordinator here.)
-//   * By-law Officer — goes to the location, investigates, and records the real
-//                      field outcome. Sees only their assigned cases.
+// This is NOT a free persona switcher. Staff identity comes from the Supabase
+// login email; the email is matched against a known staff profile list below.
+// A profile declares which roles that person is ALLOWED to act as, their default
+// role, and the display name they use in each role. The "Acting as" selector
+// only ever offers a user the roles in their OWN profile — it can never grant a
+// role the profile does not allow, and it can never let one person act as
+// another person's identity.
+//
+// Concretely:
+//   * A user can only select roles listed in their own staff profile.
+//   * If a user has officer access, they act as their OWN officer identity only
+//     (e.g. Umer → "Officer Qureshi", Balraj → "Officer Mann"). Umer can never
+//     act as Officer Oakley, and Balraj can never act as Officer Qureshi.
+//   * Officer Oakley can only ever be a By-law Officer.
+//   * A case is recorded against the assigned officer's EMAIL, so only that
+//     signed-in email may record the field outcome for it.
+//
+// Resident email is only contact information on a request. If a resident happens
+// to use the same address as a staff account, that is still just resident
+// contact information on that request — it does not grant or remove any staff
+// permission. Staff permissions come ONLY from the staff profile list here.
+//
+// Roles:
+//   * Supervisor — work queue + insights, assigns work, overrides priority,
+//                  reviews the officer's field outcome, generates/edits/approves
+//                  and sends the closure response.
+//   * CSR / Intake — creates/reviews intake, checks missing information, assigns
+//                  to an officer, requests more information. Cannot record field
+//                  outcomes or approve/send closures.
+//   * By-law Officer — sees only cases assigned to their own officer email and
+//                  records the on-site field outcome. No supervisor queue,
+//                  no insights, no closure approval.
 
 export type StaffRole = 'supervisor' | 'officer' | 'csr'
 
@@ -21,43 +44,186 @@ export const ROLE_LABELS: Record<StaffRole, string> = {
 }
 
 /**
- * The single demo By-law Officer. Cases assigned to this officer appear in the
- * Officer Field Console for whoever is signed in with this email.
+ * A known staff member. The login `email` is the real staff identity; `name` is
+ * the full staff name. `allowedRoles` is the closed set of roles this person may
+ * act as, `defaultRole` is where they land on sign-in, and `roleDisplayNames`
+ * is the name shown / recorded when this person acts in a given role (e.g. the
+ * officer display name recorded on a case they investigate).
  */
-// Display name is the role-based officer identity shown in the UI. The email is
-// an implementation detail only (auth/account binding) and is never surfaced in
-// the normal supervisor or officer UI.
-export const DEMO_OFFICER = {
-  name: 'Officer Oakley',
-  email: 'oakley.carpentry_worker@yahoo.com',
-  role: 'officer' as StaffRole,
+export type StaffProfile = {
+  name: string
+  email: string
+  allowedRoles: StaffRole[]
+  defaultRole: StaffRole
+  roleDisplayNames: Partial<Record<StaffRole, string>>
+}
+
+/** Normalize an email for identity comparison (trim + lowercase). */
+function normalizeEmail(email: string | null | undefined): string {
+  return (email ?? '').trim().toLowerCase()
 }
 
 /**
- * Demo supervisor / coordinator accounts. Anyone allowed in who is not the demo
- * officer is treated as a supervisor/coordinator with the full staff workflow.
+ * The known staff profile list — the single source of truth for staff identity
+ * and role separation. Anyone not in this list gets the default-staff fallback
+ * below (supervisor/CSR, never officer).
  */
-export const SUPERVISOR_EMAILS = [
-  'umer.qureshi@gmail.com',
-  'umer@neuralforge.ca',
-  'balraj_m7@hotmail.com',
-  'ousmaan_ahmed@icloud.com',
-] as const
+export const STAFF_PROFILES: StaffProfile[] = [
+  {
+    name: 'Umer Qureshi',
+    email: 'umer.qureshi@gmail.com',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Qureshi', csr: 'CSR Qureshi', officer: 'Officer Qureshi' },
+  },
+  {
+    name: 'Umer Neural Forge',
+    email: 'umer@neuralforge.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Qureshi', csr: 'CSR Qureshi', officer: 'Officer Qureshi' },
+  },
+  {
+    name: 'Balraj Mann',
+    email: 'balraj_m7@hotmail.com',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Mann', csr: 'CSR Mann', officer: 'Officer Mann' },
+  },
+  {
+    name: 'Ousmaan Ahmed',
+    email: 'ousmaan_ahmed@icloud.com',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Ahmed', csr: 'CSR Ahmed', officer: 'Officer Ahmed' },
+  },
+  {
+    name: 'Yuri Levin',
+    email: 'yuri.levin@queensu.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Levin', csr: 'CSR Levin', officer: 'Officer Levin' },
+  },
+  {
+    name: 'Ceren Kolsarici',
+    email: 'ceren.kolsarici@queensu.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Ceren', csr: 'CSR Ceren', officer: 'Officer Ceren' },
+  },
+  {
+    name: 'Stephen Thomas',
+    email: 'stephen.thomas@queensu.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Stephen', csr: 'CSR Stephen', officer: 'Officer Stephen' },
+  },
+  {
+    name: 'Dean McKeown',
+    email: 'dean.mckeown@queensu.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Dean', csr: 'CSR Dean', officer: 'Officer Dean' },
+  },
+  {
+    // Standard staff member (full access, lands on Supervisor) — matches the
+    // rest of the team. Added to mirror his Supabase login.
+    name: 'Bilal',
+    email: 'bgahmad@gmail.com',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Bilal', csr: 'CSR Bilal', officer: 'Officer Bilal' },
+  },
+  {
+    // The dedicated demo By-law Officer. This profile can ONLY be an officer.
+    name: 'Officer Oakley',
+    email: 'oakley.carpentry_worker@yahoo.com',
+    allowedRoles: ['officer'],
+    defaultRole: 'officer',
+    roleDisplayNames: { officer: 'Officer Oakley' },
+  },
+  {
+    // Full-access staff whose field identity is "Officer Shaz". Lands on the
+    // officer field console by default but can also act as supervisor / CSR.
+    name: 'Shaz',
+    email: 'shahzadqu@gmail.com',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'officer',
+    roleDisplayNames: { supervisor: 'Supervisor Shaz', csr: 'CSR Shaz', officer: 'Officer Shaz' },
+  },
+]
+
+// Fallback for an authenticated email that is allowed into the app but is not a
+// named staff profile: treat them as a supervisor/CSR for the demo, but NEVER
+// grant officer access. Officer access requires an explicit officer profile.
+const DEFAULT_STAFF_ALLOWED_ROLES: StaffRole[] = ['supervisor', 'csr']
+const DEFAULT_STAFF_ROLE: StaffRole = 'supervisor'
 
 /**
- * Central email → role mapping. The demo officer email maps to the officer role;
- * every other authenticated user is a supervisor/coordinator. This is the single
- * source of truth for role separation by signed-in identity.
+ * The dedicated demo By-law Officer profile (Officer Oakley). Cases assigned to
+ * this officer email appear in the Officer Field Console for whoever is signed
+ * in with this email.
  */
-export function roleForEmail(email: string | null | undefined): StaffRole {
-  const value = (email ?? '').trim().toLowerCase()
-  if (value && value === DEMO_OFFICER.email) return 'officer'
-  return 'supervisor'
+export const DEMO_OFFICER: StaffProfile =
+  STAFF_PROFILES.find((p) => p.email === 'oakley.carpentry_worker@yahoo.com')!
+
+/** The staff profile for a signed-in email, or null if not a known staff member. */
+export function getStaffProfileForEmail(email: string | null | undefined): StaffProfile | null {
+  const value = normalizeEmail(email)
+  if (!value) return null
+  return STAFF_PROFILES.find((p) => p.email === value) ?? null
 }
 
-/** Whether a signed-in user may switch the demo "Acting as" role (officers cannot). */
-export function canSwitchRoleForEmail(email: string | null | undefined): boolean {
-  return roleForEmail(email) !== 'officer'
+/** The roles a signed-in email is allowed to act as. */
+export function allowedRolesForEmail(email: string | null | undefined): StaffRole[] {
+  const profile = getStaffProfileForEmail(email)
+  return profile ? [...profile.allowedRoles] : [...DEFAULT_STAFF_ALLOWED_ROLES]
+}
+
+/** The role a signed-in email lands on by default. */
+export function defaultRoleForEmail(email: string | null | undefined): StaffRole {
+  const profile = getStaffProfileForEmail(email)
+  return profile ? profile.defaultRole : DEFAULT_STAFF_ROLE
+}
+
+/** Whether a signed-in email is allowed to act as the given role. */
+export function canUseRole(email: string | null | undefined, role: StaffRole): boolean {
+  return allowedRolesForEmail(email).includes(role)
+}
+
+/**
+ * The display name the signed-in user uses when acting in a given role — their
+ * own role identity (e.g. "Officer Qureshi"), never another person's. Falls back
+ * to a name + role label, then to the generic role actor name for unknown staff.
+ */
+export function currentActorName(email: string | null | undefined, role: StaffRole): string {
+  const profile = getStaffProfileForEmail(email)
+  if (profile) return profile.roleDisplayNames[role] ?? `${profile.name} (${ROLE_LABELS[role]})`
+  return ROLE_ACTOR_NAME[role]
+}
+
+/** The officer display name for a staff profile (its own officer identity). */
+export function officerDisplayName(profile: StaffProfile): string {
+  return profile.roleDisplayNames.officer ?? profile.name
+}
+
+/**
+ * The assignable By-law Officers — the assignable list is generated from all
+ * named staff profiles with officer access, deduplicated by officer display
+ * name. Two Umer logins share the one "Officer Qureshi" identity, so the first
+ * matching login is the canonical assignable identity for that officer name.
+ */
+export function officerProfiles(): StaffProfile[] {
+  const seen = new Set<string>()
+  const result: StaffProfile[] = []
+  for (const profile of STAFF_PROFILES) {
+    if (!profile.allowedRoles.includes('officer')) continue
+    const label = officerDisplayName(profile)
+    if (seen.has(label)) continue
+    seen.add(label)
+    result.push(profile)
+  }
+  return result
 }
 
 /** Short descriptor used in the role switcher. */
@@ -67,11 +233,11 @@ export const ROLE_DESCRIPTIONS: Record<StaffRole, string> = {
   csr: 'Logs and triages complaints, assigns to an officer',
 }
 
-/** A staff display name per role, used when a role records an action. */
+/** Generic fallback staff name per role, used only for unknown (non-profile) staff. */
 export const ROLE_ACTOR_NAME: Record<StaffRole, string> = {
-  supervisor: 'M. Okafor (Supervisor)',
-  officer: `${DEMO_OFFICER.name} (By-law Officer)`,
-  csr: 'J. Lee (Intake / CSR)',
+  supervisor: 'Supervisor (staff)',
+  officer: `${DEMO_OFFICER.roleDisplayNames.officer} (By-law Officer)`,
+  csr: 'Intake / CSR (staff)',
 }
 
 /** The gated actions in the enforcement workflow. */
@@ -79,14 +245,17 @@ export type RoleAction = 'manageCase' | 'assignOfficer' | 'recordFieldAction' | 
 
 // Which roles may perform each gated action.
 const PERMISSIONS: Record<RoleAction, StaffRole[]> = {
-  // Supervisor/coordinator case management: approve routing, request more info,
-  // override priority, prepare the closure draft. Officers cannot do these.
+  // Supervisor/CSR case management: review intake, check missing information,
+  // request more info, prepare the closure draft. Officers cannot do these.
   manageCase: ['supervisor', 'csr'],
+  // Both supervisor and CSR can assign a case to an officer.
   assignOfficer: ['supervisor', 'csr'],
-  // Recording a field outcome is the By-law Officer's job only. A supervisor
-  // assigns and approves closure — they never record field outcomes as the
-  // officer. The officer records from the Officer Field Console.
+  // Recording a field outcome is the By-law Officer's job only, and only for a
+  // case assigned to their own email. A supervisor never records a field outcome
+  // as the officer; CSR cannot record one at all.
   recordFieldAction: ['officer'],
+  // Approving (and sending) the final closure response is supervisor-only. CSR
+  // can intake and assign but does not approve or send closures.
   approveClosure: ['supervisor'],
 }
 

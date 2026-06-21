@@ -9,6 +9,7 @@ import {
   type ResidentRequestRow,
   type ResidentStatus,
 } from '../../services/residentRequests'
+import { sanitizeResidentDescription } from '../../lib/residentDescription'
 
 type LoadState = {
   rows: ResidentRequestRow[]
@@ -225,7 +226,7 @@ function RequestCard({
 
       <div className="mt-3">
         <div className="text-xs uppercase tracking-wide text-ink-subtle">Additional information</div>
-        <p className="mt-0.5 text-sm text-ink">{row.description || '—'}</p>
+        <p className="mt-0.5 whitespace-pre-line text-sm text-ink">{sanitizeResidentDescription(row.description) || '—'}</p>
       </div>
 
       <div className="mt-4 border-t border-slate-100 pt-4">

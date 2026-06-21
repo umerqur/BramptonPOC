@@ -35,7 +35,7 @@ const AI_CARDS_RIGHT: LaneCard[] = [
 
 const STAFF_CARDS: LaneCard[] = [
   { title: 'Needs staff attention', bullets: ['Clarify details', 'Override routing / priority', 'Request more information'] },
-  { n: '5', title: 'Staff review draft', bullets: ['Review AI summary', 'Edit if needed', 'Approve response'] },
+  { n: '5', title: 'Staff review draft', bullets: ['Review case summary', 'Edit if needed', 'Approve response'] },
   { n: '7', title: 'Final approval', bullets: ['Human in the loop'] },
 ]
 
@@ -57,13 +57,13 @@ export default function AppDemoFlowPage() {
         <div className="max-w-3xl">
           <div className="section-eyebrow">City of Brampton use-case concept</div>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">
-            Proactive Enforcement Response — AI-assisted complaint closure
+            Proactive Enforcement Response — decision-support complaint closure
           </h1>
           <p className="mt-3 text-ink-muted">
-            A resident complaint comes in, and the AI workflow system captures intake, classifies it, gathers
-            enforcement context, builds a case summary, checks confidence, and prepares a closure-response draft. By-law
-            staff only review exceptions, edit if needed, and approve the final response — the system logs every
-            decision and updates insights.
+            A resident complaint comes in, and the deterministic decision-support workflow captures intake, runs a
+            classification check, assembles enforcement context, builds a case summary, checks file readiness, and
+            prepares a rules-based closure-response draft. By-law staff only review exceptions, edit if needed, and
+            approve the final response — the system logs every decision and updates insights.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <AutomationBadge kind="ai" />
@@ -149,7 +149,7 @@ export default function AppDemoFlowPage() {
             ))}
           </div>
           <p className="mt-4 text-xs text-ink-subtle">
-            This is not automated enforcement, crime prediction, or officer replacement. It is AI-assisted closure-response
+            This is not automated enforcement, crime prediction, or officer replacement. It is decision-support closure-response
             automation and decision support, with final review by authorized staff.
           </p>
         </div>

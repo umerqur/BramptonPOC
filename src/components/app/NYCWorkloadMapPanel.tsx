@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   getNYCBoroughBoundaries,
   getNYCWorkloadByBorough,
   getNYCCouncilDistrictBoundaries,
   getNYCWorkloadByCouncilDistrict,
 } from '../../services/municipalServiceRequests'
+import { calmWorkloadCss } from './workloadColor'
+
+// The deck.gl 3D workload view is heavy, so it is code-split and only loaded when
+// the user opens the 3D tab. The default 2D operational map never pulls deck.gl.
+const NYCWorkload3DDeck = lazy(() => import('./NYCWorkload3DDeck'))
 
 // NYC 311 workload heat map. Two geographic modes share one choropleth:
 //   * Council district workload (default) — real NYC City Council district
@@ -22,9 +27,9 @@ import {
 type MapMode = 'district' | 'borough'
 
 /** A geographic area to draw: a borough or a council district. */
-type AreaUnit = { id: string; key: string; label: string; short: string; geometry: unknown }
+export type AreaUnit = { id: string; key: string; label: string; short: string; geometry: unknown }
 /** NYC 311 workload for one area, joined to AreaUnit by `key`. */
-type AreaVolume = { key: string; label: string; volume: number }
+export type AreaVolume = { key: string; label: string; volume: number }
 
 /** Case-insensitive borough key for joining workload counts to geometry. */
 const boroughKey = (name: string) => name.trim().toLowerCase()
@@ -175,14 +180,6 @@ function heatColor(t: number): string {
   return `hsl(${hue.toFixed(0)}, 78%, 52%)`
 }
 
-/** Darker shade of {@link heatColor}, used for the extruded side walls in the
- *  3D view so blocks read with depth while keeping the same hue. */
-function heatSideColor(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t))
-  const hue = 140 - clamped * 128
-  return `hsl(${hue.toFixed(0)}, 64%, 33%)`
-}
-
 /** Workload-intensity tier label for a normalized value t in [0,1]. */
 function workloadTier(t: number): string {
   if (t < 1 / 3) return 'Low workload'
@@ -309,15 +306,17 @@ function NYCWorkloadHeatMap({
         <div className="lg:col-span-3">
           {map ? (
             <figure className="relative rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-0 rounded-lg opacity-[0.35]"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(to right, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.06) 1px, transparent 1px)',
-                  backgroundSize: '28px 28px',
-                }}
-              />
+              {view === '2d' && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 rounded-lg opacity-[0.35]"
+                  style={{
+                    backgroundImage:
+                      'linear-gradient(to right, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.06) 1px, transparent 1px)',
+                    backgroundSize: '28px 28px',
+                  }}
+                />
+              )}
 
               {view === '2d' ? (
                 <svg
@@ -376,21 +375,27 @@ function NYCWorkloadHeatMap({
                   ))}
                 </svg>
               ) : (
-                <NYCWorkload3DScene
-                  map={map}
-                  unitLabel={adapter.unitLabel}
-                  volumes={volumes}
-                  min={min}
-                  max={max}
-                  activeKey={activeKey}
-                  hasWorkload={hasWorkload}
-                  num={num}
-                  onHover={setHovered}
-                  onSelect={(key, label) => {
-                    setSelected(key)
-                    onSelectArea?.(mode, mode === 'district' ? key : label)
-                  }}
-                />
+                <Suspense
+                  fallback={
+                    <div className="relative flex h-[320px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 text-sm text-ink-subtle sm:h-[440px]">
+                      Loading 3D workload view…
+                    </div>
+                  }
+                >
+                  <NYCWorkload3DDeck
+                    units={units}
+                    volumes={volumes}
+                    min={min}
+                    max={max}
+                    unitLabel={adapter.unitLabel}
+                    activeKey={activeKey}
+                    onHover={setHovered}
+                    onSelect={(key, label) => {
+                      setSelected(key)
+                      onSelectArea?.(mode, mode === 'district' ? key : label)
+                    }}
+                  />
+                </Suspense>
               )}
 
               {/* Legend — shared by both views, relative to the selected geography level */}
@@ -401,12 +406,18 @@ function NYCWorkloadHeatMap({
                 </div>
                 <div
                   className="mt-1 h-2 rounded-full"
-                  style={{ background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})` }}
+                  style={{
+                    background:
+                      view === '3d'
+                        ? `linear-gradient(to right, ${calmWorkloadCss(0)}, ${calmWorkloadCss(0.4)}, ${calmWorkloadCss(0.72)}, ${calmWorkloadCss(1)})`
+                        : `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
+                  }}
                 />
                 <div className="mt-1 flex justify-between text-[11px] text-ink-subtle">
                   <span>Low</span>
                   <span>Medium</span>
                   <span>High</span>
+                  {view === '3d' && <span>Highest</span>}
                 </div>
                 {hasWorkload && (
                   <div className="mt-0.5 text-center text-[10px] text-ink-subtle tabular-nums">
@@ -415,7 +426,7 @@ function NYCWorkloadHeatMap({
                 )}
                 <div className="mt-2 text-[11px] text-ink-subtle">
                   {view === '3d'
-                    ? `Height represents complaint volume. Scale remains relative to the selected geography level. Hover or select a ${adapter.unitLabel} for detail.`
+                    ? '3D workload view shows relative complaint volume. Heights are scaled for readability and are not physical measurements.'
                     : `Hover or select a ${adapter.unitLabel} to see its workload detail.`}
                 </div>
               </figcaption>
@@ -541,284 +552,6 @@ function SelectedAreaPanel({
   )
 }
 
-// ---------------------------------------------------------------------------
-// 3D workload view
-// ---------------------------------------------------------------------------
-
-// Pseudo-3D extrusion of the same choropleth, rendered in plain SVG — no 3D
-// library. Each area is projected onto a tilted ground plane (an oblique /
-// axonometric view) and extruded straight up in screen space by its complaint
-// volume, so busier areas stand taller. The low/medium/high heat colors are
-// reused, the side walls a darker shade for depth. There is no auto-spin: the
-// view opens at a fixed gentle tilt and the user may drag to rotate/tilt within
-// bounds. Like the 2D map, height and color are RELATIVE to the selected
-// geography level — districts vs boroughs each have their own scale.
-
-const TILT_MIN = 0.32
-const TILT_MAX = 0.82
-const YAW_LIMIT = (48 * Math.PI) / 180
-const DEFAULT_YAW = -0.22
-const DEFAULT_TILT = 0.6
-
-function NYCWorkload3DScene({
-  map,
-  unitLabel,
-  volumes,
-  min,
-  max,
-  activeKey,
-  hasWorkload,
-  num,
-  onHover,
-  onSelect,
-}: {
-  map: AreaMap
-  unitLabel: string
-  volumes: AreaVolume[]
-  min: number
-  max: number
-  activeKey: string | null
-  hasWorkload: boolean
-  num: (v: number) => string
-  onHover: (key: string | null) => void
-  onSelect: (key: string, label: string) => void
-}) {
-  const [yaw, setYaw] = useState(DEFAULT_YAW)
-  const [tilt, setTilt] = useState(DEFAULT_TILT)
-  const drag = useRef<{ x: number; y: number; yaw: number; tilt: number } | null>(null)
-
-  const byKey = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const v of volumes) m.set(v.key, v.volume)
-    return m
-  }, [volumes])
-
-  // Taller maps get a slightly taller extrusion budget; capped so blocks never
-  // dwarf the footprint.
-  const maxExtrude = Math.min(map.width, map.height) * 0.34
-
-  // Project + extrude every area for the current yaw/tilt, then frame the scene.
-  // Depends only on geometry + camera (not hover), so dragging is the only thing
-  // that triggers a rebuild.
-  const scene = useMemo(() => {
-    const norm = (v: number) => (max > min ? (v - min) / (max - min) : 0.5)
-    const cx0 = map.width / 2
-    const cy0 = map.height / 2
-    const cosY = Math.cos(yaw)
-    const sinY = Math.sin(yaw)
-    // Map (x,y) → tilted ground-plane screen coords (before height extrusion).
-    const ground = (x: number, y: number): [number, number] => {
-      const dx = x - cx0
-      const dy = y - cy0
-      const rx = dx * cosY - dy * sinY
-      const ry = dx * sinY + dy * cosY
-      return [rx, ry * tilt]
-    }
-
-    type Built = {
-      shape: AreaShape
-      base: [number, number][]
-      top: [number, number][]
-      /** Average screen-y of the base — painter's-order depth (back to front). */
-      depth: number
-      /** Top-face centroid for the label. */
-      lx: number
-      ly: number
-      t: number
-      volume: number | undefined
-    }
-
-    let minX = Infinity
-    let maxX = -Infinity
-    let minY = Infinity
-    let maxY = -Infinity
-
-    const built: Built[] = map.shapes.map((shape) => {
-      const volume = byKey.get(shape.key)
-      const t = volume != null ? norm(volume) : 0
-      // Even zero-volume areas get a thin slab so they read as a ground tile.
-      const height = volume != null ? 5 + t * maxExtrude : 2
-      const base = shape.ring.map(([x, y]) => ground(x, y))
-      const top = base.map(([x, y]) => [x, y - height] as [number, number])
-
-      let depth = 0
-      let lx = 0
-      let ly = 0
-      for (const [, y] of base) depth += y
-      depth /= base.length || 1
-      for (const [x, y] of top) {
-        lx += x
-        ly += y
-      }
-      lx /= top.length || 1
-      ly /= top.length || 1
-
-      for (const [x, y] of base) {
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-      }
-      for (const [, y] of top) {
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-      }
-
-      return { shape, base, top, depth, lx, ly, t, volume }
-    })
-
-    // Paint far areas first so nearer (taller) blocks overlap them.
-    built.sort((a, b) => a.depth - b.depth)
-
-    const pad = 26
-    const offX = pad - minX
-    const offY = pad - minY
-    const width = maxX - minX + pad * 2
-    const height = maxY - minY + pad * 2
-    return { built, offX, offY, width, height }
-  }, [map, byKey, yaw, tilt, maxExtrude, min, max])
-
-  const { built, offX, offY, width, height } = scene
-
-  const px = (x: number) => (x + offX).toFixed(1)
-  const py = (y: number) => (y + offY).toFixed(1)
-  const ringPath = (pts: [number, number][]) =>
-    pts.map(([x, y], i) => `${i ? 'L' : 'M'}${px(x)} ${py(y)}`).join(' ') + ' Z'
-
-  // Only the walls facing the viewer (outward normal pointing down-screen) are
-  // drawn, so blocks look solid instead of showing a skirt on the far side.
-  const wallPath = (base: [number, number][], top: [number, number][]) => {
-    const n = base.length
-    let cx = 0
-    let cy = 0
-    for (const [x, y] of base) {
-      cx += x
-      cy += y
-    }
-    cx /= n || 1
-    cy /= n || 1
-    let d = ''
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n
-      const [x1, y1] = base[i]
-      const [x2, y2] = base[j]
-      // Outward normal of this edge, flipped to point away from the centroid.
-      let nx = y2 - y1
-      let ny = -(x2 - x1)
-      const mx = (x1 + x2) / 2 - cx
-      const my = (y1 + y2) / 2 - cy
-      if (nx * mx + ny * my < 0) {
-        nx = -nx
-        ny = -ny
-      }
-      // Visible when the wall faces toward the viewer (down the screen).
-      if (ny <= 0) continue
-      const [tx1, ty1] = top[i]
-      const [tx2, ty2] = top[j]
-      d += `M${px(x1)} ${py(y1)} L${px(x2)} ${py(y2)} L${px(tx2)} ${py(ty2)} L${px(tx1)} ${py(ty1)} Z `
-    }
-    return d
-  }
-
-  const endDrag = () => {
-    drag.current = null
-  }
-
-  const labelSize = Math.max(8, map.labelSize * 1.05)
-
-  return (
-    <div className="relative">
-      <svg
-        role="img"
-        aria-label={`3D workload view: NYC ${unitLabel} extruded by NYC 311 complaint volume`}
-        viewBox={`0 0 ${width.toFixed(1)} ${height.toFixed(1)}`}
-        className="relative mx-auto block h-auto w-full touch-none select-none"
-        style={{ cursor: drag.current ? 'grabbing' : 'grab' }}
-        onPointerDown={(e) => {
-          ;(e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId)
-          drag.current = { x: e.clientX, y: e.clientY, yaw, tilt }
-        }}
-        onPointerMove={(e) => {
-          const d = drag.current
-          if (!d) return
-          const nextYaw = d.yaw + (e.clientX - d.x) * 0.005
-          const nextTilt = d.tilt - (e.clientY - d.y) * 0.0018
-          setYaw(Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, nextYaw)))
-          setTilt(Math.max(TILT_MIN, Math.min(TILT_MAX, nextTilt)))
-        }}
-        onPointerUp={endDrag}
-        onPointerLeave={endDrag}
-        onPointerCancel={endDrag}
-      >
-        {built.map(({ shape, base, top, t, volume }) => {
-          const isActive = activeKey != null && shape.key === activeKey
-          const topFill = hasWorkload && volume != null ? heatColor(t) : '#e2e8f0'
-          const sideFill = hasWorkload && volume != null ? heatSideColor(t) : '#cbd5e1'
-          const walls = wallPath(base, top)
-          return (
-            <g key={shape.id}>
-              {walls && (
-                <path d={walls} fill={sideFill} fillOpacity={0.95} stroke={sideFill} strokeWidth={0.4} pointerEvents="none" />
-              )}
-              <path
-                d={ringPath(top)}
-                fill={topFill}
-                fillOpacity={hasWorkload ? (isActive ? 0.96 : 0.82) : 0.5}
-                stroke={isActive ? '#0f172a' : '#1e3a5f'}
-                strokeWidth={isActive ? 1.8 : map.shapes.length > 20 ? 0.5 : 0.9}
-                strokeLinejoin="round"
-                className="cursor-pointer transition-[fill-opacity]"
-                onMouseEnter={() => onHover(shape.key)}
-                onMouseLeave={() => onHover(null)}
-                onClick={() => onSelect(shape.key, shape.label)}
-              >
-                <title>
-                  {shape.label} — New York City 311 public workload (not a risk prediction)
-                  {volume != null
-                    ? `\nWorkload intensity: ${workloadTier(t)}` + `\nComplaint volume: ${num(volume)}`
-                    : '\nNo NYC 311 workload data'}
-                </title>
-              </path>
-            </g>
-          )
-        })}
-        {/* Labels on the top faces, painted last so they stay readable. */}
-        {built.map(({ shape, lx, ly }) => (
-          <text
-            key={`label-${shape.id}`}
-            x={px(lx)}
-            y={py(ly)}
-            textAnchor="middle"
-            dominantBaseline="central"
-            className="pointer-events-none fill-navy-900"
-            style={{ fontSize: labelSize, fontWeight: 700, paintOrder: 'stroke' }}
-            stroke="#ffffff"
-            strokeWidth={labelSize / 3.5}
-          >
-            {shape.short}
-          </text>
-        ))}
-      </svg>
-
-      {/* Lightweight view controls — drag hint + reset. No auto-spin. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-1 flex items-center justify-between px-1">
-        <span className="pointer-events-none rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-medium text-ink-subtle ring-1 ring-slate-200">
-          Drag to rotate / tilt
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            setYaw(DEFAULT_YAW)
-            setTilt(DEFAULT_TILT)
-          }}
-          className="pointer-events-auto rounded-full bg-white/80 px-2.5 py-0.5 text-[10px] font-semibold text-ink-muted ring-1 ring-slate-200 transition-colors hover:bg-white hover:text-navy-900"
-        >
-          Reset view
-        </button>
-      </div>
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // GeoJSON → SVG helpers
@@ -835,9 +568,6 @@ type AreaShape = {
   d: string
   cx: number
   cy: number
-  /** Projected points of the largest ring (SVG space) — used by the 3D view to
-   *  extrude each area. Decimated so the pseudo-3D render stays performant. */
-  ring: [number, number][]
 }
 
 type AreaMap = {
@@ -950,24 +680,19 @@ function buildMap(entries: MapEntry[]): AreaMap | null {
       })
       .join(' ')
 
-    // Project the largest ring once, reused for both the label centroid and the
-    // 3D extrusion. Decimate dense rings so the pseudo-3D render stays light.
+    // Label centroid from the largest ring (mean of its projected vertices).
     const largest = entry.rings.reduce((a, b) => (b.length > a.length ? b : a), entry.rings[0])
-    const step = largest.length > 120 ? Math.ceil(largest.length / 120) : 1
-    const ring: [number, number][] = []
     let sx = 0
     let sy = 0
-    for (let i = 0; i < largest.length; i++) {
-      const [lng, lat] = largest[i]
+    for (const [lng, lat] of largest) {
       const [x, y] = project(lng, lat)
       sx += x
       sy += y
-      if (i % step === 0) ring.push([fmt(x), fmt(y)])
     }
     const cx = sx / largest.length
     const cy = sy / largest.length
 
-    return { id: entry.id, label: entry.label, short: entry.short, key: entry.key, d, cx: fmt(cx), cy: fmt(cy), ring }
+    return { id: entry.id, label: entry.label, short: entry.short, key: entry.key, d, cx: fmt(cx), cy: fmt(cy) }
   })
 
   // Smaller labels when there are many areas (e.g. 51 council districts).
