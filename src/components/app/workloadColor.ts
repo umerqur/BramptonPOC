@@ -1,18 +1,21 @@
-// Calm municipal-dashboard color ramp for the 3D workload view: a controlled
-// green → amber → orange scale. We deliberately stop at orange and never reach
-// intense red, so the 3D extrusion reads as a measured operational signal rather
-// than an alarming "skyscraper" heat map. The same stops are used for the
-// deck.gl polygon fills (RGB) and the shared legend gradient (CSS), so the two
-// always match. This module has no deck.gl dependency, so importing the CSS
-// helper into the 2D map path does NOT pull the deck.gl bundle in.
+// Municipal-dashboard color ramp for the 3D workload view: a controlled
+// green → amber → orange → red scale. The ramp reads as a measured operational
+// signal (low = calm green, medium = amber, high = orange) and resolves the
+// HIGHEST workload bucket to a clear, professional red so the busiest geography
+// reads unmistakably as the hot spot — without the muddy dark-orange/brown that
+// a shorter ramp produced at the top. The same stops are used for the deck.gl
+// polygon fills (RGB) and the shared legend gradient (CSS), so the two always
+// match. This module has no deck.gl dependency, so importing the CSS helper into
+// the 2D map path does NOT pull the deck.gl bundle in.
 
 type Rgb = [number, number, number]
 
-/** Color stops at normalized workload t = 0 (low) → 1 (high). No red. */
+/** Color stops at normalized workload t = 0 (low) → 1 (highest). */
 export const WORKLOAD_STOPS: Array<[number, Rgb]> = [
-  [0.0, [74, 158, 110]], // calm green  #4A9E6E
-  [0.5, [232, 178, 58]], // amber       #E8B23A
-  [1.0, [221, 122, 53]], // orange      #DD7A35
+  [0.0, [74, 158, 110]], // calm green  #4A9E6E  (low)
+  [0.4, [232, 178, 58]], // amber       #E8B23A  (medium)
+  [0.72, [226, 119, 45]], // orange     #E2772D  (high)
+  [1.0, [211, 47, 47]], // red          #D32F2F  (highest)
 ]
 
 /** Calm workload color as an [r, g, b] triple for a normalized t in [0, 1]. */

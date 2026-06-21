@@ -10,10 +10,9 @@ import type { AreaUnit, AreaVolume } from './NYCWorkloadMapPanel'
 // Professional 3D workload view built on deck.gl's GeoJsonLayer (extruded
 // polygons) — replacing the old hand-rolled SVG pseudo-3D extrusion. It renders
 // the real NYC borough / council-district GeoJSON, extruded by a CONTROLLED,
-// relative height (sqrt scaling, hard-capped) and shaded with the calm
-// green→amber→orange municipal ramp. This is a relative operational
-// visualization: heights are scaled for readability and are not physical
-// measurements.
+// relative height (sqrt scaling, hard-capped) and shaded with the municipal
+// green→amber→orange→red ramp. This is a relative operational visualization:
+// heights are scaled for readability and are not physical measurements.
 
 // Height is intentionally NOT raw complaint volume. The suggested literal
 // formula `Math.min(Math.sqrt(volume) * 600, 8000)` pegs almost every NYC
@@ -22,8 +21,10 @@ import type { AreaUnit, AreaVolume } from './NYCWorkloadMapPanel'
 // against the current geography level's [min, max] and map it onto a capped
 // height band — so differences stay visible without skyscraper exaggeration,
 // consistent with the rest of the map being "relative to the selected geography
-// level".
-const MAX_HEIGHT = 9000
+// level". The band top is tuned a little taller than the volume-flattening cap
+// so the busiest geography reads as clearly taller than its neighbours, while
+// the hard cap still rules out cartoonish skyscrapers.
+const MAX_HEIGHT = 11000
 const MIN_HEIGHT = 250
 const NO_DATA_HEIGHT = 60
 const NO_DATA_COLOR: Color = [203, 213, 225, 235]

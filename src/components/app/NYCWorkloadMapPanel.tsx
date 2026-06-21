@@ -409,7 +409,7 @@ function NYCWorkloadHeatMap({
                   style={{
                     background:
                       view === '3d'
-                        ? `linear-gradient(to right, ${calmWorkloadCss(0)}, ${calmWorkloadCss(0.5)}, ${calmWorkloadCss(1)})`
+                        ? `linear-gradient(to right, ${calmWorkloadCss(0)}, ${calmWorkloadCss(0.4)}, ${calmWorkloadCss(0.72)}, ${calmWorkloadCss(1)})`
                         : `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
                   }}
                 />
@@ -417,6 +417,7 @@ function NYCWorkloadHeatMap({
                   <span>Low</span>
                   <span>Medium</span>
                   <span>High</span>
+                  {view === '3d' && <span>Highest</span>}
                 </div>
                 {hasWorkload && (
                   <div className="mt-0.5 text-center text-[10px] text-ink-subtle tabular-nums">
