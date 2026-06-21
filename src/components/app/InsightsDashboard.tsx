@@ -318,8 +318,12 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
       <TrendSection onExplore={onExplore} />
       <ClosureScatter onExplore={onExplore} />
       <ClosureBottlenecks onExplore={onExplore} />
-      <AreaBottlenecks onExplore={onExplore} />
-      <DepartmentWorkload onExplore={onExplore} />
+      {/* District workload (leaderboard) and department workload share (donut)
+          sit side by side on desktop, and stack vertically on mobile. */}
+      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+        <AreaBottlenecks onExplore={onExplore} />
+        <DepartmentWorkload onExplore={onExplore} />
+      </div>
     </div>
   )
 }
