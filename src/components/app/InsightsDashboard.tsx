@@ -317,12 +317,11 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
       <TrendSection onExplore={onExplore} />
       <ClosureScatter onExplore={onExplore} />
       <ClosureBottlenecks onExplore={onExplore} />
-      {/* District workload (leaderboard) and department workload share (donut)
-          sit side by side on desktop, and stack vertically on mobile. */}
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-        <AreaBottlenecks onExplore={onExplore} />
-        <DepartmentWorkload onExplore={onExplore} />
-      </div>
+      {/* District workload pressure (leaderboard) needs full width so the bars
+          and closure timing stay readable; department workload share is
+          supporting context below it. Stacked full-width on desktop and mobile. */}
+      <AreaBottlenecks onExplore={onExplore} />
+      <DepartmentWorkload onExplore={onExplore} />
     </div>
   )
 }
@@ -354,6 +353,16 @@ function OperationalSnapshot() {
       .filter(Boolean)
       .join(' · ') || null
 
+  // POC interpretation thresholds (not an official City SLA): a backlog of open
+  // cases reads as workload pressure; any high-priority case is flagged; a long
+  // p90 closure tail is a watch signal.
+  const openTotal = open.data?.total ?? null
+  const highCount = open.data?.highPriority ?? null
+  const p90 = k?.p90_closure_days ?? null
+  const openTone: KpiTone = openTotal != null && openTotal > 0 ? 'pressure' : 'neutral'
+  const highTone: KpiTone = highCount != null && highCount > 0 ? 'priority' : 'neutral'
+  const p90Tone: KpiTone = p90 != null && p90 >= 30 ? 'watch' : 'benchmark'
+
   return (
     <section className="card p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -373,27 +382,37 @@ function OperationalSnapshot() {
         <KpiCard
           title="Open cases waiting"
           value={fromOpen(open.data?.total)}
+          tone={openTone}
+          statusLabel="Backlog"
           helper="Current open case backlog in the review queue"
         />
         <KpiCard
           title="High priority cases"
           value={fromOpen(open.data?.highPriority)}
+          tone={highTone}
+          statusLabel="High priority"
           helper="Open cases currently surfaced for priority review"
         />
         <KpiCard
           title="Typical historical closure"
           value={fromHist(k?.avg_closure_days == null ? null : `${k.avg_closure_days.toFixed(1)} d`)}
+          tone="benchmark"
+          statusLabel="Benchmark"
           helper="Average closure time across closed benchmark records"
         />
         <KpiCard
           title="90% closed within"
           value={fromHist(k?.p90_closure_days == null ? null : `${Math.round(k.p90_closure_days)} d`)}
+          tone={p90Tone}
+          statusLabel={p90Tone === 'watch' ? 'Watch' : 'Benchmark'}
           helper="Long tail closure benchmark for closed records"
         />
         <KpiCard
           title="Top workload pressure"
           value={fromHist(topPressure)}
           valueClass="text-lg font-semibold leading-snug"
+          tone="pressure"
+          statusLabel="Pressure"
           helper="Highest workload issue and district in the benchmark view"
         />
         <KpiCard
@@ -401,23 +420,38 @@ function OperationalSnapshot() {
           value={fromSlow(slowRow?.complaint_type ?? null)}
           valueClass="text-lg font-semibold leading-snug"
           detail={slowRow?.avg_closure_days != null ? `Avg closure ${fmtDays(slowRow.avg_closure_days)}` : undefined}
+          tone="priority"
+          statusLabel="Slowest"
           helper="Complaint type with the longest average closure time"
         />
       </div>
 
-      {hist.data && (
-        <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-          Based on {fmtInt(hist.data.closed_requests)} closed NYC 311 benchmark records and the live open review queue.
-        </p>
-      )}
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+        Signals are based on POC thresholds, not official City SLA.
+        {hist.data && ` Based on ${fmtInt(hist.data.closed_requests)} closed NYC 311 benchmark records and the live open review queue.`}
+      </p>
     </section>
   )
+}
+
+// Subtle status treatment for the snapshot KPI cards — a tinted left border, a
+// small pill, and a faint tinted background. These are POC interpretation cues,
+// NOT an official City SLA. Kept restrained: one accent per card, soft tints.
+type KpiTone = 'neutral' | 'benchmark' | 'watch' | 'pressure' | 'priority'
+
+const KPI_TONE: Record<KpiTone, { border: string; card: string; pill: string }> = {
+  neutral: { border: 'border-l-slate-300', card: 'bg-white', pill: 'bg-slate-100 text-slate-600' },
+  benchmark: { border: 'border-l-emerald-400', card: 'bg-emerald-50/30', pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-100' },
+  watch: { border: 'border-l-amber-400', card: 'bg-amber-50/30', pill: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100' },
+  pressure: { border: 'border-l-orange-500', card: 'bg-orange-50/30', pill: 'bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-100' },
+  priority: { border: 'border-l-rose-500', card: 'bg-rose-50/40', pill: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-100' },
 }
 
 /**
  * One KPI card: a title, a live value, an optional secondary detail line, and a
  * plain-language helper. Values come only from live aggregate services — no
- * targets, benchmarks, or synthetic baselines.
+ * targets, benchmarks, or synthetic baselines. An optional tone + status label
+ * give a subtle, POC-threshold reading of the metric.
  */
 function KpiCard({
   title,
@@ -425,16 +459,26 @@ function KpiCard({
   helper,
   detail,
   valueClass = 'text-3xl font-bold',
+  tone = 'neutral',
+  statusLabel,
 }: {
   title: string
   value: string
   helper: string
   detail?: string
   valueClass?: string
+  tone?: KpiTone
+  statusLabel?: string
 }) {
+  const t = KPI_TONE[tone]
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
+    <div className={`rounded-xl border border-l-4 border-slate-200 p-4 ${t.border} ${t.card}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
+        {statusLabel && (
+          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${t.pill}`}>{statusLabel}</span>
+        )}
+      </div>
       <div className={`mt-1.5 tabular-nums text-navy-900 ${valueClass}`}>{value}</div>
       {detail && <div className="mt-1 text-xs font-medium text-ink-muted">{detail}</div>}
       <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
