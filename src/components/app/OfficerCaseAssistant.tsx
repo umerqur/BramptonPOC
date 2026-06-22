@@ -28,15 +28,18 @@ export type AssistantCaseContext = {
 }
 
 // Suggested, case-scoped prompts. Each maps to the precise question sent to the
-// server so the surface never looks like an open-ended assistant.
+// server so the surface never looks like an open-ended assistant. Framed around
+// the field workflow — preparing the site visit, evidence, and handoff.
 const PROMPT_CHIPS: { label: string; question: string }[] = [
-  { label: 'Summarize this case', question: 'Summarize this case.' },
-  { label: 'What should I verify on site?', question: 'What should I verify on site?' },
-  { label: 'What information is missing?', question: 'What information is missing?' },
-  { label: 'Explain similar benchmark cases', question: 'Explain the similar benchmark cases.' },
+  { label: 'Prepare site checklist', question: 'Prepare a concise site-visit checklist for this case.' },
+  { label: 'Evidence to capture', question: 'What evidence should I capture on site for this case?' },
   {
-    label: 'Draft internal field-note summary',
-    question: 'Turn my field notes into a clean internal summary.',
+    label: 'Missing before review',
+    question: 'What information is missing before this can move to closure review?',
+  },
+  {
+    label: 'Benchmark context',
+    question: 'Show any relevant benchmark context, with case IDs if available.',
   },
 ]
 
@@ -92,17 +95,23 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
   }
 
   return (
-    <section className="card flex flex-col p-0">
-      <div className="border-b border-slate-200 px-5 py-3">
-        <h3 className="text-sm font-semibold text-navy-900">Officer Case Assistant</h3>
-        <p className="text-xs text-ink-subtle">Case-scoped AI support. Does not decide enforcement action.</p>
-      </div>
-
-      {/* Decision-support banner — always visible so the surface is never read as
-          an action tool. */}
-      <div className="mx-5 mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
-        Decision support only. Staff remain responsible for enforcement decisions. This assistant cannot issue
-        tickets, close cases, or approve closures.
+    <section className="overflow-hidden rounded-2xl border border-teal-200 bg-white shadow-sm">
+      <div className="border-b border-teal-100 bg-teal-50/60 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-600 text-white">
+            {/* Checklist / support icon */}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
+              <path d="M9 11l3 3L22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-navy-900">Field Support Assistant</h3>
+            <p className="mt-0.5 text-xs text-teal-900/80">
+              Helps prepare site checks, field notes, and supervisor handoff. Staff decide all enforcement actions.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="px-5 py-4">
@@ -113,7 +122,7 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
               type="button"
               disabled={state.status === 'loading'}
               onClick={() => ask(chip.question)}
-              className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-navy-800 transition hover:border-accent-300 hover:text-accent-700 disabled:opacity-60"
+              className="rounded-full border border-teal-200 bg-teal-50/50 px-3 py-1 text-xs font-medium text-teal-800 transition hover:border-teal-400 hover:bg-teal-50 hover:text-teal-900 disabled:opacity-60"
             >
               {chip.label}
             </button>
@@ -131,7 +140,7 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about this case…"
+            placeholder="Ask for field support on this case…"
             className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
           />
           <button
@@ -147,8 +156,8 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
         <div className="mt-4">
           {state.status === 'idle' && (
             <p className="text-xs text-ink-subtle">
-              Pick a suggested prompt or ask a question about case {ctx.caseId}. Answers use only this case file,
-              its workflow history, and similar benchmark references.
+              Use this assistant to prepare the site visit, evidence checklist, or supervisor handoff for this case.
+              It only uses this case file and available benchmark references.
             </p>
           )}
 
@@ -177,6 +186,11 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
             />
           )}
         </div>
+
+        {/* Calm, muted guardrail note — no scary warning styling unless an actual error occurs. */}
+        <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-ink-subtle">
+          Decision support only · Does not issue tickets, submit forms, close cases, or approve closures.
+        </p>
       </div>
     </section>
   )
