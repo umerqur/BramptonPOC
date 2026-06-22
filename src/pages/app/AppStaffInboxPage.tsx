@@ -56,6 +56,17 @@ const WORK_TAB_LABELS: Record<WorkTab, string> = {
   closure: 'Ready for closure review',
 }
 
+// Status-aware count-badge colours per Work Queue tab. Active = solid status
+// colour for emphasis; inactive = soft tint that still reads against the tab
+// card. Kept to a restrained municipal-SaaS palette, not a colourful toy UI.
+const WORK_TAB_BADGE_STYLES: Record<WorkTab, { active: string; inactive: string }> = {
+  assigned: { active: 'bg-teal-600 text-white', inactive: 'bg-teal-50 text-teal-700 ring-1 ring-inset ring-teal-100' },
+  closure: { active: 'bg-amber-500 text-white', inactive: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100' },
+  resident: { active: 'bg-indigo-600 text-white', inactive: 'bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-100' },
+  all: { active: 'bg-slate-700 text-white', inactive: 'bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-200' },
+  open: { active: 'bg-purple-600 text-white', inactive: 'bg-purple-50 text-purple-700 ring-1 ring-inset ring-purple-100' },
+}
+
 const STATUS_STYLES: Record<string, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
   received: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200',
@@ -272,10 +283,15 @@ export default function AppStaffInboxPage() {
 
       <ReviewPriorityNote />
 
-      <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
+      <div
+        role="tablist"
+        aria-label="Work queue filters"
+        className="mt-6 flex snap-x gap-2 overflow-x-auto rounded-2xl border border-slate-200 bg-white/70 p-2 shadow-sm"
+      >
         {tabOrder.map((t) => (
           <TabButton
             key={t}
+            tab={t}
             label={WORK_TAB_LABELS[t]}
             count={t === 'open' && open.error ? null : counts[t]}
             active={tab === t}
@@ -639,29 +655,36 @@ function SourceWarning({ label, error }: { label: string; error: string }) {
 }
 
 function TabButton({
+  tab,
   label,
   count,
   active,
   onClick,
 }: {
+  tab: WorkTab
   label: string
   count: number | null
   active: boolean
   onClick: () => void
 }) {
+  const badge = WORK_TAB_BADGE_STYLES[tab]
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
-        active ? 'border-accent-600 text-navy-900' : 'border-transparent text-ink-subtle hover:text-navy-900'
+      className={`flex shrink-0 snap-start items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1 ${
+        active
+          ? 'bg-white text-navy-900 shadow-sm ring-1 ring-teal-200'
+          : 'bg-slate-50 text-slate-600 hover:bg-white hover:text-navy-900'
       }`}
     >
       {label}
       {count != null && (
         <span
-          className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${
-            active ? 'bg-accent-100 text-accent-800' : 'bg-slate-100 text-slate-600'
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+            active ? badge.active : badge.inactive
           }`}
         >
           {count}
