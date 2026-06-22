@@ -169,6 +169,23 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
   const classification = support?.triage.category ?? row.request_type
   const priority = support?.triage.recommendedPriority ?? '—'
 
+  // Rendered in two spots (mobile: before the form; desktop: right column). A
+  // render function avoids reusing one React element in two places and keeps the
+  // ctx / fieldDraft props identical between the two.
+  const renderAssistant = () => (
+    <OfficerCaseAssistant
+      ctx={{
+        caseId: row.case_id,
+        category: support?.triage.category ?? 'Property Standards',
+        complaintType: row.request_type,
+        location: [row.location, row.city, row.province].filter(Boolean).join(', '),
+        description: sanitizeResidentDescription(row.description),
+        assignedOfficer: row.assigned_officer_name ?? null,
+      }}
+      fieldDraft={fieldDraft}
+    />
+  )
+
   return (
     <div className="container-page py-10">
       <BackLink />
@@ -185,6 +202,8 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
         </div>
       )}
 
+      {/* Mobile places the assistant before the field outcome form; desktop keeps
+          it in the right support column. */}
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         {/* Left: read-only case context for the field visit */}
         <div className="space-y-6 lg:col-span-2">
@@ -209,6 +228,10 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
 
           <ResidentAttachments caseId={row.case_id} variant="full" />
 
+          {/* Mobile-only: assistant appears before the long field outcome form so
+              it can help prepare it. Hidden on desktop (shown in right column). */}
+          <div className="lg:hidden">{renderAssistant()}</div>
+
           <FieldOutcomeSection
             row={row}
             isClosed={isClosed}
@@ -225,17 +248,10 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
             and secondary, collapsed decision support. The officer surface is
             intentionally workflow-driven — assistant + field-outcome form. */}
         <div className="space-y-6">
-          <OfficerCaseAssistant
-            ctx={{
-              caseId: row.case_id,
-              category: support?.triage.category ?? 'Property Standards',
-              complaintType: row.request_type,
-              location: [row.location, row.city, row.province].filter(Boolean).join(', '),
-              description: sanitizeResidentDescription(row.description),
-              assignedOfficer: row.assigned_officer_name ?? null,
-            }}
-            fieldDraft={fieldDraft}
-          />
+          {/* Desktop-only: assistant sits in the right support column, sticky so
+              it stays in view alongside the form. Hidden on mobile (rendered
+              above the form there). */}
+          <div className="hidden lg:block lg:sticky lg:top-24">{renderAssistant()}</div>
 
           {row.assigned_officer_name && (
             <Panel title="Assignment">
