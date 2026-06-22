@@ -27,6 +27,20 @@ export type AssistantCaseContext = {
   assignedOfficer: string | null
 }
 
+// The officer's live, unsaved field outcome draft. The assistant can use this to
+// help clean up notes, draft action-taken text, and check closure readiness from
+// what the officer is actually typing. Mirrors the field-outcome form fields.
+export type OfficerFieldDraft = {
+  observedCondition: string
+  violationObserved: 'yes' | 'no' | 'unclear'
+  enforcementAction: string
+  referenceNumber: string
+  serviceMethod: string
+  actionTaken: string
+  officerNotes: string
+  followUpRequired: boolean
+}
+
 // Suggested, case-scoped prompts. Each maps to the precise question sent to the
 // server so the surface never looks like an open-ended assistant. Framed around
 // the field workflow — preparing the site visit, evidence, and handoff.
@@ -43,6 +57,23 @@ const PROMPT_CHIPS: { label: string; question: string }[] = [
   },
 ]
 
+// Extra prompts shown only when the officer has actually typed draft content, so
+// the assistant can work with the real text rather than offering empty actions.
+const DRAFT_PROMPT_CHIPS: { label: string; question: string }[] = [
+  {
+    label: 'Clean up my notes',
+    question: 'Turn the current field notes into a clean internal field outcome summary.',
+  },
+  {
+    label: 'Draft action taken',
+    question: 'Draft concise action taken / resolution details from the current field notes.',
+  },
+  {
+    label: 'Ready for supervisor?',
+    question: 'Check whether this field outcome is complete enough for supervisor closure review.',
+  },
+]
+
 type LoadState =
   | { status: 'idle' }
   | { status: 'loading' }
@@ -55,10 +86,25 @@ type LoadState =
   | { status: 'unconfigured'; message: string }
   | { status: 'error'; message: string }
 
-export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContext }) {
+export default function OfficerCaseAssistant({
+  ctx,
+  fieldDraft,
+}: {
+  ctx: AssistantCaseContext
+  fieldDraft?: OfficerFieldDraft
+}) {
   const [state, setState] = useState<LoadState>({ status: 'idle' })
   const [input, setInput] = useState('')
   const [lastQuestion, setLastQuestion] = useState<string | null>(null)
+
+  // Only offer the draft-aware prompts once there is real text to work with.
+  const hasDraftText = !!(
+    fieldDraft &&
+    (fieldDraft.observedCondition.trim() ||
+      fieldDraft.actionTaken.trim() ||
+      fieldDraft.officerNotes.trim())
+  )
+  const chips = hasDraftText ? [...PROMPT_CHIPS, ...DRAFT_PROMPT_CHIPS] : PROMPT_CHIPS
 
   // Reset when the focused case changes so a stale answer never carries across.
   useEffect(() => {
@@ -73,12 +119,17 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
     setLastQuestion(q)
     setState({ status: 'loading' })
     try {
-      const res = await askOfficerCaseAssistant(ctx.caseId, q, {
-        issue_type: ctx.complaintType,
-        description: ctx.description,
-        location: ctx.location,
-        assigned_officer_name: ctx.assignedOfficer,
-      })
+      const res = await askOfficerCaseAssistant(
+        ctx.caseId,
+        q,
+        {
+          issue_type: ctx.complaintType,
+          description: ctx.description,
+          location: ctx.location,
+          assigned_officer_name: ctx.assignedOfficer,
+        },
+        fieldDraft,
+      )
       setState({
         status: 'ready',
         result: res.result,
@@ -116,7 +167,7 @@ export default function OfficerCaseAssistant({ ctx }: { ctx: AssistantCaseContex
 
       <div className="px-5 py-4">
         <div className="flex flex-wrap gap-1.5">
-          {PROMPT_CHIPS.map((chip) => (
+          {chips.map((chip) => (
             <button
               key={chip.label}
               type="button"
