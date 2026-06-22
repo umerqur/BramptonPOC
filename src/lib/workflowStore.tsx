@@ -384,9 +384,14 @@ export function WorkflowProvider({
         }
         // Regenerate the closure draft grounded in the recorded outcome.
         const draft = buildClosureDraft(c.input, c.triage, c.context, now, fieldAction)
+        // A recorded field outcome moves the case OUT of the officer's
+        // field-visit flow and INTO supervisor closure review (staff-review) —
+        // matching the resident/Supabase path, which flips the request to
+        // 'in_review'. The supervisor still makes the final closure decision;
+        // nothing is auto-approved or auto-closed.
         return {
           ...c,
-          stage: 'field-visit',
+          stage: 'staff-review',
           fieldAction,
           draft,
           decisions: [...c.decisions, { action: `Recorded field outcome: ${FIELD_OUTCOME_LABELS[outcome]}`, by: officerName, at: now }],
@@ -394,6 +399,7 @@ export function WorkflowProvider({
             ...c.audit,
             auditEvent('officer', 'Field visit recorded', `${officerName} attended the location and recorded the outcome: ${FIELD_OUTCOME_LABELS[outcome]}.`, now),
             auditEvent('ai', 'Closure draft updated', 'Closure response regenerated to reflect the recorded field outcome.', addSecondsIso(now, 1)),
+            auditEvent('staff', 'Sent to closure review', 'Field outcome recorded — case moved to supervisor closure review.', addSecondsIso(now, 2)),
           ],
         }
       })

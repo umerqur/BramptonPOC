@@ -280,7 +280,10 @@ export function mapResidentToWorkRow(row: ResidentRequestRow, attachmentCount = 
 
   const age = ageDays(row.created_at) ?? 0
   const readyForClosure = row.field_visit_completed && row.status !== 'closed'
-  const inProgress = isAssignedResident(row)
+  // Once the officer has recorded a field outcome the case LEAVES "Assigned / in
+  // progress" and belongs only in "Ready for closure review" — otherwise it would
+  // count in both tabs and never look like it advanced.
+  const inProgress = isAssignedResident(row) && !readyForClosure
 
   const { score, tier, reason, components } = computeResidentPriority({
     priority,
