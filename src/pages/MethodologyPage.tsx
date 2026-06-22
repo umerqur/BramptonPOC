@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import SectionHeading from '../components/SectionHeading'
 
 // Public explanation page for the Proactive Enforcement Response POC.
@@ -129,41 +129,39 @@ const RULES_CONTROL = [
   'Closure templates',
 ]
 
+const DATA_SOURCE: { title: string; body: string }[] = [
+  {
+    title: 'Demo data',
+    body: 'Public NYC 311 service request data is used as a realistic municipal benchmark for this demo.',
+  },
+  {
+    title: 'Not Brampton operational data',
+    body: 'This demo does not use Brampton private complaint, patrol, ticket, inspection, or officer note data.',
+  },
+  {
+    title: 'POC ready',
+    body: 'During a Brampton POC, approved City data sources can replace or supplement the benchmark data.',
+  },
+]
+
+// Two-row architecture diagram: the people-facing workflow above the system layer
+// that supports it. Each entry becomes a card with an arrow to the next.
+const WORKFLOW_ROW = ['Resident request', 'Staff triage', 'Officer review', 'Supervisor approval', 'Resident update']
+
+const SYSTEM_ROW = [
+  'Public benchmark data',
+  'Normalized case records',
+  'Supabase aggregate views',
+  'Insights dashboard',
+  'Human reviewed outputs',
+]
+
 const TECHNICAL_REVIEWER_ITEMS = [
+  'Dashboard charts read from precomputed Supabase aggregate views, so the Insights pages do not scan millions of records on every page load.',
   'Semantic retrieval can search indexed historical or benchmark cases so staff can compare similar records.',
+  'Similarity search and reranking are optional support layers that help staff compare cases — they are not automated enforcement and never close a case or contact a resident.',
   'Cohere embeddings and Qdrant can support similarity search when the retrieval layer is enabled.',
-  'Reranking can reorder retrieved cases so stronger references appear first.',
   'Generated summaries or agentic workflows should only be added after data quality, retrieval quality, governance, and human approval controls are validated.',
-]
-
-const CITIZEN_VIEW = ['Resident request', 'Staff review', 'Officer action', 'Approved response']
-
-const SYSTEM_VIEW = [
-  'Resident portal',
-  'Case record',
-  'Secure data layer',
-  'Rules and workflow checks',
-  'AI decision support',
-  'Staff dashboard',
-  'Supervisor approval',
-]
-
-const LEGEND: { label: string; body: string; cls: string }[] = [
-  {
-    label: 'Rules',
-    body: 'Workflow gates, routing guidance, readiness checks, and approved templates.',
-    cls: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200',
-  },
-  {
-    label: 'AI support',
-    body: 'Similarity search, retrieval, summaries, and pattern review where approved.',
-    cls: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
-  },
-  {
-    label: 'Human approval',
-    body: 'Assignment, field outcome, enforcement action, edits, approval, and resident communication.',
-    cls: 'bg-navy-50 text-navy-900 ring-1 ring-inset ring-navy-200',
-  },
 ]
 
 export default function MethodologyPage() {
@@ -190,6 +188,14 @@ export default function MethodologyPage() {
             Staff need to understand the issue, check context, assign work, record field outcomes, and close
             the loop with residents. This POC reduces manual review friction while preserving staff accountability.
           </p>
+        </Section>
+
+        <Section title="Current data source">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {DATA_SOURCE.map((item) => (
+              <InfoCard key={item.title} title={item.title} body={item.body} />
+            ))}
+          </div>
         </Section>
 
         <Section title="What the system does">
@@ -219,14 +225,6 @@ export default function MethodologyPage() {
           </div>
         </Section>
 
-        <Section title="Current demo data">
-          <p className="text-ink-muted">
-            The current demo uses public NYC 311 service request data as a realistic municipal benchmark.
-            It is not Brampton operational data. During a Brampton POC, approved Brampton data sources
-            could replace or supplement the benchmark data.
-          </p>
-        </Section>
-
         <Section title="Clear responsibility model">
           <div className="grid gap-4 lg:grid-cols-2">
             <div>
@@ -240,20 +238,15 @@ export default function MethodologyPage() {
           </div>
         </Section>
 
-        <Section title="Architecture in plain language">
-          <LayeredFlow title="Citizen view" items={CITIZEN_VIEW} />
-          <div className="mt-5">
-            <LayeredFlow title="System view" items={SYSTEM_VIEW} />
+        <Section title="Simple architecture">
+          <div className="space-y-4">
+            <DiagramRow label="Resident and staff workflow" items={WORKFLOW_ROW} />
+            <DiagramRow label="System layer" items={SYSTEM_ROW} />
           </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            {LEGEND.map((item) => (
-              <div key={item.label} className="rounded-xl border border-slate-200 bg-white p-4">
-                <span className={`badge ${item.cls}`}>{item.label}</span>
-                <p className="mt-2 text-xs leading-relaxed text-ink-muted">{item.body}</p>
-              </div>
-            ))}
-          </div>
+          <p className="mt-4 text-xs leading-relaxed text-ink-muted">
+            The current demo uses public benchmark data. In a Brampton POC, approved City data sources would connect
+            into the same case and insights structure.
+          </p>
         </Section>
 
         <Section title="For technical reviewers">
@@ -301,18 +294,25 @@ function InfoCard({ title, body }: { title: string; body: string }) {
   )
 }
 
-function LayeredFlow({ title, items }: { title: string; items: string[] }) {
+// One labelled row of the architecture diagram: equal-width cards joined by
+// arrows. Cards stack vertically (arrows point down) on mobile and sit in a row
+// (arrows point right) from sm up.
+function DiagramRow({ label, items }: { label: string; items: string[] }) {
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
-      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-2">
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
         {items.map((item, index) => (
-          <span key={item} className="flex items-center gap-1.5">
-            <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-navy-900">
+          <Fragment key={item}>
+            <div className="flex flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-3 text-center text-xs font-semibold text-navy-900 shadow-sm">
               {item}
-            </span>
-            {index < items.length - 1 && <span aria-hidden className="text-ink-subtle">→</span>}
-          </span>
+            </div>
+            {index < items.length - 1 && (
+              <span aria-hidden className="self-center rotate-90 text-base text-ink-subtle sm:rotate-0">
+                →
+              </span>
+            )}
+          </Fragment>
         ))}
       </div>
     </div>
