@@ -43,6 +43,13 @@ export type MetricConfig = {
   nullable: boolean
   /** Additive count metrics support a "share of total" line; rates do not. */
   additive: boolean
+  /**
+   * Whether the backing view actually populates this metric yet. The current
+   * compatibility views only return real total_requests; the other metrics are
+   * placeholders (0 / null) until the full metric views are populated, so they
+   * are shown disabled ("Coming soon") in the UI.
+   */
+  available: boolean
   /** Format a non-null value for display. */
   format: (v: number) => string
 }
@@ -60,6 +67,7 @@ export const MAP_METRICS: MetricConfig[] = [
     unit: 'complaints',
     nullable: false,
     additive: true,
+    available: true,
     format: int,
   },
   {
@@ -69,6 +77,7 @@ export const MAP_METRICS: MetricConfig[] = [
     unit: 'open cases',
     nullable: false,
     additive: true,
+    available: false,
     format: int,
   },
   {
@@ -78,6 +87,7 @@ export const MAP_METRICS: MetricConfig[] = [
     unit: 'days',
     nullable: true,
     additive: false,
+    available: false,
     format: days,
   },
   {
@@ -87,6 +97,7 @@ export const MAP_METRICS: MetricConfig[] = [
     unit: 'days',
     nullable: true,
     additive: false,
+    available: false,
     format: days,
   },
   {
@@ -96,6 +107,7 @@ export const MAP_METRICS: MetricConfig[] = [
     unit: 'high-priority open cases',
     nullable: false,
     additive: true,
+    available: false,
     format: int,
   },
 ]

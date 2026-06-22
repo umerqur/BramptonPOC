@@ -238,6 +238,8 @@ function supportingContext(row: AreaMetricValue | undefined, metric: MapMetric):
 
 // A small segmented toggle: visible cards (not a native select), full label text
 // kept on one line and wrapping to a new row on mobile rather than truncating.
+// Options can be `disabled` — rendered non-interactive with a small "Coming soon"
+// note — for metrics whose backing view is not populated yet.
 function SegmentedControl<T extends string>({
   label,
   value,
@@ -246,15 +248,31 @@ function SegmentedControl<T extends string>({
 }: {
   label: string
   value: T
-  options: Array<{ value: T; label: string }>
+  options: Array<{ value: T; label: string; disabled?: boolean }>
   onChange: (value: T) => void
 }) {
+  const hasComingSoon = options.some((o) => o.disabled)
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</span>
       <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
         {options.map((o) => {
           const selected = o.value === value
+          if (o.disabled) {
+            return (
+              <span
+                key={o.value}
+                aria-disabled
+                title="Coming soon"
+                className="inline-flex cursor-not-allowed items-center gap-1.5 whitespace-nowrap rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-400"
+              >
+                {o.label}
+                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  Soon
+                </span>
+              </span>
+            )
+          }
           return (
             <button
               key={o.value}
@@ -273,6 +291,9 @@ function SegmentedControl<T extends string>({
           )
         })}
       </div>
+      {hasComingSoon && (
+        <span className="text-[10px] text-ink-subtle">Coming soon — available once the metric data is populated.</span>
+      )}
     </div>
   )
 }
@@ -388,7 +409,7 @@ function NYCWorkloadHeatMap({
               label="Metric"
               value={metric}
               onChange={onMetricChange}
-              options={MAP_METRICS.map((m) => ({ value: m.key, label: m.label }))}
+              options={MAP_METRICS.map((m) => ({ value: m.key, label: m.label, disabled: !m.available }))}
             />
           </div>
 
