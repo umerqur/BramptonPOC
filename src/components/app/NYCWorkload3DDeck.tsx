@@ -5,25 +5,24 @@ import { MapView, WebMercatorViewport } from '@deck.gl/core'
 import type { Color, MapViewState, PickingInfo } from '@deck.gl/core'
 import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon } from 'geojson'
 import { calmWorkloadRgb } from './workloadColor'
-import type { AreaUnit, AreaVolume } from './NYCWorkloadMapPanel'
+import type { AreaUnit } from './NYCWorkloadMapPanel'
+import { formatMetric, metricConfig, metricRawValue, type AreaMetricValue, type MapMetric } from './mapMetrics'
 
 // Professional 3D workload view built on deck.gl's GeoJsonLayer (extruded
-// polygons) — replacing the old hand-rolled SVG pseudo-3D extrusion. It renders
-// the real NYC borough / council-district GeoJSON, extruded by a CONTROLLED,
-// relative height (sqrt scaling, hard-capped) and shaded with the municipal
-// green→amber→orange→red ramp. This is a relative operational visualization:
-// heights are scaled for readability and are not physical measurements.
+// polygons). It renders the real NYC borough / council-district GeoJSON, extruded
+// by a CONTROLLED, relative height (sqrt scaling, hard-capped) and shaded with the
+// municipal green→amber→orange→red ramp. The selected metric (not just complaint
+// volume) drives both the colour and the 3D height. This is a relative operational
+// visualization: heights are scaled for readability and are not physical
+// measurements.
 
-// Height is intentionally NOT raw complaint volume. The suggested literal
-// formula `Math.min(Math.sqrt(volume) * 600, 8000)` pegs almost every NYC
-// district to the cap once volumes reach a few hundred, which flattens the
-// low/medium/high contrast. Instead we keep sqrt scaling but normalize it
-// against the current geography level's [min, max] and map it onto a capped
-// height band — so differences stay visible without skyscraper exaggeration,
-// consistent with the rest of the map being "relative to the selected geography
-// level". The band top is tuned a little taller than the volume-flattening cap
-// so the busiest geography reads as clearly taller than its neighbours, while
-// the hard cap still rules out cartoonish skyscrapers.
+// Height is intentionally NOT the raw metric value. A literal sqrt-of-volume
+// formula pegs almost every NYC area to the cap once values reach a few hundred,
+// which flattens the low/medium/high contrast. Instead we keep sqrt scaling but
+// normalize it against the current geography level's [min, max] for the SELECTED
+// metric and map it onto a capped height band — so differences stay visible
+// without skyscraper exaggeration, consistent with the rest of the map being
+// "relative to the selected geography level and metric".
 const MAX_HEIGHT = 11000
 const MIN_HEIGHT = 250
 const NO_DATA_HEIGHT = 60
@@ -43,12 +42,16 @@ const NYC_FALLBACK: MapViewState = {
 type PolyGeom = Polygon | MultiPolygon
 
 /** Properties carried on each extruded feature, used by the accessors + tooltip. */
-type WorkloadProps = {
+type MetricProps = {
   key: string
   label: string
   short: string
-  volume: number | null
-  /** Workload share of the geography level total, 0..1, or null when no data. */
+  /** Selected-metric value for this area, or null when no data. */
+  value: number | null
+  /** Supporting context for the tooltip. */
+  total_requests: number | null
+  open_backlog: number | null
+  /** Share of the geography-level total, 0..1 — only for additive metrics. */
   share: number | null
   /** Linear min–max normalization used only for the color ramp. */
   colorT: number
@@ -58,7 +61,7 @@ type WorkloadProps = {
 
 // deck.gl's GeoJsonLayer widens feature geometry to the general Geometry union,
 // so accessors receive this type (we only ever build Polygon/MultiPolygon).
-type WorkloadFeature = Feature<Geometry, WorkloadProps>
+type MetricFeature = Feature<Geometry, MetricProps>
 
 /** Parse the bundled geometry (object | JSON string | Feature | FC) to a
  *  Polygon / MultiPolygon usable by deck.gl. */
@@ -92,12 +95,12 @@ function toGeometry(geometry: unknown): PolyGeom | null {
   return null
 }
 
-/** Controlled, relative, capped extrusion height — never raw volume. */
-function elevationFor(volume: number | null, min: number, max: number): number {
-  if (volume == null) return NO_DATA_HEIGHT
+/** Controlled, relative, capped extrusion height — never the raw metric value. */
+function elevationFor(value: number | null, min: number, max: number): number {
+  if (value == null) return NO_DATA_HEIGHT
   const lo = Math.sqrt(Math.max(0, min))
   const hi = Math.sqrt(Math.max(0, max))
-  const t = hi > lo ? (Math.sqrt(Math.max(0, volume)) - lo) / (hi - lo) : 0.5
+  const t = hi > lo ? (Math.sqrt(Math.max(0, value)) - lo) / (hi - lo) : 0.5
   const clamped = Math.max(0, Math.min(1, t))
   return Math.min(MIN_HEIGHT + clamped * (MAX_HEIGHT - MIN_HEIGHT), MAX_HEIGHT)
 }
@@ -112,15 +115,20 @@ type Bounds = [[number, number], [number, number]]
 /** Build the extruded FeatureCollection and the geographic bounds in one pass. */
 function buildScene(
   units: AreaUnit[],
-  volumes: AreaVolume[],
+  values: AreaMetricValue[],
+  metric: MapMetric,
   min: number,
   max: number,
-): { fc: FeatureCollection<Geometry, WorkloadProps>; bounds: Bounds | null } {
-  const byKey = new Map<string, number>()
-  for (const v of volumes) byKey.set(v.key, v.volume)
-  const total = volumes.reduce((s, v) => s + v.volume, 0)
+): { fc: FeatureCollection<Geometry, MetricProps>; bounds: Bounds | null } {
+  const byKey = new Map<string, AreaMetricValue>()
+  for (const v of values) byKey.set(v.key, v)
+  const additive = metricConfig(metric).additive
+  // Share only makes sense for additive count metrics, never closure-day rates.
+  const total = additive
+    ? values.reduce((s, v) => s + (metricRawValue(v, metric) ?? 0), 0)
+    : 0
 
-  const features: WorkloadFeature[] = []
+  const features: MetricFeature[] = []
   let minLng = Infinity
   let maxLng = -Infinity
   let minLat = Infinity
@@ -129,9 +137,10 @@ function buildScene(
   for (const u of units) {
     const geometry = toGeometry(u.geometry)
     if (!geometry) continue
-    const volume = byKey.has(u.key) ? (byKey.get(u.key) as number) : null
-    const colorT = max > min && volume != null ? (volume - min) / (max - min) : 0
-    const share = volume != null && total > 0 ? volume / total : null
+    const row = byKey.get(u.key)
+    const value = metricRawValue(row, metric)
+    const colorT = max > min && value != null ? (value - min) / (max - min) : 0
+    const share = additive && value != null && total > 0 ? value / total : null
     features.push({
       type: 'Feature',
       geometry,
@@ -139,10 +148,12 @@ function buildScene(
         key: u.key,
         label: u.label,
         short: u.short,
-        volume,
+        value,
+        total_requests: row?.total_requests ?? null,
+        open_backlog: row?.open_backlog ?? null,
         share,
         colorT,
-        elevation: elevationFor(volume, min, max),
+        elevation: elevationFor(value, min, max),
       },
     })
     eachCoord(geometry, (lng, lat) => {
@@ -162,17 +173,16 @@ function buildScene(
   return { fc: { type: 'FeatureCollection', features }, bounds }
 }
 
-function fillFor(p: WorkloadProps): Color {
-  if (p.volume == null) return NO_DATA_COLOR
+function fillFor(p: MetricProps): Color {
+  if (p.value == null) return NO_DATA_COLOR
   const [r, g, b] = calmWorkloadRgb(p.colorT)
   return [r, g, b, 235]
 }
 
-const numFmt = (v: number) => v.toLocaleString()
-
 export default function NYCWorkload3DDeck({
   units,
-  volumes,
+  values,
+  metric,
   min,
   max,
   unitLabel,
@@ -181,7 +191,8 @@ export default function NYCWorkload3DDeck({
   onSelect,
 }: {
   units: AreaUnit[]
-  volumes: AreaVolume[]
+  values: AreaMetricValue[]
+  metric: MapMetric
   min: number
   max: number
   unitLabel: string
@@ -191,8 +202,12 @@ export default function NYCWorkload3DDeck({
 }) {
   // Bumping this remounts DeckGL, which re-reads initialViewState (i.e. resets).
   const [resetCount, setResetCount] = useState(0)
+  const cfg = metricConfig(metric)
 
-  const { fc, bounds } = useMemo(() => buildScene(units, volumes, min, max), [units, volumes, min, max])
+  const { fc, bounds } = useMemo(
+    () => buildScene(units, values, metric, min, max),
+    [units, values, metric, min, max],
+  )
 
   const initialViewState = useMemo<MapViewState>(() => {
     if (!bounds) return NYC_FALLBACK
@@ -212,7 +227,7 @@ export default function NYCWorkload3DDeck({
 
   const layer = useMemo(
     () =>
-      new GeoJsonLayer<WorkloadProps>({
+      new GeoJsonLayer<MetricProps>({
         id: 'nyc-workload-3d',
         data: fc,
         pickable: true,
@@ -221,41 +236,49 @@ export default function NYCWorkload3DDeck({
         stroked: true,
         wireframe: false,
         elevationScale: 1,
-        getElevation: (f: WorkloadFeature) => f.properties.elevation,
-        getFillColor: (f: WorkloadFeature) => fillFor(f.properties),
-        getLineColor: (f: WorkloadFeature): Color =>
+        getElevation: (f: MetricFeature) => f.properties.elevation,
+        getFillColor: (f: MetricFeature) => fillFor(f.properties),
+        getLineColor: (f: MetricFeature): Color =>
           f.properties.key === activeKey ? [15, 23, 42, 255] : [255, 255, 255, 90],
-        getLineWidth: (f: WorkloadFeature) => (f.properties.key === activeKey ? 2 : 1),
+        getLineWidth: (f: MetricFeature) => (f.properties.key === activeKey ? 2 : 1),
         lineWidthUnits: 'pixels',
         // Soft lighting so the calm colors read with depth, not as flat blocks.
         material: { ambient: 0.62, diffuse: 0.55, shininess: 24, specularColor: [30, 30, 30] },
         autoHighlight: true,
         highlightColor: [255, 255, 255, 60],
-        onClick: (info: PickingInfo<WorkloadFeature>) => {
+        onClick: (info: PickingInfo<MetricFeature>) => {
           const p = info.object?.properties
           if (p) onSelect(p.key, p.label)
         },
-        onHover: (info: PickingInfo<WorkloadFeature>) => onHover(info.object?.properties.key ?? null),
+        onHover: (info: PickingInfo<MetricFeature>) => onHover(info.object?.properties.key ?? null),
         updateTriggers: {
-          getFillColor: [min, max, activeKey],
-          getElevation: [min, max],
+          getFillColor: [min, max, metric, activeKey],
+          getElevation: [min, max, metric],
           getLineColor: [activeKey],
           getLineWidth: [activeKey],
         },
       }),
-    [fc, min, max, activeKey, onHover, onSelect],
+    [fc, min, max, metric, activeKey, onHover, onSelect],
   )
 
-  const getTooltip = (info: PickingInfo<WorkloadFeature>) => {
+  const getTooltip = (info: PickingInfo<MetricFeature>) => {
     const p = info.object?.properties
     if (!p) return null
-    const count = p.volume != null ? `${numFmt(p.volume)} complaints` : 'No workload data'
-    const share = p.share != null ? `${(p.share * 100).toFixed(1)}% of ${unitLabel} workload` : '—'
+    const headline = `${cfg.title}: ${formatMetric(p.value, metric)}`
+    const share = p.share != null ? `${(p.share * 100).toFixed(1)}% of ${unitLabel} total` : null
+    const context: string[] = []
+    if (metric !== 'total_requests' && p.total_requests != null) {
+      context.push(`Total requests: ${p.total_requests.toLocaleString()}`)
+    }
+    if (metric !== 'open_backlog' && p.open_backlog != null) {
+      context.push(`Open backlog: ${p.open_backlog.toLocaleString()}`)
+    }
     return {
       html:
         `<div style="font-weight:600;margin-bottom:2px">${p.label}</div>` +
-        `<div>${count}</div>` +
-        `<div style="opacity:.8">${share}</div>` +
+        `<div>${headline}</div>` +
+        (share ? `<div style="opacity:.8">${share}</div>` : '') +
+        context.map((c) => `<div style="opacity:.8">${c}</div>`).join('') +
         `<div style="opacity:.7;margin-top:3px;font-size:10px">Height is scaled for readability — not a physical measurement.</div>`,
       style: {
         backgroundColor: 'rgba(15,23,42,0.92)',
