@@ -1758,6 +1758,30 @@ const AGING_BUCKETS: { label: string; test: (d: number) => boolean }[] = [
   { label: '15+ days', test: (d) => d >= 15 },
 ]
 
+// Plain-language status for an open-case aging bucket, classified by the bucket's
+// lower-bound day count. These are POC interpretation thresholds for demo reading,
+// NOT an official City service-level standard. Robust to 3- or 4-bucket views.
+type AgingStatus = 'current' | 'watch' | 'aging' | 'backlog'
+
+const AGING_STATUS_META: Record<AgingStatus, { label: string; pill: string; border: string }> = {
+  current: { label: 'Current', pill: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200', border: 'border-l-emerald-400' },
+  watch: { label: 'Watch', pill: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200', border: 'border-l-amber-400' },
+  aging: { label: 'Aging', pill: 'bg-orange-50 text-orange-800 ring-1 ring-inset ring-orange-200', border: 'border-l-orange-500' },
+  backlog: { label: 'Backlog', pill: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200', border: 'border-l-rose-500' },
+}
+
+function agingStatus(label: string): AgingStatus {
+  const lower = parseInt(label, 10) // leading day count: "8–14 days" → 8, "15+ days" → 15
+  if (!Number.isFinite(lower)) return 'current'
+  if (lower >= 15) return 'backlog'
+  if (lower >= 8) return 'aging'
+  if (lower >= 3) return 'watch'
+  return 'current'
+}
+
+const AGING_THRESHOLD_HELP =
+  'These colours show how long open benchmark cases have been waiting. Thresholds are for demo interpretation and can be replaced with City SLA rules.'
+
 const OPEN_PAGE_SIZE = 25
 const DIVERSIFIED_SIZE = 60
 
@@ -1858,13 +1882,26 @@ function OpenCasesQueue() {
         error={null}
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {agingCards.map((b) => (
-            <div key={b.label} className="rounded-lg border border-slate-200 bg-white p-3.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{b.label}</div>
-              <div className="mt-1 text-xl font-semibold tabular-nums text-navy-900">{fmtInt(b.count)}</div>
-            </div>
-          ))}
+          {agingCards.map((b) => {
+            const meta = AGING_STATUS_META[agingStatus(b.label)]
+            return (
+              <div
+                key={b.label}
+                title={AGING_THRESHOLD_HELP}
+                className={`rounded-lg border border-l-4 border-slate-200 bg-white p-3.5 ${meta.border}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{b.label}</div>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.pill}`}>{meta.label}</span>
+                </div>
+                <div className="mt-1 text-xl font-semibold tabular-nums text-navy-900">{fmtInt(b.count)}</div>
+              </div>
+            )
+          })}
         </div>
+        <p className="mt-3 text-[11px] text-ink-subtle" title={AGING_THRESHOLD_HELP}>
+          Compared against POC review-age thresholds, not an official City SLA.
+        </p>
       </SectionShell>
 
       <SectionShell
