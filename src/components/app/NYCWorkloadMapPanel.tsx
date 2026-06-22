@@ -144,6 +144,11 @@ export default function NYCWorkloadMapPanel({
   const [mode, setMode] = useState<MapMode>('district')
   // Selected metric persists across geography toggles. Total complaints default.
   const [metric, setMetric] = useState<MapMetric>(DEFAULT_METRIC)
+  // Guard: a metric whose backing view is not populated yet ("Coming soon") can
+  // never become the selected metric, even if a stale call slips through.
+  const selectMetric = (next: MapMetric) => {
+    if (metricConfig(next).available) setMetric(next)
+  }
   const [units, setUnits] = useState<AreaUnit[]>([])
   const [rows, setRows] = useState<AreaMetricValue[]>([])
   // Set when the live aggregate cannot be loaded from Supabase. No hardcoded
@@ -193,7 +198,7 @@ export default function NYCWorkloadMapPanel({
       mode={mode}
       onModeChange={setMode}
       metric={metric}
-      onMetricChange={setMetric}
+      onMetricChange={selectMetric}
       units={units}
       rows={rows}
       unavailable={unavailable}
@@ -292,7 +297,9 @@ function SegmentedControl<T extends string>({
         })}
       </div>
       {hasComingSoon && (
-        <span className="text-[10px] text-ink-subtle">Coming soon — available once the metric data is populated.</span>
+        <span className="text-[10px] text-ink-subtle">
+          Coming soon — total complaints is live now. Backlog and closure metrics require the next aggregate refresh.
+        </span>
       )}
     </div>
   )
