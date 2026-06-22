@@ -517,11 +517,18 @@ function WorkRowCard({
           {row.assigned_to ? (
             <>
               <span className="font-medium text-ink">Assigned officer:</span> {row.assigned_to}
-              {!row.ready_for_closure && ' · Next step: Officer records field outcome'}
+              {' · Next step: Officer records field outcome'}
             </>
           ) : (
             <span className="font-medium text-rose-700">Assignment incomplete — reassign an officer from Resident intakes.</span>
           )}
+        </p>
+      )}
+
+      {isResident && row.ready_for_closure && (
+        <p className="mt-2 text-xs">
+          <span className="font-medium text-amber-700">Field outcome recorded · Supervisor closure review required</span>
+          {row.assigned_to ? <span className="text-ink-muted"> · {row.assigned_to}</span> : null}
         </p>
       )}
 
