@@ -10,6 +10,7 @@
 
 import type { NormalizedServiceRequest } from '../data/demoWorkflowTypes'
 import type { ResidentRequestRow } from './residentRequests'
+import { sanitizeResidentDescription } from '../lib/residentDescription'
 import type { OpenReviewRow } from './caseExplorer'
 
 const cleaned = (v: string | null | undefined): string | null => {
@@ -38,7 +39,7 @@ export function residentRowToNormalized(
     submitted_at: row.created_at,
     status: row.status,
     complaint_type: cleaned(row.request_type),
-    request_detail: cleaned(row.description),
+    request_detail: cleaned(sanitizeResidentDescription(row.description)),
     location_type: cleaned(row.address_type),
     address_or_location: join([row.location, row.city]),
     ward_or_area: cleaned(row.province),

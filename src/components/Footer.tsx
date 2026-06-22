@@ -11,15 +11,14 @@ export default function Footer() {
             <span className="text-sm font-semibold text-navy-900">Proactive Enforcement Intelligence</span>
           </div>
           <p className="mt-3 text-sm text-ink-muted max-w-sm">
-            A Closure Review Workbench proof of concept for Enforcement and By-law complaint responses. AI automates
-            research, analysis, and draft preparation for staff approved closure responses. Built using NYC 311
-            public benchmark data and synthetic records.
+            A Closure Review Workbench proof of concept for enforcement and by-law complaint responses. AI-supported
+            benchmark retrieval and a rules-based workflow keep enforcement decisions under human control. Built using
+            NYC 311 public benchmark data and demo records.
           </p>
         </div>
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-subtle">Product</h4>
           <ul className="mt-3 space-y-2 text-sm">
-            <li><Link to="/how-it-works" className="link-quiet">How It Works</Link></li>
             <li><Link to="/resident" className="link-quiet">Resident portal (demo)</Link></li>
             <li><Link to="/login" className="link-quiet">Authorized staff login</Link></li>
           </ul>

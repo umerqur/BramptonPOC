@@ -5,9 +5,9 @@
 //
 // When a resident files a complaint it lands in Supabase and shows up in the
 // Staff Inbox. When staff click "Open case", we turn that row into a workbench
-// DemoCase using the same deterministic AI workflow that powers the POC
-// Walkthrough — so staff get an AI-style triage, summary, confidence, and
-// recommended action even though no real model result exists yet.
+// DemoCase using the same deterministic decision-support workflow that powers
+// the POC Walkthrough — so staff get a classification check, summary, file
+// readiness, and recommended action, all rules-based.
 //
 // This is decision support only: every department / priority / confidence value
 // here is a generated placeholder, and every closure still requires explicit
@@ -16,13 +16,16 @@
 import type {
   DemoCase,
   DemoCategory,
+  EnforcementAction,
   OfficerFieldAction,
   ResidentComplaintInput,
+  ServiceMethod,
   ContactPreference,
 } from '../data/demoWorkflowTypes'
 import { runWorkflow, buildClosureDraft, deriveFieldVisitOutcome } from './demoWorkflowService'
 import { residentRowToNormalized } from './serviceRequest'
 import type { ResidentRequestRow } from './residentRequests'
+import { sanitizeResidentDescription } from '../lib/residentDescription'
 
 /**
  * Deterministic mapping from a resident-facing issue type to the internal
@@ -63,6 +66,27 @@ function normalizeViolation(value: string | null): 'yes' | 'no' | 'unclear' | nu
   return v === 'yes' || v === 'no' || v === 'unclear' ? v : null
 }
 
+const ENFORCEMENT_ACTIONS: EnforcementAction[] = [
+  'warning_education',
+  'notice_issued',
+  'ticket_issued',
+  'no_action',
+  'other',
+]
+const SERVICE_METHODS: ServiceMethod[] = ['placed_on_vehicle', 'handed_to_driver', 'sent_by_mail', 'other']
+
+/** Normalize a stored enforcement-action value to the union, or null. */
+function normalizeEnforcementAction(value: string | null): EnforcementAction | null {
+  const v = (value ?? '').trim()
+  return (ENFORCEMENT_ACTIONS as string[]).includes(v) ? (v as EnforcementAction) : null
+}
+
+/** Normalize a stored method-of-service value to the union, or null. */
+function normalizeServiceMethod(value: string | null): ServiceMethod | null {
+  const v = (value ?? '').trim()
+  return (SERVICE_METHODS as string[]).includes(v) ? (v as ServiceMethod) : null
+}
+
 /**
  * Build a recorded OfficerFieldAction from the resident request's field-outcome
  * columns, or null when the officer has not recorded an outcome yet. The
@@ -78,16 +102,21 @@ function fieldActionFromRow(row: ResidentRequestRow): OfficerFieldAction | null 
     const t = (s ?? '').trim()
     return t.length > 0 ? t : null
   }
+  const enforcementAction = normalizeEnforcementAction(row.field_enforcement_action)
   return {
     officerName: row.assigned_officer_name ?? 'Officer Oakley',
     visitedAt: recordedAt,
     recordedAt,
-    outcome: deriveFieldVisitOutcome(row.field_violation_observed, row.field_action_taken),
+    outcome: deriveFieldVisitOutcome(row.field_violation_observed, enforcementAction),
     observations: internalObservation,
-    referenceNumber: null,
+    // Ticket / penalty notice number, only when a ticket was issued.
+    referenceNumber: enforcementAction === 'ticket_issued' ? clean(row.field_reference_number) : null,
     followUpRequired: row.field_follow_up_required,
     // Verbatim recorded fields, so the closure draft reflects the real action.
     violationObserved: normalizeViolation(row.field_violation_observed),
+    enforcementAction,
+    serviceMethod:
+      enforcementAction === 'ticket_issued' ? normalizeServiceMethod(row.field_service_method) : null,
     actionTaken: clean(row.field_action_taken),
     observedCondition: clean(row.field_observed_condition),
     officerNotes: clean(row.field_officer_notes),
@@ -104,7 +133,7 @@ function fieldActionFromRow(row: ResidentRequestRow): OfficerFieldAction | null 
  */
 export function residentRowToCase(row: ResidentRequestRow): DemoCase {
   const input: ResidentComplaintInput = {
-    description: row.description ?? '',
+    description: sanitizeResidentDescription(row.description),
     location: [row.location, row.city].filter(Boolean).join(', '),
     channel: '311 Web',
     hasPhoto: false,
@@ -122,7 +151,11 @@ export function residentRowToCase(row: ResidentRequestRow): DemoCase {
   // schema (the resident form stays friendly; the record is normalized here).
   demoCase.normalized = residentRowToNormalized(row, demoCase.triage.recommendedDepartment)
 
+  // Resident cases already carry the assigned officer email in Supabase — keep
+  // that as the officer identity the Field Console filters on.
   if (row.assigned_officer_name) demoCase.assignedOfficer = row.assigned_officer_name
+  if (row.assigned_officer_email)
+    demoCase.assignedOfficerEmail = row.assigned_officer_email.trim().toLowerCase()
 
   // When the officer has recorded a field outcome, pull it into the case so
   // closure review reflects it: rebuild the closure draft from the recorded

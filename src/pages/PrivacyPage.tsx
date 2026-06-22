@@ -7,7 +7,7 @@ const principles = [
   },
   {
     title: 'Decision support, not autonomous enforcement',
-    body: 'AI automates research, analysis, and draft preparation for staff approved closure responses. The system never closes a case, issues notices or penalties, or sends resident communications on its own. Every draft is reviewed and approved by authorized municipal staff.',
+    body: 'AI is limited to semantic retrieval and reranking over indexed benchmark cases — decision support, not decisions. A rules-based workflow prepares closure drafts from approved templates and structured case facts. The system never closes a case, issues notices or penalties, or sends resident communications on its own. Every draft is reviewed and approved by authorized municipal staff.',
   },
   {
     title: 'Explainability by default',

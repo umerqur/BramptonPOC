@@ -14,7 +14,9 @@ export const ALLOWED_EMAILS = [
   'liboluo@hotmail.com',
   'ousmaan_ahmed@icloud.com',
   'balraj_m7@hotmail.com',
-  // Demo By-law Officer account (role derived from email in src/lib/roles.ts).
+  'yuri.levin@queensu.ca',
+  // Demo By-law Officer account (staff role comes from the profile list in
+  // src/lib/roles.ts — this email is the officer profile).
   'oakley.carpentry_worker@yahoo.com',
 ] as const
 

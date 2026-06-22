@@ -453,7 +453,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
       <dt className="text-[10px] uppercase tracking-wider text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-ink">{value || '—'}</dd>
+      <dd className="mt-0.5 break-words text-ink">{value || '—'}</dd>
     </div>
   )
 }

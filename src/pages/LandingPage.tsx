@@ -73,7 +73,7 @@ export default function LandingPage() {
           <div className="card card-hover flex flex-col p-7">
             <h2 className="text-xl font-semibold text-navy-900">City staff</h2>
             <p className="mt-2 flex-1 text-ink-muted">
-              Review submitted requests and prepare staff approved closure responses.
+              Review submitted requests, use decision support, assign officers, and approve closure responses.
             </p>
             <div className="mt-6">
               <Link to="/login" className="btn-primary">

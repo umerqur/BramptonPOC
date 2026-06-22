@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
-import { can, DEMO_OFFICER } from '../../lib/roles'
+import { can, officerProfiles, officerDisplayName, type StaffProfile } from '../../lib/roles'
 import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
 import { formatDate, formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
@@ -18,13 +18,16 @@ import {
   mapResidentToWorkRow,
   sortByReviewPriority,
   isActiveResident,
+  needsOfficerAssignment,
   REVIEW_PRIORITY_EXPLAINER,
   REVIEW_PRIORITY_FACTORS,
   type WorkQueueRow,
   type ReviewPriorityTier,
 } from '../../services/workQueue'
 import type { OpenReviewRow } from '../../services/caseExplorer'
+import { sanitizeResidentDescription } from '../../lib/residentDescription'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import { DecisionLogicDisclosure, decisionLogicFromWorkRow } from '../../components/app/DecisionLogicPanel'
 
 // Work Queue — the unified, active review surface staff land on first. It brings
 // together two LIVE sources of active work, with clear source labels on every row:
@@ -42,6 +45,16 @@ import ResidentAttachments from '../../components/app/ResidentAttachments'
 
 // The five Work Queue views.
 type WorkTab = 'all' | 'resident' | 'open' | 'assigned' | 'closure'
+
+// Tab labels. "Open benchmark cases" stays explicitly labelled as benchmark /
+// context data so it never reads as live Brampton resident work.
+const WORK_TAB_LABELS: Record<WorkTab, string> = {
+  all: 'All active work',
+  resident: 'Resident intakes',
+  open: 'Open benchmark cases',
+  assigned: 'Assigned / in progress',
+  closure: 'Ready for closure review',
+}
 
 const STATUS_STYLES: Record<string, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
@@ -83,7 +96,11 @@ export default function AppStaffInboxPage() {
   const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
   const [open, setOpen] = useState<OpenState>({ rows: [], hasMore: false, loading: true, error: null })
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
-  const [tab, setTab] = useState<WorkTab>('all')
+  // Tab order + default tab are role-aware (see tabOrder / the default-selection
+  // effect below). Initialise to the role's primary tab so the first paint isn't
+  // backwards for a supervisor; the effect then refines to the first tab that
+  // actually has items once the queue has loaded.
+  const [tab, setTab] = useState<WorkTab>(() => (role === 'csr' ? 'resident' : 'assigned'))
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const canAssign = can(role, 'assignOfficer')
 
@@ -128,6 +145,13 @@ export default function AppStaffInboxPage() {
   // active Work Queue.
   const residentActive = useMemo(() => resident.rows.filter(isActiveResident), [resident.rows])
 
+  // Resident intakes tab shows only NEW / unassigned intakes that still need a
+  // supervisor to assign an officer (including any with an incomplete assignment).
+  const residentNeedsAssignment = useMemo(
+    () => residentActive.filter(needsOfficerAssignment),
+    [residentActive],
+  )
+
   const residentWorkRows = useMemo(
     () => residentActive.map((r) => mapResidentToWorkRow(r, attachmentsByCase[r.case_id]?.length ?? 0)),
     [residentActive, attachmentsByCase],
@@ -145,6 +169,41 @@ export default function AppStaffInboxPage() {
     () => sortByReviewPriority(residentWorkRows.filter((r) => r.ready_for_closure)),
     [residentWorkRows],
   )
+
+  const counts: Record<WorkTab, number> = useMemo(
+    () => ({
+      all: allActive.length,
+      resident: residentNeedsAssignment.length,
+      open: open.rows.length,
+      assigned: assignedInProgress.length,
+      closure: readyForClosure.length,
+    }),
+    [allActive.length, residentNeedsAssignment.length, open.rows.length, assignedInProgress.length, readyForClosure.length],
+  )
+
+  // Tab order by role. Supervisors should see live operational work first
+  // (assigned/in progress, then closure reviews, then new intakes), with NYC
+  // open benchmark cases last so demo/context data never visually outranks live
+  // resident workflow. CSR / Intake prioritises new resident intakes first.
+  const tabOrder = useMemo<WorkTab[]>(
+    () =>
+      role === 'csr'
+        ? ['resident', 'all', 'assigned', 'closure', 'open']
+        : ['assigned', 'closure', 'resident', 'all', 'open'],
+    [role],
+  )
+
+  // Default-selection: once the queue has loaded, land on the first tab in the
+  // role's preferred order that actually has items (falling back to the role's
+  // primary tab). Runs once and never overrides a manual tab choice.
+  const didInitTab = useRef(false)
+  useEffect(() => {
+    if (didInitTab.current) return
+    if (resident.loading || open.loading) return
+    didInitTab.current = true
+    const firstWithItems = tabOrder.find((t) => counts[t] > 0)
+    if (firstWithItems) setTab(firstWithItems)
+  }, [resident.loading, open.loading, tabOrder, counts])
 
   function openResidentCase(row: ResidentRequestRow) {
     ingestResidentCase(row)
@@ -164,12 +223,16 @@ export default function AppStaffInboxPage() {
     navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
   }
 
-  // Supervisor/coordinator action: explicit human assignment to the By-law
-  // Officer (never automated).
-  async function assignToOfficer(row: ResidentRequestRow) {
+  // Supervisor/CSR action: explicit human assignment to a chosen By-law Officer
+  // profile (never automated). Stores the officer display name + login email, so
+  // only that signed-in officer can record the field outcome (assigned_officer_email).
+  async function assignToOfficer(row: ResidentRequestRow, officer: StaffProfile) {
     setAssigningId(row.case_id)
     try {
-      await assignResidentRequestToOfficer(row.case_id, { name: DEMO_OFFICER.name, email: DEMO_OFFICER.email })
+      await assignResidentRequestToOfficer(row.case_id, {
+        name: officerDisplayName(officer),
+        email: officer.email,
+      })
       load()
     } catch (err) {
       console.error('Failed to assign case to officer:', err)
@@ -190,13 +253,6 @@ export default function AppStaffInboxPage() {
   if (role === 'officer') return <Navigate to="/app/field" replace />
 
   const loading = resident.loading || open.loading
-  const counts: Record<WorkTab, number> = {
-    all: allActive.length,
-    resident: residentActive.length,
-    open: open.rows.length,
-    assigned: assignedInProgress.length,
-    closure: readyForClosure.length,
-  }
 
   return (
     <div className="container-page py-10">
@@ -216,24 +272,27 @@ export default function AppStaffInboxPage() {
 
       <ReviewPriorityNote />
 
-      <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
-        <TabButton label="All active work" count={counts.all} active={tab === 'all'} onClick={() => setTab('all')} />
-        <TabButton label="Resident intakes" count={counts.resident} active={tab === 'resident'} onClick={() => setTab('resident')} />
-        <TabButton
-          label="Open benchmark cases"
-          count={open.error ? null : counts.open}
-          active={tab === 'open'}
-          onClick={() => setTab('open')}
-        />
-        <TabButton label="Assigned / in progress" count={counts.assigned} active={tab === 'assigned'} onClick={() => setTab('assigned')} />
-        <TabButton label="Ready for closure review" count={counts.closure} active={tab === 'closure'} onClick={() => setTab('closure')} />
+      <div
+        role="tablist"
+        aria-label="Work queue filters"
+        className="mt-6 flex gap-8 overflow-x-auto border-b border-slate-200"
+      >
+        {tabOrder.map((t) => (
+          <TabButton
+            key={t}
+            label={WORK_TAB_LABELS[t]}
+            count={t === 'open' && open.error ? null : counts[t]}
+            active={tab === t}
+            onClick={() => setTab(t)}
+          />
+        ))}
       </div>
 
       <div className="mt-6">
         {tab === 'resident' ? (
           <ResidentIntakesView
             state={resident}
-            rows={residentActive}
+            rows={residentNeedsAssignment}
             attachmentsByCase={attachmentsByCase}
             canAssign={canAssign}
             assigningId={assigningId}
@@ -437,6 +496,30 @@ function WorkRowCard({
         </p>
       )}
 
+      <DecisionLogicDisclosure data={decisionLogicFromWorkRow(row)} />
+
+      {/* Assigned resident cases: surface the assigned officer and the next step
+          so the assignment state reads clearly once a supervisor has assigned. */}
+      {isResident && row.in_progress && (
+        <p className="mt-2 text-xs text-ink-muted">
+          {row.assigned_to ? (
+            <>
+              <span className="font-medium text-ink">Assigned officer:</span> {row.assigned_to}
+              {' · Next step: Officer records field outcome'}
+            </>
+          ) : (
+            <span className="font-medium text-rose-700">Assignment incomplete — reassign an officer from Resident intakes.</span>
+          )}
+        </p>
+      )}
+
+      {isResident && row.ready_for_closure && (
+        <p className="mt-2 text-xs">
+          <span className="font-medium text-amber-700">Field outcome recorded · Supervisor closure review required</span>
+          {row.assigned_to ? <span className="text-ink-muted"> · {row.assigned_to}</span> : null}
+        </p>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] text-ink-subtle">
           {row.workflow_stage}
@@ -521,7 +604,7 @@ function ResidentIntakesView({
   attachmentsByCase: Record<string, ResidentRequestAttachment[]>
   canAssign: boolean
   assigningId: string | null
-  onAssign: (row: ResidentRequestRow) => void
+  onAssign: (row: ResidentRequestRow, officer: StaffProfile) => void
   onOpen: (row: ResidentRequestRow) => void
   onOpenClosureReview: (row: ResidentRequestRow) => void
 }) {
@@ -548,7 +631,7 @@ function ResidentIntakesView({
             attachments={attachmentsByCase[row.case_id] ?? []}
             canAssign={canAssign}
             assigning={assigningId === row.case_id}
-            onAssign={() => onAssign(row)}
+            onAssign={(officer) => onAssign(row, officer)}
             onOpen={() => onOpen(row)}
             onOpenClosureReview={() => onOpenClosureReview(row)}
           />
@@ -580,21 +663,17 @@ function TabButton({
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
-        active ? 'border-accent-600 text-navy-900' : 'border-transparent text-ink-subtle hover:text-navy-900'
+      className={`relative shrink-0 pb-3 text-sm font-semibold transition ${
+        active
+          ? 'text-navy-900 after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-teal-600'
+          : 'text-slate-500 hover:text-navy-900'
       }`}
     >
       {label}
-      {count != null && (
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${
-            active ? 'bg-accent-100 text-accent-800' : 'bg-slate-100 text-slate-600'
-          }`}
-        >
-          {count}
-        </span>
-      )}
+      {count != null && <span className="ml-1 text-xs font-semibold text-teal-700">{count}</span>}
     </button>
   )
 }
@@ -612,7 +691,7 @@ function InboxCard({
   attachments: ResidentRequestAttachment[]
   canAssign: boolean
   assigning: boolean
-  onAssign: () => void
+  onAssign: (officer: StaffProfile) => void
   onOpen: () => void
   onOpenClosureReview: () => void
 }) {
@@ -625,7 +704,7 @@ function InboxCard({
   const { triage, summary } = triageCase
   const priority = triage.recommendedPriority
   const missingInformation = triage.missingInformation
-  const residentComplaint = row.description?.trim()
+  const residentComplaint = sanitizeResidentDescription(row.description)
 
   return (
     <div className="card p-5">
@@ -666,7 +745,7 @@ function InboxCard({
               </span>
             </div>
             <p className="mt-1 text-sm text-ink">
-              Field outcome recorded by {row.assigned_officer_name ?? 'Officer Oakley'}.
+              Field outcome recorded by {row.assigned_officer_name ?? 'the assigned officer'}.
             </p>
           </div>
           <button onClick={onOpenClosureReview} className="btn-primary text-sm py-2 px-4">
@@ -763,12 +842,21 @@ function AssignmentPanel({
   row: ResidentRequestRow
   canAssign: boolean
   assigning: boolean
-  onAssign: () => void
+  onAssign: (officer: StaffProfile) => void
   routingRecommendation: string
 }) {
-  const assigned = Boolean(row.assigned_officer_name)
+  // Only a recorded officer name means the assignment actually completed. A row
+  // can carry status 'assigned' with NO officer on file (an incomplete or stale
+  // assignment) — that is not "assigned", it needs the supervisor to finish it.
+  const assignedComplete = Boolean(row.assigned_officer_name)
+  const assignmentIncomplete = !assignedComplete && row.status === 'assigned'
+  // The assignable By-law Officers (Officer Qureshi, Officer Mann, Officer Ahmed,
+  // Officer Oakley). Assignment stores the chosen officer's login email.
+  const officers = officerProfiles()
+  const [selectedEmail, setSelectedEmail] = useState(officers[0]?.email ?? '')
+  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? officers[0] ?? null
 
-  if (assigned) {
+  if (assignedComplete) {
     return (
       <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
         <div className="flex items-center gap-2">
@@ -776,7 +864,7 @@ function AssignmentPanel({
           <span className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Assignment</span>
         </div>
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'Officer Oakley'} />
+          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'the assigned officer'} />
           <Detail label="Role" value="Bylaw Officer" />
           <Detail label="Status" value="Assigned for field review" />
           <Detail label="Next step" value="Officer records field outcome" />
@@ -786,25 +874,59 @@ function AssignmentPanel({
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+    <div
+      className={`mt-4 rounded-xl border p-4 ${
+        assignmentIncomplete ? 'border-rose-200 bg-rose-50/60' : 'border-amber-200 bg-amber-50/60'
+      }`}
+    >
       <div className="flex items-center gap-2">
-        <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-        <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">Assignment</span>
+        <span
+          aria-hidden
+          className={`inline-block h-2 w-2 rounded-full ${assignmentIncomplete ? 'bg-rose-500' : 'bg-amber-500'}`}
+        />
+        <span
+          className={`text-xs font-semibold uppercase tracking-wide ${
+            assignmentIncomplete ? 'text-rose-800' : 'text-amber-800'
+          }`}
+        >
+          Assignment
+        </span>
       </div>
       <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs uppercase tracking-wide text-ink-subtle">Status</dt>
-          <dd className="mt-0.5 font-medium text-amber-700">Human assignment required</dd>
+          <dd className={`mt-0.5 font-medium ${assignmentIncomplete ? 'text-rose-700' : 'text-amber-700'}`}>
+            {assignmentIncomplete ? 'Assignment incomplete — select an officer again' : 'Human assignment required'}
+          </dd>
         </div>
         <Detail label="Routing recommendation" value={routingRecommendation} />
       </dl>
       <p className="mt-2 text-[11px] text-ink-subtle">
-        Routing recommendation does not dispatch an officer automatically.
+        {assignmentIncomplete
+          ? 'This case shows as assigned but has no officer on file. Select an officer to complete the assignment.'
+          : 'Routing recommendation does not dispatch an officer automatically.'}
       </p>
       {canAssign && row.status !== 'closed' && (
-        <div className="mt-3">
-          <button onClick={onAssign} disabled={assigning} className="btn-primary text-sm py-2 px-4 disabled:opacity-60">
-            {assigning ? 'Assigning…' : 'Assign to Bylaw Officer'}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <select
+            value={selectedEmail}
+            onChange={(e) => setSelectedEmail(e.target.value)}
+            disabled={assigning}
+            aria-label="Select By-law Officer"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+          >
+            {officers.map((o) => (
+              <option key={o.email} value={o.email}>
+                {officerDisplayName(o)}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => selectedOfficer && onAssign(selectedOfficer)}
+            disabled={assigning || !selectedOfficer}
+            className="btn-primary text-sm py-2 px-4 disabled:opacity-60"
+          >
+            {assigning ? 'Assigning…' : `Assign to ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
           </button>
         </div>
       )}
@@ -816,7 +938,7 @@ function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs uppercase tracking-wide text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-ink">{value}</dd>
+      <dd className="mt-0.5 break-words text-ink">{value}</dd>
     </div>
   )
 }
