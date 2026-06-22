@@ -435,16 +435,16 @@ function OperationalSnapshot() {
 }
 
 // Subtle status treatment for the snapshot KPI cards — a tinted left border, a
-// small pill, and a faint tinted background. These are POC interpretation cues,
+// small coloured status label, and a faint tinted background. These are POC interpretation cues,
 // NOT an official City SLA. Kept restrained: one accent per card, soft tints.
 type KpiTone = 'neutral' | 'benchmark' | 'watch' | 'pressure' | 'priority'
 
-const KPI_TONE: Record<KpiTone, { border: string; card: string; pill: string }> = {
-  neutral: { border: 'border-l-slate-300', card: 'bg-white', pill: 'bg-slate-100 text-slate-600' },
-  benchmark: { border: 'border-l-emerald-400', card: 'bg-emerald-50/30', pill: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-100' },
-  watch: { border: 'border-l-amber-400', card: 'bg-amber-50/30', pill: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100' },
-  pressure: { border: 'border-l-orange-500', card: 'bg-orange-50/30', pill: 'bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-100' },
-  priority: { border: 'border-l-rose-500', card: 'bg-rose-50/40', pill: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-100' },
+const KPI_TONE: Record<KpiTone, { border: string; card: string; label: string }> = {
+  neutral: { border: 'border-l-slate-300', card: 'bg-white', label: 'text-slate-600' },
+  benchmark: { border: 'border-l-emerald-400', card: 'bg-emerald-50/30', label: 'text-emerald-700' },
+  watch: { border: 'border-l-amber-400', card: 'bg-amber-50/30', label: 'text-amber-700' },
+  pressure: { border: 'border-l-orange-500', card: 'bg-orange-50/30', label: 'text-orange-700' },
+  priority: { border: 'border-l-rose-500', card: 'bg-rose-50/40', label: 'text-rose-700' },
 }
 
 /**
@@ -476,7 +476,9 @@ function KpiCard({
       <div className="flex items-start justify-between gap-2">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
         {statusLabel && (
-          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${t.pill}`}>{statusLabel}</span>
+          <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider ${t.label}`}>
+            {statusLabel}
+          </span>
         )}
       </div>
       <div className={`mt-1.5 tabular-nums text-navy-900 ${valueClass}`}>{value}</div>
