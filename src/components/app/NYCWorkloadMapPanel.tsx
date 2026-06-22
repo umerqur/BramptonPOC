@@ -259,33 +259,67 @@ function NYCWorkloadHeatMap({
         </span>
       </div>
 
-      {/* Toggles: geography level (district vs borough) and visual mode (2D vs 3D). */}
-      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3.5">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Geography level</span>
-            <div
-              role="tablist"
-              aria-label="Geography level"
-              className="inline-flex items-center gap-1 self-start rounded-2xl bg-slate-100 p-1.5 shadow-inner ring-1 ring-slate-200"
+      {/* Compact controls: a geography select and a 2D/3D switch. Stacks on
+          mobile, becomes a single horizontal toolbar from sm up. */}
+      <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3.5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-6">
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+              Geography
+            </span>
+            <select
+              value={mode}
+              onChange={(e) => onModeChange(e.target.value as MapMode)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-navy-900 shadow-sm focus:border-teal-500 focus:outline-none"
             >
-              <ModeTab label={ADAPTERS.district.toggleLabel} active={mode === 'district'} onClick={() => onModeChange('district')} />
-              <ModeTab label={ADAPTERS.borough.toggleLabel} active={mode === 'borough'} onClick={() => onModeChange('borough')} />
-            </div>
-          </div>
+              <option value="district">Council districts</option>
+              <option value="borough">Boroughs</option>
+            </select>
+          </label>
+
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">View</span>
-            <div
-              role="tablist"
-              aria-label="Visual mode"
-              className="inline-flex items-center gap-1 self-start rounded-2xl bg-slate-100 p-1.5 shadow-inner ring-1 ring-slate-200"
-            >
-              <ModeTab label="2D operational map" active={view === '2d'} onClick={() => setView('2d')} />
-              <ModeTab label="3D workload view" active={view === '3d'} onClick={() => setView('3d')} />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+              View
+            </span>
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
+              <button
+                type="button"
+                onClick={() => setView('2d')}
+                className={view === '2d' ? 'text-navy-900' : 'text-slate-500'}
+              >
+                2D map
+              </button>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={view === '3d'}
+                aria-label="Toggle 3D workload view"
+                onClick={() => setView(view === '2d' ? '3d' : '2d')}
+                className={`relative h-6 w-11 rounded-full transition ${
+                  view === '3d' ? 'bg-teal-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                    view === '3d' ? 'left-5' : 'left-0.5'
+                  }`}
+                />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setView('3d')}
+                className={view === '3d' ? 'text-navy-900' : 'text-slate-500'}
+              >
+                3D
+              </button>
             </div>
           </div>
         </div>
-        <span className="text-[11px] text-ink-subtle">{SCALE_NOTE}</span>
+        <span className="text-[11px] leading-relaxed text-ink-subtle sm:max-w-md sm:text-right">
+          {SCALE_NOTE}
+        </span>
       </div>
 
       {/* Short mode banner */}
@@ -458,35 +492,6 @@ function NYCWorkloadHeatMap({
         concentrated by {adapter.unitLabel} — input for staffing and routing review. Not a risk prediction.
       </div>
     </section>
-  )
-}
-
-function ModeTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-100 ${
-        active
-          ? 'bg-white text-navy-900 shadow-md ring-1 ring-slate-200'
-          : 'text-ink-muted hover:bg-white/70 hover:text-navy-900'
-      }`}
-    >
-      {/* Selected indicator — a small checkmark dot inside the active tab. */}
-      <span
-        aria-hidden
-        className={`flex h-4 w-4 items-center justify-center rounded-full transition-all duration-200 ${
-          active ? 'scale-100 bg-accent-500 text-white' : 'scale-0 opacity-0'
-        }`}
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
-      </span>
-      {label}
-    </button>
   )
 }
 
