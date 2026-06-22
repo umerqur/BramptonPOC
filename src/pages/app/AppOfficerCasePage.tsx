@@ -270,7 +270,7 @@ function FieldOutcomeSection({
               <Detail label="Method of service" value={serviceMethodLabel(row.field_service_method)} />
             </>
           )}
-          <Detail label="Action taken notes" value={row.field_action_taken ?? '—'} />
+          <Detail label="Action taken / resolution details" value={row.field_action_taken ?? '—'} />
           <Detail label="Follow-up required" value={row.field_follow_up_required ? 'Yes' : 'No'} />
           <Detail
             label="Recorded"
@@ -334,9 +334,17 @@ function FieldOutcomeForm({
       setError('Select the enforcement action you took before completing the field outcome.')
       return
     }
+    const isTicket = enforcementAction === 'ticket_issued'
+    if (isTicket && !referenceNumber.trim()) {
+      setError('Enter the ticket / penalty notice number for the ticket issued, before completing the field outcome.')
+      return
+    }
+    if (!actionTaken.trim()) {
+      setError('Describe the action taken or reason no action was required before completing the field outcome.')
+      return
+    }
     setBusy(true)
     setError(null)
-    const isTicket = enforcementAction === 'ticket_issued'
     const input: FieldOutcomeInput = {
       observedCondition,
       violationObserved,
@@ -367,7 +375,7 @@ function FieldOutcomeForm({
             value={observedCondition}
             onChange={(e) => setObservedCondition(e.target.value)}
             rows={3}
-            placeholder="What you observed on site…"
+            placeholder="Describe what you observed on site…"
             className={fieldClass}
           />
         </label>
@@ -395,12 +403,12 @@ function FieldOutcomeForm({
         />
 
         <label className="block">
-          <span className="stat-label">Action taken notes (optional)</span>
+          <span className="stat-label">Action taken / resolution details</span>
           <textarea
             value={actionTaken}
             onChange={(e) => setActionTaken(e.target.value)}
             rows={2}
-            placeholder="Optional supporting detail on the action taken…"
+            placeholder="Describe the action taken, notice issued, warning provided, or reason no action was required…"
             className={fieldClass}
           />
         </label>
@@ -411,7 +419,7 @@ function FieldOutcomeForm({
             value={officerNotes}
             onChange={(e) => setOfficerNotes(e.target.value)}
             rows={2}
-            placeholder="Optional additional notes…"
+            placeholder="Optional internal notes…"
             className={fieldClass}
           />
         </label>
@@ -510,7 +518,7 @@ function EnforcementActionFields({
             <input
               value={referenceNumber}
               onChange={(e) => setReferenceNumber(e.target.value)}
-              placeholder="e.g. PN-0001234 (optional)"
+              placeholder="e.g. PN-0001234"
               className={fieldClass}
             />
           </label>
@@ -738,15 +746,23 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
       setError('Select the enforcement action you took before completing the field outcome.')
       return
     }
-    setError(null)
     const isTicket = enforcementAction === 'ticket_issued'
+    if (isTicket && !referenceNumber.trim()) {
+      setError('Enter the ticket / penalty notice number for the ticket issued, before completing the field outcome.')
+      return
+    }
+    if (!actionTaken.trim()) {
+      setError('Describe the action taken or reason no action was required before completing the field outcome.')
+      return
+    }
+    setError(null)
     const input: FieldActionInput = {
       observedCondition: observedCondition.trim(),
       violationObserved,
       enforcementAction,
       serviceMethod: isTicket ? serviceMethod : undefined,
       referenceNumber: isTicket ? referenceNumber.trim() : undefined,
-      actionTaken: actionTaken.trim() || undefined,
+      actionTaken: actionTaken.trim(),
       officerNotes: officerNotes.trim() || undefined,
       followUpRequired,
     }
@@ -763,7 +779,7 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
             value={observedCondition}
             onChange={(e) => setObservedCondition(e.target.value)}
             rows={3}
-            placeholder="What you observed on site…"
+            placeholder="Describe what you observed on site…"
             className={fieldClass}
           />
         </label>
@@ -791,12 +807,12 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
         />
 
         <label className="block">
-          <span className="stat-label">Action taken notes (optional)</span>
+          <span className="stat-label">Action taken / resolution details</span>
           <textarea
             value={actionTaken}
             onChange={(e) => setActionTaken(e.target.value)}
             rows={2}
-            placeholder="Optional supporting detail on the action taken…"
+            placeholder="Describe the action taken, notice issued, warning provided, or reason no action was required…"
             className={fieldClass}
           />
         </label>
@@ -807,7 +823,7 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
             value={officerNotes}
             onChange={(e) => setOfficerNotes(e.target.value)}
             rows={2}
-            placeholder="Optional additional notes…"
+            placeholder="Optional internal notes…"
             className={fieldClass}
           />
         </label>
