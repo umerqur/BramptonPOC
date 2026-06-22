@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import type { OfficerFieldDraft } from '../components/app/OfficerCaseAssistant'
 
 // Client wrapper for the server-side "Officer Case Assistant" Netlify function
 // (netlify/functions/officer-case-assistant.ts).
@@ -77,6 +78,7 @@ export async function askOfficerCaseAssistant(
   caseId: string,
   question: string,
   caseContext?: AssistantCaseContextInput,
+  fieldDraft?: OfficerFieldDraft,
 ): Promise<AssistantResponse> {
   // Attach the Supabase access token when available so the server can verify
   // identity. Best-effort: if there is no session the server falls back to its
@@ -93,7 +95,7 @@ export async function askOfficerCaseAssistant(
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ caseId, question, caseContext: caseContext ?? {} }),
+    body: JSON.stringify({ caseId, question, caseContext: caseContext ?? {}, field_draft: fieldDraft ?? null }),
   })
 
   let payload: unknown = null

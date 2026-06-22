@@ -186,6 +186,14 @@ const PREAMBLE = [
   '- Never invent a benchmark case, a case_id, an outcome, or a number. Only use the benchmark references provided.',
   '- If NO benchmark references are provided, return an empty benchmark_notes array and, if the question is about benchmarks, state: "No benchmark references were available."',
   '',
+  'Field outcome draft rules (the CURRENT FIELD OUTCOME DRAFT section):',
+  "- This is the officer's live, unsaved work-in-progress. Use it to help with the actual text the officer has typed.",
+  '- When asked to clean up notes, rewrite the draft observed condition / action taken / officer notes into a clean, professional internal field outcome summary. Do not invent facts not present in the draft or case file.',
+  '- When asked to draft action taken / resolution details, produce concise resolution text grounded only in the draft and case context.',
+  '- When asked whether it is ready for supervisor closure review, check that: observed condition is present; violation observed is selected (if still "Unclear", say so and explain what would resolve it); an enforcement action is selected; action taken / resolution details are present; if a ticket / penalty notice was issued, a reference number is present; and whether follow-up is required has been considered. List anything missing in missing_information.',
+  '- Refer to the fields only by their human-readable labels. Never expose raw internal field names or codes.',
+  '- If there is NO field outcome draft text yet and the user asks to clean up notes or draft text, do NOT return a long checklist. Set answer to exactly: "No field notes have been entered yet. Add observed condition or action taken details, then I can help clean them up." and return empty officer_checklist and missing_information.',
+  '',
   'Return ONLY a single JSON object (no markdown, no code fences, no commentary) with exactly these fields:',
   '- answer: string — a concise, plain-language answer grounded only in the provided context.',
   '- used_context: string[] — short labels for the context you actually relied on (e.g. "case details", "workflow timeline", "benchmark references").',
@@ -265,6 +273,43 @@ type TimelineEvent = {
   actor_type: string | null
   created_at: string | null
   notes: string | null
+}
+
+// The officer's live, unsaved field outcome draft — what they are typing right
+// now in the field-outcome form. Distinct from the SAVED field_* values on the
+// case row: this lets the assistant clean up notes, draft action-taken text, and
+// check closure-review readiness from the in-progress text. Client-supplied (it
+// is not yet persisted), so it is sanitized to strings before use.
+type FieldDraft = {
+  observed_condition: string | null
+  violation_observed: string | null
+  enforcement_action: string | null
+  reference_number: string | null
+  service_method: string | null
+  action_taken: string | null
+  officer_notes: string | null
+  follow_up_required: boolean | null
+}
+
+// Human-readable labels for the structured draft codes, so the model never sees
+// raw internal codes (and never echoes them back in the answer).
+const ENFORCEMENT_ACTION_LABELS: Record<string, string> = {
+  warning_education: 'Education / warning provided',
+  notice_issued: 'Notice issued',
+  ticket_issued: 'Parking ticket / penalty notice issued',
+  no_action: 'No action taken',
+  other: 'Other',
+}
+const SERVICE_METHOD_LABELS: Record<string, string> = {
+  placed_on_vehicle: 'Placed on vehicle',
+  handed_to_driver: 'Handed to driver / owner',
+  sent_by_mail: 'Sent by mail',
+  other: 'Other',
+}
+const VIOLATION_OBSERVED_LABELS: Record<string, string> = {
+  yes: 'Yes',
+  no: 'No',
+  unclear: 'Unclear',
 }
 
 // A single retrieved benchmark reference. case_id and the retrieval scores are
@@ -478,15 +523,71 @@ async function fetchBenchmarks(caseId: string | null, text: string): Promise<Ben
 // Prompt building + response parsing
 // ---------------------------------------------------------------------------
 
+/** Sanitize the client-supplied, unsaved field outcome draft to plain strings. */
+function parseFieldDraft(value: unknown): FieldDraft | null {
+  if (!value || typeof value !== 'object') return null
+  const o = value as Record<string, unknown>
+  return {
+    observed_condition: strOrNull(o.observedCondition ?? o.observed_condition),
+    violation_observed: strOrNull(o.violationObserved ?? o.violation_observed),
+    enforcement_action: strOrNull(o.enforcementAction ?? o.enforcement_action),
+    reference_number: strOrNull(o.referenceNumber ?? o.reference_number),
+    service_method: strOrNull(o.serviceMethod ?? o.service_method),
+    action_taken: strOrNull(o.actionTaken ?? o.action_taken),
+    officer_notes: strOrNull(o.officerNotes ?? o.officer_notes),
+    follow_up_required:
+      typeof (o.followUpRequired ?? o.follow_up_required) === 'boolean'
+        ? Boolean(o.followUpRequired ?? o.follow_up_required)
+        : null,
+  }
+}
+
+/** True when the officer has typed substantive draft text the assistant can work with. */
+function fieldDraftHasText(d: FieldDraft | null): boolean {
+  return !!(d && (d.observed_condition || d.action_taken || d.officer_notes))
+}
+
 function buildMessage(args: {
   context: CaseContext
   timeline: TimelineEvent[]
   benchmarks: BenchmarkRef[]
+  fieldDraft: FieldDraft | null
   question: string
 }): string {
-  const { context: c, timeline, benchmarks, question } = args
+  const { context: c, timeline, benchmarks, fieldDraft, question } = args
   const field = (label: string, value: string | number | boolean | null) =>
     `${label}: ${value === null || value === '' ? '(not available in case file)' : String(value)}`
+
+  // Live, unsaved field outcome draft — shown with human-readable labels only.
+  // When the officer has typed nothing substantive, say so plainly so the model
+  // does not fabricate a summary or return a long useless checklist.
+  const draftLines = fieldDraftHasText(fieldDraft)
+    ? [
+        field('Observed condition', fieldDraft!.observed_condition),
+        field(
+          'Violation observed',
+          fieldDraft!.violation_observed
+            ? VIOLATION_OBSERVED_LABELS[fieldDraft!.violation_observed] ?? fieldDraft!.violation_observed
+            : null,
+        ),
+        field(
+          'Enforcement action',
+          fieldDraft!.enforcement_action
+            ? ENFORCEMENT_ACTION_LABELS[fieldDraft!.enforcement_action] ?? fieldDraft!.enforcement_action
+            : null,
+        ),
+        field('Ticket / penalty notice number', fieldDraft!.reference_number),
+        field(
+          'Method of service',
+          fieldDraft!.service_method
+            ? SERVICE_METHOD_LABELS[fieldDraft!.service_method] ?? fieldDraft!.service_method
+            : null,
+        ),
+        field('Action taken / resolution details', fieldDraft!.action_taken),
+        field('Officer notes', fieldDraft!.officer_notes),
+        field('Follow-up required', fieldDraft!.follow_up_required),
+      ]
+    : ['(no field outcome draft has been entered yet)']
 
   const timelineLines = timeline.length
     ? timeline.map((e) => `- [${e.created_at ?? '—'}] ${e.event_label ?? 'event'} (${e.actor_type ?? 'staff'})${e.notes ? ` — ${e.notes}` : ''}`)
@@ -526,6 +627,9 @@ function buildMessage(args: {
     '',
     'RECENT WORKFLOW TIMELINE (most recent first)',
     ...timelineLines,
+    '',
+    "CURRENT FIELD OUTCOME DRAFT (the officer's live, unsaved field-outcome form — use this to clean up notes, draft action-taken text, or check closure-review readiness)",
+    ...draftLines,
     '',
     'BENCHMARK REFERENCES (similar closed cases, for reference only — not this case)',
     'Cite a benchmark only by the exact case_id shown below. Do not reference any case not listed here.',
@@ -688,6 +792,9 @@ export default async function handler(req: Request): Promise<Response> {
   const input = (body ?? {}) as Record<string, unknown>
   const caseId = asString(input.caseId || input.case_id).trim()
   const question = asString(input.question).trim().slice(0, MAX_QUESTION_LEN)
+  // The officer's live, unsaved field outcome draft (best-effort, client-supplied
+  // — it is not yet persisted). Used only as model context, never written.
+  const fieldDraft = parseFieldDraft(input.field_draft)
 
   if (!caseId) return json({ error: 'A caseId is required.' }, 400)
   if (!question) return json({ error: 'A question about the case is required.' }, 400)
@@ -793,7 +900,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   // Generate the answer with the selected provider. The prompt (guardrails +
   // case context + benchmarks + question) is identical across providers.
-  const userMessage = buildMessage({ context, timeline, benchmarks, question })
+  const userMessage = buildMessage({ context, timeline, benchmarks, fieldDraft, question })
   let text: string
   try {
     text =
