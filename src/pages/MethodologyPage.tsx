@@ -71,39 +71,6 @@ const SYSTEM_DOES: { title: string; body: string }[] = [
   },
 ]
 
-const WORKFLOW_STEPS: { n: number; title: string; body: string }[] = [
-  {
-    n: 1,
-    title: 'Intake',
-    body: 'A complaint or service request is captured with location, category, description, and contact details where applicable.',
-  },
-  {
-    n: 2,
-    title: 'Triage',
-    body: 'Rules and workflow checks help staff identify routing, priority, missing information, and next actions.',
-  },
-  {
-    n: 3,
-    title: 'Operational insight',
-    body: 'Dashboards show workload patterns, hotspots, open backlog, and closure pressure across geography and case types.',
-  },
-  {
-    n: 4,
-    title: 'Field review',
-    body: 'Authorized staff or officers review the case, record findings, and decide the appropriate action.',
-  },
-  {
-    n: 5,
-    title: 'Closure review',
-    body: 'The system can help prepare a draft closure update from approved templates and structured case facts.',
-  },
-  {
-    n: 6,
-    title: 'Approval',
-    body: 'A supervisor or authorized staff member reviews, edits, approves, and sends the final resident update.',
-  },
-]
-
 const DOES_NOT = [
   'Does not issue tickets automatically',
   'Does not decide enforcement action',
@@ -173,72 +140,22 @@ export default function MethodologyPage() {
         description="This POC shows how resident service requests can be organized, reviewed, investigated, and closed with clearer staff support while keeping enforcement decisions under human control."
       />
 
-      <div className="mt-10 max-w-4xl space-y-8">
-        <Section title="At a glance">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {GLANCE_FLOW.map((step) => (
-              <FlowCard key={step.title} n={step.n} title={step.title} body={step.body} />
-            ))}
-          </div>
-        </Section>
-
-        <Section title="What problem this solves">
-          <p className="text-ink-muted">
-            Municipal enforcement teams receive high volumes of resident complaints and service requests.
-            Staff need to understand the issue, check context, assign work, record field outcomes, and close
-            the loop with residents. This POC reduces manual review friction while preserving staff accountability.
+      <div className="mt-10 max-w-5xl space-y-8">
+        {/* Lead with the diagram: the full complaint-to-closure journey. */}
+        <Section title="From complaint to closure">
+          <p className="text-xs text-ink-subtle">
+            One connected flow — a resident request becomes a structured case, gets reviewed and investigated, then
+            closed with a staff-approved update.
+          </p>
+          <Pipeline steps={GLANCE_FLOW} className="mt-4" />
+          <p className="mt-4 text-xs leading-relaxed text-ink-muted">
+            Decision support only: the system organizes and surfaces information, but staff decide enforcement, approve
+            closures, and communicate with residents.
           </p>
         </Section>
 
-        <Section title="Current data source">
-          <div className="grid gap-3 sm:grid-cols-3">
-            {DATA_SOURCE.map((item) => (
-              <InfoCard key={item.title} title={item.title} body={item.body} />
-            ))}
-          </div>
-        </Section>
-
-        <Section title="What the system does">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {SYSTEM_DOES.map((item) => (
-              <InfoCard key={item.title} title={item.title} body={item.body} />
-            ))}
-          </div>
-        </Section>
-
-        <Section title="What this system does not do">
-          <ul className="space-y-1.5">
-            {DOES_NOT.map((item) => (
-              <li key={item} className="flex gap-2 text-sm text-ink">
-                <span aria-hidden className="mt-0.5 text-rose-500">✕</span>
-                {item}
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <Section title="End-to-end staff workflow">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {WORKFLOW_STEPS.map((step) => (
-              <FlowCard key={step.title} n={step.n} title={step.title} body={step.body} />
-            ))}
-          </div>
-        </Section>
-
-        <Section title="Clear responsibility model">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div>
-              <h3 className="text-sm font-semibold text-navy-900">Rules and workflow checks</h3>
-              <BulletList items={RULES_CONTROL} className="mt-3" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-navy-900">Humans approve</h3>
-              <BulletList items={HUMANS_APPROVE} className="mt-3" />
-            </div>
-          </div>
-        </Section>
-
-        <Section title="Simple architecture">
+        {/* How it is built — the architecture, as a diagram. */}
+        <Section title="How it is built">
           <div className="space-y-3">
             <DiagramRow
               accent="navy"
@@ -255,19 +172,64 @@ export default function MethodologyPage() {
           </div>
           <p className="mt-4 text-xs leading-relaxed text-ink-muted">
             Data is organized once, then reused across staff review, workload insights, and resident communication
-            support.
+            support. The demo uses public benchmark data; in a Brampton POC, approved City data sources connect into the
+            same case and insights structure.
           </p>
-          <p className="mt-2 text-xs leading-relaxed text-ink-muted">
-            The current demo uses public benchmark data. In a Brampton POC, approved City data sources would connect
-            into the same case and insights structure.
-          </p>
+        </Section>
+
+        {/* Who decides what — rules vs humans, side by side. */}
+        <Section title="Who decides what">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex items-center gap-2">
+                <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-accent-500" />
+                <h3 className="text-sm font-semibold text-navy-900">Rules and workflow checks</h3>
+              </div>
+              <BulletList items={RULES_CONTROL} className="mt-3" />
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex items-center gap-2">
+                <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-navy-900" />
+                <h3 className="text-sm font-semibold text-navy-900">Humans approve</h3>
+              </div>
+              <BulletList items={HUMANS_APPROVE} className="mt-3" />
+            </div>
+          </div>
+        </Section>
+
+        {/* What it does / does not do — visual cards + a clear guardrail list. */}
+        <Section title="What the system does">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {SYSTEM_DOES.map((item) => (
+              <InfoCard key={item.title} title={item.title} body={item.body} />
+            ))}
+          </div>
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50/50 p-4">
+            <h3 className="text-sm font-semibold text-rose-900">What it does not do</h3>
+            <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+              {DOES_NOT.map((item) => (
+                <li key={item} className="flex gap-2 text-sm text-rose-900/90">
+                  <span aria-hidden className="mt-0.5 text-rose-500">✕</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Section>
+
+        {/* Data source — three compact cards. */}
+        <Section title="Current data source">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {DATA_SOURCE.map((item) => (
+              <InfoCard key={item.title} title={item.title} body={item.body} />
+            ))}
+          </div>
         </Section>
 
         <Section title="For technical reviewers">
           <p className="text-ink-muted">
-            The POC uses a hybrid approach: deterministic workflow controls first, with AI support only where it
-            adds context for staff review. The architecture is designed so retrieval, summaries, and future automation
-            remain auditable and subject to human approval.
+            Hybrid by design: deterministic workflow controls first, with AI support only where it adds context for staff
+            review — so retrieval, summaries, and future automation stay auditable and subject to human approval.
           </p>
           <BulletList items={TECHNICAL_REVIEWER_ITEMS} className="mt-3" />
         </Section>
@@ -285,16 +247,36 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function FlowCard({ n, title, body }: { n: number; title: string; body: string }) {
+// The hero complaint-to-closure diagram: numbered, connected stages with a short
+// description under each. Stacks vertically with down-arrows on mobile and flows
+// left → right with right-arrows from lg up, so it reads as one pipeline.
+function Pipeline({
+  steps,
+  className = '',
+}: {
+  steps: { n: number; title: string; body: string }[]
+  className?: string
+}) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-navy-900 text-[11px] font-semibold text-white">
-          {n}
-        </span>
-        <span className="text-sm font-semibold text-navy-900">{title}</span>
-      </div>
-      <p className="mt-2 text-xs leading-relaxed text-ink-muted">{body}</p>
+    <div className={`flex flex-col gap-2 lg:flex-row lg:items-stretch ${className}`}>
+      {steps.map((step, index) => (
+        <Fragment key={step.title}>
+          <div className="flex flex-1 flex-col rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy-900 text-[11px] font-semibold text-white">
+                {step.n}
+              </span>
+              <span className="text-[13px] font-semibold leading-tight text-navy-900">{step.title}</span>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">{step.body}</p>
+          </div>
+          {index < steps.length - 1 && (
+            <span aria-hidden className="self-center rotate-90 text-base text-ink-subtle lg:rotate-0">
+              →
+            </span>
+          )}
+        </Fragment>
+      ))}
     </div>
   )
 }
