@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
+  getInsightsKpis,
   getInsightsComplaintTypeVolume,
   getInsightsClosureBottlenecks,
   getInsightsAreaBottlenecks,
@@ -13,6 +14,7 @@ import {
   isChannelMixMeaningful,
   formatPlainDate,
   type InsightsSourceMeta,
+  type InsightsKpis,
   type ComplaintTypeVolume,
   type ClosureBottleneck,
   type AreaBottleneck,
@@ -316,9 +318,8 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
 function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   return (
     <div className="mt-6 space-y-6">
-      {/* Geographic heat map of service-request workload — kept as the leading
-          analytic. (The synthetic field-activity cards and the misleading
-          Operational Snapshot were removed; the heat map itself stays.) */}
+      <OperationalSnapshot />
+      {/* Geographic heat map of service-request workload. */}
       <NYCWorkloadMapPanel />
       <ComplaintTypeRanked onExplore={onExplore} />
       <div className="grid gap-6 lg:grid-cols-2">
@@ -337,6 +338,177 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
     </div>
   )
 }
+// --- Operational snapshot --------------------------------------------------
+
+/**
+ * Operational snapshot — six KPI cards that summarize the analytics shown below.
+ * Grounded only in aggregate services (no synthetic workflow-store figures): the
+ * open review queue (v_nyc_open_review_queue) and the closed NYC 311 benchmark
+ * (v_insights_kpis, v_insights_closure_bottlenecks). Every value is NYC 311
+ * BENCHMARK data, not a live Brampton operational backlog.
+ */
+function OperationalSnapshot() {
+  const hist = useLive<InsightsKpis>(getInsightsKpis)
+  const open = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
+  // Closure bottlenecks power the "Longest closure pressure" KPI. Loaded
+  // independently so a bottleneck-view failure never breaks the snapshot.
+  const bottle = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(40))
+
+  const k = hist.data
+
+  // Each value cell degrades to "…" while loading and "—" on error or null.
+  const fromOpen = (n: number | null | undefined) =>
+    open.loading ? '…' : open.error || n == null ? '—' : fmtInt(n)
+  const fromHist = (s: string | null) => (hist.loading ? '…' : hist.error ? '—' : s ?? '—')
+
+  // Longest closure pressure — the high-volume complaint type with the highest
+  // p90 closure time. Degrades on its own; never blocks the snapshot.
+  const longestClosure = useMemo(() => {
+    const highVol = (bottle.data ?? []).filter((r) => r.total_cases >= HIGH_VOLUME_MIN && r.p90_closure_days != null)
+    return highVol.length ? highVol.reduce((a, b) => (b.p90_closure_days! > a.p90_closure_days! ? b : a)) : null
+  }, [bottle.data])
+  const longestValue =
+    bottle.loading ? '…' : bottle.error || !longestClosure ? '—' : longestClosure.complaint_type
+  const longestDetail = longestClosure ? `90% closed within ${fmtDays(longestClosure.p90_closure_days)}` : undefined
+
+  const topPressure =
+    [k?.top_complaint_type, k?.busiest_council_district ? `District ${k.busiest_council_district}` : null]
+      .filter(Boolean)
+      .join(' · ') || null
+
+  // POC interpretation thresholds (not an official City SLA). These read the NYC
+  // 311 benchmark, so the open-case count is benchmark workload, NOT a live
+  // Brampton backlog — labelled "Benchmark" to avoid that misread.
+  const highCount = open.data?.highPriority ?? null
+  const p90 = k?.p90_closure_days ?? null
+  const highTone: KpiTone = highCount != null && highCount > 0 ? 'priority' : 'neutral'
+  const p90Tone: KpiTone = p90 != null && p90 >= 30 ? 'watch' : 'benchmark'
+
+  return (
+    <section className="card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
+          <p className="mt-0.5 text-xs text-ink-subtle">
+            A summary of the workload analytics below, from the NYC 311 benchmark (open review queue and closed
+            records). Benchmark data, not a live Brampton backlog.
+          </p>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+          Benchmark data
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <KpiCard
+          title="Benchmark open cases"
+          value={fromOpen(open.data?.total)}
+          tone="benchmark"
+          statusLabel="Benchmark"
+          helper="Open cases in the NYC 311 benchmark review queue — not a live Brampton backlog"
+        />
+        <KpiCard
+          title="High priority cases"
+          value={fromOpen(open.data?.highPriority)}
+          tone={highTone}
+          statusLabel="High priority"
+          helper="Benchmark open cases surfaced for priority review"
+        />
+        <KpiCard
+          title="Typical historical closure"
+          value={fromHist(k?.avg_closure_days == null ? null : `${k.avg_closure_days.toFixed(1)} d`)}
+          tone="benchmark"
+          statusLabel="Benchmark"
+          helper="Average closure time across closed benchmark records"
+        />
+        <KpiCard
+          title="90% closed within"
+          value={fromHist(k?.p90_closure_days == null ? null : `${Math.round(k.p90_closure_days)} d`)}
+          tone={p90Tone}
+          statusLabel={p90Tone === 'watch' ? 'Watch' : 'Benchmark'}
+          helper="Long tail closure benchmark for closed records"
+        />
+        <KpiCard
+          title="Top workload pressure"
+          value={fromHist(topPressure)}
+          valueClass="text-lg font-semibold leading-snug"
+          tone="pressure"
+          statusLabel="Pressure"
+          helper="Highest workload issue and district in the benchmark view"
+        />
+        <KpiCard
+          title="Longest closure pressure"
+          value={longestValue}
+          valueClass="text-lg font-semibold leading-snug truncate"
+          detail={longestDetail}
+          tone="pressure"
+          statusLabel="Pressure"
+          helper="Slowest-closing high-volume complaint type by 90% closure time"
+        />
+      </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+        Signals are based on POC thresholds, not official City SLA.
+        {hist.data && ` Based on ${fmtInt(hist.data.closed_requests)} closed NYC 311 benchmark records and the benchmark open review queue.`}
+      </p>
+    </section>
+  )
+}
+
+// Subtle status treatment for the snapshot KPI cards — a tinted left border, a
+// small coloured status label, and a faint tinted background. These are POC interpretation cues,
+// NOT an official City SLA. Kept restrained: one accent per card, soft tints.
+type KpiTone = 'neutral' | 'benchmark' | 'watch' | 'pressure' | 'priority'
+
+const KPI_TONE: Record<KpiTone, { border: string; card: string; label: string }> = {
+  neutral: { border: 'border-l-slate-300', card: 'bg-white', label: 'text-slate-600' },
+  benchmark: { border: 'border-l-emerald-400', card: 'bg-emerald-50/30', label: 'text-emerald-700' },
+  watch: { border: 'border-l-amber-400', card: 'bg-amber-50/30', label: 'text-amber-700' },
+  pressure: { border: 'border-l-orange-500', card: 'bg-orange-50/30', label: 'text-orange-700' },
+  priority: { border: 'border-l-rose-500', card: 'bg-rose-50/40', label: 'text-rose-700' },
+}
+
+/**
+ * One KPI card: a title, a value, an optional secondary detail line, and a
+ * plain-language helper. Values come only from aggregate benchmark services — no
+ * targets or synthetic baselines. An optional tone + status label give a subtle,
+ * POC-threshold reading of the metric.
+ */
+function KpiCard({
+  title,
+  value,
+  helper,
+  detail,
+  valueClass = 'text-3xl font-bold',
+  tone = 'neutral',
+  statusLabel,
+}: {
+  title: string
+  value: string
+  helper: string
+  detail?: string
+  valueClass?: string
+  tone?: KpiTone
+  statusLabel?: string
+}) {
+  const t = KPI_TONE[tone]
+  return (
+    <div className={`rounded-xl border border-l-4 border-slate-200 p-4 ${t.border} ${t.card}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
+        {statusLabel && (
+          <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider ${t.label}`}>
+            {statusLabel}
+          </span>
+        )}
+      </div>
+      <div className={`mt-1.5 tabular-nums text-navy-900 ${valueClass}`}>{value}</div>
+      {detail && <div className="mt-1 text-xs font-medium text-ink-muted">{detail}</div>}
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
+  )
+}
+
 // --- Donuts ----------------------------------------------------------------
 
 type Slice = { label: string; value: number; color: string; onClick?: () => void }
