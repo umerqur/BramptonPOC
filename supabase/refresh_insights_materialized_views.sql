@@ -13,6 +13,7 @@ refresh materialized view public.mv_insights_department_workload;
 refresh materialized view public.mv_insights_monthly_trend;
 refresh materialized view public.mv_insights_channel_mix;
 refresh materialized view public.mv_insights_status_mix;
+refresh materialized view public.mv_insights_closure_duration_distribution;
 
 -- Source metadata + map workload aggregates (also materialized).
 refresh materialized view public.mv_insights_source_meta;
