@@ -255,27 +255,35 @@ const BOROUGH_BOUNDARY_FC: FeatureCollection<Geometry, { name: string }> = {
   })),
 }
 
+/** A label for one feature, at its centroid, lifted to the top of its column. */
+function featureLabel(f: Feature<Geometry, MetricProps>): LabelDatum | null {
+  if (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon') return null
+  const text = (f.properties.short || f.properties.label || '').trim()
+  if (!text) return null
+  const [lng, lat] = polygonCentroid(f.geometry as PolyGeom)
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+  return { position: [lng, lat, f.properties.elevation + LABEL_Z_OFFSET], text }
+}
+
 /**
  * District labels, decluttered: instead of labelling all ~51 council districts,
- * label only the highest-value district (the operational headline) plus the
- * currently selected district. Each sits at the top of its own extruded column.
- * Returns [] in borough mode, where the always-on borough labels already cover it.
+ * label only the top few by metric (the operational headline) plus the
+ * hovered/selected district. Each sits at the top of its own extruded column.
  */
 function buildDistrictLabels(
   fc: FeatureCollection<Geometry, MetricProps>,
   activeKey: string | null,
+  topN = 3,
 ): LabelDatum[] {
   const wanted = new Map<string, Feature<Geometry, MetricProps>>()
 
-  // Highest-value rendered district.
-  let top: Feature<Geometry, MetricProps> | null = null
-  for (const f of fc.features) {
-    if (f.properties.value == null) continue
-    if (!top || (f.properties.value ?? -Infinity) > (top.properties.value ?? -Infinity)) top = f
-  }
-  if (top) wanted.set(top.properties.key, top)
+  // Top N rendered districts by value.
+  const ranked = fc.features
+    .filter((f) => f.properties.value != null)
+    .sort((a, b) => (b.properties.value ?? -Infinity) - (a.properties.value ?? -Infinity))
+  for (const f of ranked.slice(0, Math.max(0, topN))) wanted.set(f.properties.key, f)
 
-  // Currently selected district, if any.
+  // Hovered / selected district, if any (activeKey already folds in the busiest).
   if (activeKey) {
     const active = fc.features.find((f) => f.properties.key === activeKey)
     if (active) wanted.set(activeKey, active)
@@ -283,12 +291,18 @@ function buildDistrictLabels(
 
   const out: LabelDatum[] = []
   for (const f of wanted.values()) {
-    if (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon') continue
-    const text = (f.properties.short || f.properties.label || '').trim()
-    if (!text) continue
-    const [lng, lat] = polygonCentroid(f.geometry as PolyGeom)
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue
-    out.push({ position: [lng, lat, f.properties.elevation + LABEL_Z_OFFSET], text })
+    const label = featureLabel(f)
+    if (label) out.push(label)
+  }
+  return out
+}
+
+/** Label every rendered feature — used in borough mode (only ~5 boroughs). */
+function buildAllLabels(fc: FeatureCollection<Geometry, MetricProps>): LabelDatum[] {
+  const out: LabelDatum[] = []
+  for (const f of fc.features) {
+    const label = featureLabel(f)
+    if (label) out.push(label)
   }
   return out
 }
@@ -355,10 +369,11 @@ export default function NYCWorkload3DDeck({
         elevationScale: 1,
         getElevation: (f: MetricFeature) => f.properties.elevation,
         getFillColor: (f: MetricFeature) => fillFor(f.properties),
-        // Darker, subtle slate division lines make internal district boundaries
-        // readable without a separate heavy outer borough outline.
+        // Thin, subtle slate division lines for local separation between areas.
+        // The selected area gets a stronger line; the borough overlay layer below
+        // supplies the geographic-context lines on top in district mode.
         getLineColor: (f: MetricFeature): Color =>
-          f.properties.key === activeKey ? [15, 23, 42, 255] : [30, 41, 59, 130],
+          f.properties.key === activeKey ? [15, 23, 42, 255] : [30, 41, 59, 110],
         getLineWidth: (f: MetricFeature) => (f.properties.key === activeKey ? 2 : 1),
         lineWidthUnits: 'pixels',
         // Soft lighting so the calm colors read with depth, not as flat blocks.
@@ -380,10 +395,12 @@ export default function NYCWorkload3DDeck({
     [fc, min, max, metric, activeKey, onHover, onSelect],
   )
 
-  // Borough boundary outline — an apparent (but not heavy black) slate division
-  // line tracing the borough borders on the ground plane, so borough divisions
-  // stay readable without bold text labels over the map. Stroked only, never
-  // filled or extruded, and non-pickable so it can't intercept clicks/rotation.
+  // Borough boundary overlay — drawn ONLY in district mode, so the user sees
+  // which borough the districts belong to (district detail inside borough
+  // context). Slightly stronger than the thin internal district lines, but still
+  // a subtle slate, never a heavy black outer shell. Stroked only, never filled
+  // or extruded, and non-pickable so it can't intercept hover/click/rotation. In
+  // borough mode the main layer already outlines boroughs, so this is omitted.
   const boroughOutlineLayer = useMemo(
     () =>
       new GeoJsonLayer({
@@ -393,20 +410,20 @@ export default function NYCWorkload3DDeck({
         filled: false,
         extruded: false,
         pickable: false,
-        getLineColor: [71, 85, 105, 205],
-        getLineWidth: 1.6,
+        getLineColor: [15, 23, 42, 150],
+        getLineWidth: 1.8,
         lineWidthUnits: 'pixels',
-        lineWidthMinPixels: 1,
+        lineWidthMinPixels: 1.2,
         lineWidthMaxPixels: 2.5,
       }),
     [],
   )
 
-  // Decluttered district labels: only the highest-value district plus the
-  // selected one (district mode only), sitting atop their own columns. White
-  // text with a dark outline for legibility over the green/amber/red ramp.
+  // Labels: in district mode, only the top few districts by metric plus the
+  // hovered/selected one; in borough mode, label all (≈5) boroughs. White text
+  // with a dark outline for legibility over the green/amber/red ramp.
   const districtLabelData = useMemo<LabelDatum[]>(
-    () => (mode === 'borough' ? [] : buildDistrictLabels(fc, activeKey)),
+    () => (mode === 'borough' ? buildAllLabels(fc) : buildDistrictLabels(fc, activeKey, 3)),
     [fc, activeKey, mode],
   )
 
@@ -475,7 +492,7 @@ export default function NYCWorkload3DDeck({
         initialViewState={initialViewState}
         // Left-drag pans, right-drag / two-finger rotates and tilts.
         controller={{ dragRotate: true, touchRotate: true, doubleClickZoom: false }}
-        layers={[layer, boroughOutlineLayer, districtLabelLayer]}
+        layers={[layer, ...(mode === 'district' ? [boroughOutlineLayer] : []), districtLabelLayer]}
         getTooltip={getTooltip}
         getCursor={({ isHovering }) => (isHovering ? 'pointer' : 'grab')}
         style={{ position: 'absolute', inset: '0' }}
