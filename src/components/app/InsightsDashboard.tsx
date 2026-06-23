@@ -365,9 +365,9 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
 function OperationalSnapshot() {
   const hist = useLive<InsightsKpis>(getInsightsKpis)
   const open = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
-  // Simulated field-activity estimate for the "Field activity load" KPI. Loaded
-  // independently so a synthetic-view failure never breaks the live snapshot.
-  const synth = useLive<SyntheticFieldActivitySummary>(getSyntheticFieldActivitySummary)
+  // Closure bottlenecks power the "Longest closure pressure" KPI. Loaded
+  // independently so a bottleneck-view failure never breaks the live snapshot.
+  const bottle = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(40))
 
   const k = hist.data
 
@@ -375,9 +375,16 @@ function OperationalSnapshot() {
   const fromOpen = (n: number | null | undefined) =>
     open.loading ? '…' : open.error || n == null ? '—' : fmtInt(n)
   const fromHist = (s: string | null) => (hist.loading ? '…' : hist.error ? '—' : s ?? '—')
-  // Field activity load degrades to "—" on its own — it never blocks the snapshot.
-  const fieldLoad =
-    synth.loading ? '…' : synth.error || synth.data?.planned_field_activities == null ? '—' : fmtInt(synth.data.planned_field_activities)
+
+  // Longest closure pressure — the high-volume complaint type with the highest
+  // p90 closure time. Degrades on its own; never blocks the snapshot.
+  const longestClosure = useMemo(() => {
+    const highVol = (bottle.data ?? []).filter((r) => r.total_cases >= HIGH_VOLUME_MIN && r.p90_closure_days != null)
+    return highVol.length ? highVol.reduce((a, b) => (b.p90_closure_days! > a.p90_closure_days! ? b : a)) : null
+  }, [bottle.data])
+  const longestValue =
+    bottle.loading ? '…' : bottle.error || !longestClosure ? '—' : longestClosure.complaint_type
+  const longestDetail = longestClosure ? `90% closed within ${fmtDays(longestClosure.p90_closure_days)}` : undefined
 
   const topPressure =
     [k?.top_complaint_type, k?.busiest_council_district ? `District ${k.busiest_council_district}` : null]
@@ -401,7 +408,7 @@ function OperationalSnapshot() {
           <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
           <p className="mt-0.5 text-xs text-ink-subtle">
             A live summary of the workload analytics below — from the open review queue and closed NYC 311 benchmark
-            records, plus a simulated field-activity estimate.
+            records.
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
@@ -447,11 +454,13 @@ function OperationalSnapshot() {
           helper="Highest workload issue and district in the benchmark view"
         />
         <KpiCard
-          title="Field activity load"
-          value={fieldLoad}
+          title="Longest closure pressure"
+          value={longestValue}
+          valueClass="text-lg font-semibold leading-snug truncate"
+          detail={longestDetail}
           tone="pressure"
-          statusLabel="Simulated"
-          helper="Estimated patrol and follow-up actions"
+          statusLabel="Pressure"
+          helper="Slowest-closing high-volume complaint type by 90% closure time"
         />
       </div>
 
@@ -539,9 +548,8 @@ function SyntheticFieldActivity() {
         <div>
           <h2 className="text-sm font-semibold text-navy-900">Synthetic field activity</h2>
           <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-ink-subtle">
-            Synthetic field activity estimates how many patrol, inspection, and follow-up actions a complaint workload
-            could create. It translates service requests into officer workload using NYC 311 benchmark timing and status
-            patterns. This is simulated data, not Brampton patrol history.
+            Synthetic field activity estimates patrol and follow-up workload from benchmark case patterns. Simulated
+            data, not Brampton patrol history.
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-violet-700">
