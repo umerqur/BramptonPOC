@@ -18,13 +18,15 @@ export default function AppInsightsPage() {
   return (
     <div className="container-page py-10">
       <div className="max-w-3xl">
-        <div className="section-eyebrow">INSIGHTS</div>
+        <div className="section-eyebrow">INTELLIGENCE COMMAND</div>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-navy-900 sm:text-3xl">
-          Operational workload intelligence
+          Intelligence Command
         </h1>
         <p className="mt-2 text-ink-muted">
-          Where the service-request workload sits and where closure is under pressure across the New York City 311
-          public service request dataset. Decision support for staffing and routing review — not a risk prediction.
+          Operational workload intelligence over the public New York City 311 benchmark dataset — where the
+          service-request workload sits and where closure is under pressure. This is benchmark data, not Brampton
+          operational data, and it is decision support for staffing and routing review — not automated enforcement and
+          not a risk prediction.
         </p>
       </div>
 

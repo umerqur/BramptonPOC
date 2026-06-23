@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
   getInsightsKpis,
@@ -196,9 +196,22 @@ function SourceLine({ label, value, emphasis }: { label: string; value: string; 
 // Dashboard shell + tabs
 // ---------------------------------------------------------------------------
 
+const VALID_TABS: Tab[] = ['overview', 'explorer', 'open', 'simulations']
+
 export default function InsightsDashboard() {
-  const [tab, setTab] = useState<Tab>('overview')
+  // The top nav links Stress-Testing to /app/insights?tab=simulations, so honor a
+  // `tab` query param (validated against the known tabs) and keep it in sync if
+  // the user navigates to a tab URL while already on the page.
+  const [searchParams] = useSearchParams()
+  const paramTab = searchParams.get('tab')
+  const [tab, setTab] = useState<Tab>(() =>
+    VALID_TABS.includes(paramTab as Tab) ? (paramTab as Tab) : 'overview',
+  )
   const [filters, setFilters] = useState<CaseExplorerFilters>({})
+
+  useEffect(() => {
+    if (paramTab && VALID_TABS.includes(paramTab as Tab)) setTab(paramTab as Tab)
+  }, [paramTab])
 
   // Drill into the Case Explorer from any chart segment.
   const explore = (f: CaseExplorerFilters) => {
