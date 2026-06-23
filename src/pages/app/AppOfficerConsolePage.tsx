@@ -136,8 +136,7 @@ export default function AppOfficerConsolePage() {
           <div className="section-eyebrow">By-law Officer</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Officer Field Console</h1>
           <p className="mt-2 text-ink-muted">
-            Cases a supervisor has assigned to you for a field investigation. Open a case to review the details and
-            record your field outcome — your outcome feeds closure review, and a supervisor approves the final closure.
+            Cases assigned to you for field investigation — open one to record your field outcome.
           </p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={rows === null}>
