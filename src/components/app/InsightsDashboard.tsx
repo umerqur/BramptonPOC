@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
   getInsightsKpis,
   getInsightsComplaintTypeVolume,
@@ -11,9 +10,6 @@ import {
   getInsightsChannelMix,
   getInsightsClosureDurationDistribution,
   getInsightsSourceMeta,
-  getSyntheticFieldActivitySummary,
-  getSyntheticFieldActivityByBorough,
-  getSyntheticFieldActivityByClosureBucket,
   isChannelMixMeaningful,
   formatPlainDate,
   type InsightsSourceMeta,
@@ -25,9 +21,6 @@ import {
   type MonthlyTrendPoint,
   type ChannelMixRow,
   type ClosureDurationBucket,
-  type SyntheticFieldActivitySummary,
-  type SyntheticFieldActivityByBorough,
-  type SyntheticFieldActivityByClosureBucket,
 } from '../../services/insightsDashboard'
 import {
   getNycCaseExplorerPage,
@@ -49,7 +42,6 @@ import {
   type OpenStatusMixRow,
   type OpenQueueSummary,
 } from '../../services/caseExplorer'
-import { getNYCWorkloadByBorough, type NYCBoroughWorkload } from '../../services/municipalServiceRequests'
 
 // Insights — operational workload intelligence over the New York City 311 public
 // service request dataset. Three tabs: Overview (map, KPIs, charts), Case
@@ -59,9 +51,6 @@ import { getNYCWorkloadByBorough, type NYCBoroughWorkload } from '../../services
 // full table. No fake placeholder values: a failed live read shows a clear error.
 
 type Tab = 'overview' | 'explorer' | 'open' | 'simulations'
-
-/** A geographic area selected on the workload map, for the bottleneck drilldown. */
-type SelectedArea = { mode: 'district' | 'borough'; value: string }
 
 // ---------------------------------------------------------------------------
 // Live-data hook (aggregates) — on failure expose a dev-friendly error.
@@ -326,16 +315,9 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
 // ---------------------------------------------------------------------------
 
 function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
-  // A map click updates the Bottleneck Drilldown panel below the map (it does NOT
-  // jump straight to the Case Explorer) so staff see the diagnosis first; the
-  // panel's own button opens the matching cases.
-  const [selectedArea, setSelectedArea] = useState<SelectedArea | null>(null)
   return (
     <div className="mt-6 space-y-6">
       <OperationalSnapshot />
-      <SyntheticFieldActivity />
-      <NYCWorkloadMapPanel onSelectArea={(mode, value) => setSelectedArea({ mode, value })} />
-      <BottleneckDrilldownPanel selectedArea={selectedArea} onExplore={onExplore} />
       <ComplaintTypeRanked onExplore={onExplore} />
       <div className="grid gap-6 lg:grid-cols-2">
         <ChannelMixDonut />
@@ -522,210 +504,6 @@ function KpiCard({
       <div className={`mt-1.5 tabular-nums text-navy-900 ${valueClass}`}>{value}</div>
       {detail && <div className="mt-1 text-xs font-medium text-ink-muted">{detail}</div>}
       <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
-    </div>
-  )
-}
-
-// --- Synthetic field activity simulation -----------------------------------
-
-/**
- * Synthetic field activity simulation — generated operational activity derived
- * from NYC 311 benchmark timing and status patterns. This is NOT Brampton
- * operational patrol data; it demonstrates how patrol logs, officer activity, and
- * closure bottlenecks could be visualized once real Brampton operational data is
- * connected. Reads four small precomputed aggregate views, never raw rows.
- */
-function SyntheticFieldActivity() {
-  const summary = useLive<SyntheticFieldActivitySummary>(getSyntheticFieldActivitySummary)
-  const s = summary.data
-
-  const val = (n: number | null | undefined, fmt: (n: number) => string = fmtInt) =>
-    summary.loading ? '…' : summary.error || n == null ? '—' : fmt(n)
-
-  return (
-    <section className="card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-navy-900">Synthetic field activity</h2>
-          <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-ink-subtle">
-            Synthetic field activity estimates patrol and follow-up workload from benchmark case patterns. Simulated
-            data, not Brampton patrol history.
-          </p>
-        </div>
-        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-violet-700">
-          Simulated
-        </span>
-      </div>
-
-      {summary.error ? (
-        // Calm unavailable state — never expose a raw database/timeout error here.
-        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-ink-subtle">
-          Synthetic field activity is temporarily unavailable.
-        </div>
-      ) : (
-        <>
-          {/* The core idea, read left → right: cases become field activities, some
-              of which stay active-style work requiring supervisor attention. */}
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-            <FlowStat label="Sampled cases" value={val(s?.sampled_cases)} sub="Benchmark service requests" />
-            <FlowArrow />
-            <FlowStat
-              label="Planned field activities"
-              value={val(s?.planned_field_activities)}
-              sub="Patrol, inspection, follow-up"
-              accent
-            />
-            <FlowArrow />
-            <FlowStat label="Active-style cases" value={val(s?.active_style_cases)} sub="Still need supervisor attention" />
-          </div>
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
-            Case volume is not the same as field workload: one case may need a single review, another a patrol, and others
-            repeated follow-up (average activity intensity {val(s?.avg_activity_intensity, (n) => n.toFixed(2))}).
-          </p>
-
-          <div className="mt-5 grid gap-5 lg:grid-cols-2">
-            <SyntheticByBorough />
-            <SyntheticByClosureBucket />
-          </div>
-
-          <p className="mt-4 text-[11px] text-ink-subtle">
-            Simulated from NYC 311 benchmark patterns. Not Brampton patrol history.
-          </p>
-        </>
-      )}
-    </section>
-  )
-}
-
-/** One stage of the cases → field activities → officer workload flow. */
-function FlowStat({ label, value, sub, accent = false }: { label: string; value: string; sub: string; accent?: boolean }) {
-  return (
-    <div className={`flex-1 rounded-xl border p-3.5 ${accent ? 'border-violet-200 bg-violet-50/60' : 'border-slate-200 bg-slate-50/60'}`}>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
-      <div className="mt-1 text-2xl font-bold tabular-nums text-navy-900">{value}</div>
-      <div className="mt-0.5 text-[11px] leading-snug text-ink-subtle">{sub}</div>
-    </div>
-  )
-}
-
-/** Connector between flow stages: points down on mobile, right on sm+. */
-function FlowArrow() {
-  return (
-    <span aria-hidden className="self-center rotate-90 text-base text-ink-subtle sm:rotate-0">
-      →
-    </span>
-  )
-}
-
-/** Horizontal bar list of planned field activities by borough. */
-function SyntheticByBorough() {
-  const { data, loading, error } = useLive<SyntheticFieldActivityByBorough[]>(getSyntheticFieldActivityByBorough)
-  const { rows, max } = useMemo(() => {
-    const all = data ?? []
-    return { rows: all, max: Math.max(1, ...all.map((r) => r.planned_field_activities)) }
-  }, [data])
-  return (
-    <SyntheticPanel
-      title="Field activity by borough"
-      loading={loading}
-      error={error}
-      empty={data?.length === 0}
-    >
-      {data && data.length > 0 && (
-        <ul className="space-y-2.5">
-          {rows.map((row) => (
-            <li key={row.borough}>
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="truncate text-ink">{row.borough}</span>
-                <span className="shrink-0 tabular-nums text-ink-muted">{fmtInt(row.planned_field_activities)}</span>
-              </div>
-              <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-violet-400"
-                  style={{ width: `${Math.max(2, (row.planned_field_activities / max) * 100)}%` }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </SyntheticPanel>
-  )
-}
-
-/** Horizontal bar list of planned field activities by closure bucket (ordered). */
-function SyntheticByClosureBucket() {
-  const { data, loading, error } = useLive<SyntheticFieldActivityByClosureBucket[]>(
-    getSyntheticFieldActivityByClosureBucket,
-  )
-  const { rows, max } = useMemo(() => {
-    const all = data ?? []
-    return { rows: all, max: Math.max(1, ...all.map((r) => r.planned_field_activities)) }
-  }, [data])
-  return (
-    <SyntheticPanel
-      title="Field activity by closure bucket"
-      loading={loading}
-      error={error}
-      empty={data?.length === 0}
-    >
-      {data && data.length > 0 && (
-        <ul className="space-y-2.5">
-          {rows.map((row) => (
-            <li key={row.bucket_order}>
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="truncate text-ink">{row.closure_bucket}</span>
-                <span className="shrink-0 tabular-nums text-ink-muted">{fmtInt(row.planned_field_activities)}</span>
-              </div>
-              <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-violet-400"
-                  style={{ width: `${Math.max(2, (row.planned_field_activities / max) * 100)}%` }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </SyntheticPanel>
-  )
-}
-
-/** Lightweight panel wrapper for the two synthetic-activity bar lists. */
-function SyntheticPanel({
-  title,
-  loading,
-  error,
-  empty,
-  children,
-}: {
-  title: string
-  loading: boolean
-  error: string | null
-  empty?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-subtle">{title}</h3>
-      <div className="mt-3">
-        {error ? (
-          // Calm unavailable state — synthetic panels never surface raw DB errors.
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-5 text-center text-sm text-ink-subtle">
-            Synthetic field activity is temporarily unavailable.
-          </div>
-        ) : loading ? (
-          <div className="animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">
-            Loading live data…
-          </div>
-        ) : empty ? (
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-5 text-center text-sm text-ink-subtle">
-            No records available.
-          </div>
-        ) : (
-          children
-        )}
-      </div>
     </div>
   )
 }
@@ -1368,215 +1146,6 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
         />
       )}
     </SectionShell>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Bottleneck drilldown (Overview) — diagnose a map-selected area
-// ---------------------------------------------------------------------------
-
-/** Normalize a council-district value to a plain number string ("05" → "5"). */
-const districtKey = (v: string | null): string => {
-  if (v == null) return ''
-  const n = Number(v)
-  return Number.isFinite(n) ? String(n) : String(v).trim()
-}
-
-/**
- * Operational read for a council district — plain-language diagnosis derived from
- * the area's volume, long-tail closure time, and top complaint type, RELATIVE to
- * the other areas in the current benchmark view. This is decision support, not a
- * recommendation engine: it says "Operational read", never "AI recommends".
- */
-function districtOperationalRead(row: AreaBottleneck, areas: AreaBottleneck[]): string[] {
-  const reads: string[] = []
-  const maxTotal = Math.max(0, ...areas.map((a) => a.total_cases))
-  if (maxTotal > 0 && row.total_cases >= 0.66 * maxTotal) {
-    reads.push(
-      'This area has a heavier complaint load than most areas in the current benchmark view. Supervisor action could include earlier review sequencing or temporary reassignment.',
-    )
-  }
-  const p90s = areas
-    .map((a) => a.p90_closure_days)
-    .filter((v): v is number => v != null)
-    .sort((a, b) => a - b)
-  const medianP90 = p90s.length ? p90s[Math.floor(p90s.length / 2)] : null
-  if (row.p90_closure_days != null && medianP90 != null && row.p90_closure_days >= medianP90 * 1.25) {
-    reads.push('Long tail closure time is elevated. This points to complex or stale files rather than only volume.')
-  }
-  if (row.top_complaint_type) {
-    reads.push(
-      `Most pressure is concentrated in ${row.top_complaint_type}, so routing and template review can focus there first.`,
-    )
-  }
-  if (reads.length === 0) {
-    reads.push('Workload here is close to the benchmark average for this view. No single pressure signal stands out.')
-  }
-  return reads
-}
-
-function BottleneckDrilldownPanel({
-  selectedArea,
-  onExplore,
-}: {
-  selectedArea: SelectedArea | null
-  onExplore: (f: CaseExplorerFilters) => void
-}) {
-  // Small materialized aggregates — never a full-table scan. Pull enough council
-  // districts to cover any selected one (NYC has 51).
-  const areas = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(60))
-  const boroughVolumes = useLive<NYCBoroughWorkload[]>(getNYCWorkloadByBorough)
-
-  return (
-    <section className="card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-navy-900">Bottleneck drilldown</h2>
-          <p className="mt-0.5 text-xs text-ink-subtle">What is driving workload in the selected area.</p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
-          Live data
-        </span>
-      </div>
-
-      <div className="mt-4">
-        {!selectedArea ? (
-          <div className="rounded-md border border-dashed border-slate-300 bg-slate-50/70 px-4 py-6 text-center text-sm text-ink-subtle">
-            Select a council district or borough on the map above to see what is driving its workload.
-          </div>
-        ) : selectedArea.mode === 'district' ? (
-          <DistrictBottleneck area={areas} value={selectedArea.value} onExplore={onExplore} />
-        ) : (
-          <BoroughBottleneck volumes={boroughVolumes} value={selectedArea.value} onExplore={onExplore} />
-        )}
-      </div>
-    </section>
-  )
-}
-
-function DistrictBottleneck({
-  area,
-  value,
-  onExplore,
-}: {
-  area: LiveState<AreaBottleneck[]>
-  value: string
-  onExplore: (f: CaseExplorerFilters) => void
-}) {
-  const { data, loading, error } = area
-  if (loading) return <div className="animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading live data…</div>
-  if (error) return <SectionError name="the area bottleneck aggregate" error={error} />
-
-  const rows = data ?? []
-  const row = rows.find((r) => districtKey(r.council_district) === districtKey(value))
-  const openCases = () => onExplore({ councilDistrict: districtKey(value) })
-
-  if (!row) {
-    return (
-      <div className="space-y-3">
-        <AreaHeading label={`District ${districtKey(value)}`} sub="Selected council district" />
-        <p className="text-sm text-ink-muted">
-          No bottleneck aggregate is available for this district in the current benchmark view. You can still open its
-          cases directly.
-        </p>
-        <OpenCasesButton onClick={openCases} />
-      </div>
-    )
-  }
-
-  const reads = districtOperationalRead(row, rows)
-  return (
-    <div className="space-y-4">
-      <AreaHeading label={`District ${districtKey(row.council_district)}`} sub="Selected council district" />
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Metric label="Total cases" value={fmtInt(row.total_cases)} />
-        <Metric label="Avg closure" value={fmtDays(row.avg_closure_days)} />
-        <Metric label="90% closed within" value={fmtDays(row.p90_closure_days)} />
-        <Metric label="Top complaint type" value={row.top_complaint_type ?? '—'} />
-      </dl>
-      <OperationalRead reads={reads} />
-      <OpenCasesButton onClick={openCases} />
-    </div>
-  )
-}
-
-function BoroughBottleneck({
-  volumes,
-  value,
-  onExplore,
-}: {
-  volumes: LiveState<NYCBoroughWorkload[]>
-  value: string
-  onExplore: (f: CaseExplorerFilters) => void
-}) {
-  const { data, loading, error } = volumes
-  const openCases = () => onExplore({ borough: value })
-
-  const match = (data ?? []).find((b) => b.borough.trim().toLowerCase() === value.trim().toLowerCase())
-
-  return (
-    <div className="space-y-4">
-      <AreaHeading label={value} sub="Selected borough" />
-      {loading ? (
-        <div className="animate-pulse rounded-md bg-slate-100/70 py-6 text-center text-sm text-ink-subtle">Loading live data…</div>
-      ) : error ? (
-        <p className="text-sm text-ink-muted">Borough workload volume is unavailable right now.</p>
-      ) : match ? (
-        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Metric label="Complaint volume" value={fmtInt(match.complaint_volume)} />
-        </dl>
-      ) : (
-        <p className="text-sm text-ink-muted">No borough-level workload volume is available for {value}.</p>
-      )}
-      <div className="rounded-md border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs leading-relaxed text-ink-muted">
-        <span className="font-semibold text-ink">Operational read:</span> Borough is the broad executive view. Council
-        district carries deeper bottleneck metrics right now (average and long-tail closure time, top complaint type), so
-        drill into a council district for a sharper diagnosis. Use the button below to review this borough's cases.
-      </div>
-      <OpenCasesButton onClick={openCases} />
-    </div>
-  )
-}
-
-function AreaHeading({ label, sub }: { label: string; sub: string }) {
-  return (
-    <div>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{sub}</div>
-      <div className="text-2xl font-semibold text-navy-900">{label}</div>
-    </div>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
-      <div className="mt-1 truncate text-base font-semibold tabular-nums text-navy-900">{value}</div>
-    </div>
-  )
-}
-
-function OperationalRead({ reads }: { reads: string[] }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-slate-50/70 px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Operational read</div>
-      <ul className="mt-1.5 space-y-1.5 text-sm text-ink-muted">
-        {reads.map((r) => (
-          <li key={r} className="flex gap-2">
-            <span aria-hidden className="mt-0.5 text-accent-500">•</span>
-            <span>{r}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-function OpenCasesButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="btn-primary text-sm py-2 px-4">
-      Open matching cases in Case Explorer →
-    </button>
   )
 }
 
