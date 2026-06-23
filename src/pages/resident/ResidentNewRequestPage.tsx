@@ -32,6 +32,8 @@ type FormState = {
   resolutionFollowup: boolean
 }
 
+type ServiceLevel = { label: string; value: string }
+
 type BramptonServiceCategory = {
   label: string
   group: string
@@ -39,7 +41,23 @@ type BramptonServiceCategory = {
   whenToUse: string
   examples: string[]
   prompt: string
+  // Optional knowledge-article metadata, modelled on the Brampton 311 service
+  // pages. When present, it is surfaced in the inline "About this request" tile
+  // so a resident sees expectations before submitting — no separate article page.
+  serviceLevels?: ServiceLevel[]
+  priorityGuidance?: string
+  call311When?: string
+  notHandled?: string
+  related?: string[]
 }
+
+// Brampton 311 priority matrix — shared guidance reused by time-sensitive,
+// safety-related request types so the wording stays consistent.
+const PRIORITY_MATRIX_NOTE =
+  'Priority 1 (immediate safety risk to vehicle, cycling, or pedestrian traffic within the City right-of-way) is responded to within 1 day. Priority 2 (no immediate safety risk) within 14 days. Priority 3 (general information request) within 35 days.'
+
+const PRIORITY_1_CALL_NOTE =
+  'For a Priority 1 safety risk, call 311 within city limits or 905-874-2000 from outside Brampton to speak with a live representative.'
 
 const INITIAL: FormState = {
   requestType: '',
@@ -63,7 +81,7 @@ const INITIAL: FormState = {
 const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   {
     label: 'Report Poorly Maintained Property',
-    group: 'Property and yard standards',
+    group: 'Property standards and private property',
     summary: 'Exterior property condition, debris, unsafe maintenance, or visible neglect.',
     whenToUse: 'Use this when a private property appears neglected and may need bylaw review.',
     examples: ['damaged fence', 'unsafe exterior condition', 'debris around a home'],
@@ -71,7 +89,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Excessive Refuse/Garbage on Private Property',
-    group: 'Property and yard standards',
+    group: 'Property standards and private property',
     summary: 'Garbage, refuse, or waste stored outside on private property.',
     whenToUse: 'Use this when garbage is accumulating on a private lot, driveway, side yard, or porch.',
     examples: ['overflowing bags', 'loose waste', 'garbage attracting pests'],
@@ -79,7 +97,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Improper Storage of Garbage Containers',
-    group: 'Property and yard standards',
+    group: 'Property standards and private property',
     summary: 'Garbage bins or containers stored in a way that creates a nuisance or obstruction.',
     whenToUse: 'Use this when bins are repeatedly left out, blocking access, or creating a nuisance.',
     examples: ['bins left at curb', 'containers blocking sidewalk', 'overflowing containers'],
@@ -87,7 +105,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report An Overgrown Lawn Or Prohibited Plants On Private Property',
-    group: 'Property and yard standards',
+    group: 'Property standards and private property',
     summary: 'Long grass, weeds, overgrown yard conditions, or prohibited plants.',
     whenToUse: 'Use this for private property vegetation that appears unmanaged or prohibited.',
     examples: ['long grass', 'overgrown weeds', 'blocked sightline from plants'],
@@ -95,7 +113,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Stagnant Water on Private Property',
-    group: 'Property and yard standards',
+    group: 'Property standards and private property',
     summary: 'Standing water on private property that may create nuisance or health concerns.',
     whenToUse: 'Use this when water is pooling and not draining after weather events.',
     examples: ['standing water in yard', 'water in containers', 'pooling near property line'],
@@ -103,7 +121,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Long-term Rental Housing Concern – Unlicensed or Unregistered (e.g. basement apartment)',
-    group: 'Housing and rentals',
+    group: 'Property standards and private property',
     summary: 'Possible unlicensed or unregistered long term rental housing concern.',
     whenToUse: 'Use this when a rental unit may be operating without required licensing or registration.',
     examples: ['suspected unregistered basement unit', 'multiple separate units', 'rental activity concern'],
@@ -111,7 +129,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Short-term Rental Housing Concern (e.g. AirBNB and VRBO)',
-    group: 'Housing and rentals',
+    group: 'Property standards and private property',
     summary: 'Possible short term rental concern related to a property.',
     whenToUse: 'Use this when short term rental activity appears to create a nuisance or licensing concern.',
     examples: ['frequent short stays', 'party house concern', 'parking from short term guests'],
@@ -119,7 +137,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report an Encampment',
-    group: 'Public space and community concern',
+    group: 'Waste, dumping, signs, and nuisance',
     summary: 'A tent, shelter, or encampment in a public space requiring city review.',
     whenToUse: 'Use this when a public space has an encampment concern needing coordinated review.',
     examples: ['tent in park', 'shelter near trail', 'items stored in public space'],
@@ -127,7 +145,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report an Abandoned Shopping Cart',
-    group: 'Public space and community concern',
+    group: 'Parking and vehicles',
     summary: 'Shopping cart left on public property, sidewalk, boulevard, or road area.',
     whenToUse: 'Use this when a cart has been abandoned and is obstructing or littering an area.',
     examples: ['cart on sidewalk', 'cart in park', 'cart in roadway shoulder'],
@@ -135,7 +153,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report an Incident of Dumping',
-    group: 'Waste and dumping',
+    group: 'Waste, dumping, signs, and nuisance',
     summary: 'Dumped items, debris, garbage, or materials left illegally.',
     whenToUse: 'Use this when waste has been dumped on public or private land.',
     examples: ['mattress dumped', 'bags of waste', 'construction debris'],
@@ -143,7 +161,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Litter, Debris or Obstructions',
-    group: 'Waste and dumping',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Litter, loose debris, or obstruction on public space.',
     whenToUse: 'Use this for debris that affects sidewalks, roads, boulevards, trails, or public areas.',
     examples: ['loose litter', 'branches blocking sidewalk', 'debris on boulevard'],
@@ -151,7 +169,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report of Landscaping/Construction/Dumpster Bin and other Materials on City Roadway',
-    group: 'Roadway obstructions',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Bins, landscaping materials, construction materials, or stored items on a city roadway.',
     whenToUse: 'Use this when materials are placed on the road and may block traffic or create a hazard.',
     examples: ['dumpster bin on road', 'construction materials at curb', 'landscaping material pile'],
@@ -159,7 +177,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Mud-Tracking on City Roadways',
-    group: 'Roadway obstructions',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Mud or dirt tracked onto public roads, often near construction activity.',
     whenToUse: 'Use this when roadway mud creates cleanliness, visibility, or safety concerns.',
     examples: ['mud from site entrance', 'dirt across lane', 'dirty roadway after trucks'],
@@ -167,7 +185,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Road Damage',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'General road damage that may require inspection or repair.',
     whenToUse: 'Use this when the road surface, curb lane, or roadway area is damaged.',
     examples: ['cracked roadway', 'sunken area', 'broken road edge'],
@@ -175,7 +193,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Pothole',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Pothole on a city road requiring repair review.',
     whenToUse: 'Use this for a specific pothole or cluster of potholes.',
     examples: ['deep pothole', 'multiple potholes', 'pothole near intersection'],
@@ -183,7 +201,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Curb or Sidewalk Damage',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Damaged curb or sidewalk that may affect pedestrian access.',
     whenToUse: 'Use this when a sidewalk or curb is broken, raised, cracked, or unsafe.',
     examples: ['raised sidewalk slab', 'broken curb', 'trip hazard'],
@@ -191,7 +209,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report of Damage to City Sidewalk/Boulevard Curb',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Damage to city sidewalk, boulevard, or curb area.',
     whenToUse: 'Use this for damage in the city owned boulevard or curb area.',
     examples: ['boulevard curb damage', 'sidewalk edge damage', 'curb cut concern'],
@@ -199,7 +217,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report an Uncleared/Icy Sidewalk',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Sidewalk not cleared of snow or ice.',
     whenToUse: 'Use this after snowfall or freezing conditions when a sidewalk remains unsafe.',
     examples: ['icy sidewalk', 'snow not cleared', 'blocked pedestrian path'],
@@ -207,7 +225,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Snow Issues',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Snow related service concern such as windrows, blocked access, or snow accumulation.',
     whenToUse: 'Use this for snow concerns not limited to a private sidewalk.',
     examples: ['blocked driveway windrow', 'snow pile blocking sightline', 'snow on road'],
@@ -215,7 +233,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report a Traffic Signal Issue',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Traffic signal outage, timing issue, or malfunction.',
     whenToUse: 'Use this when a traffic light is not operating as expected.',
     examples: ['signal out', 'stuck red light', 'pedestrian signal not working'],
@@ -223,7 +241,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Street Light Repairs Needed',
-    group: 'Roads, sidewalks, and traffic',
+    group: 'Roads, sidewalks, and traffic assets',
     summary: 'Street light outage, damaged pole, or lighting repair request.',
     whenToUse: 'Use this when a street light is out or visibly damaged.',
     examples: ['light out', 'flickering street light', 'damaged pole'],
@@ -231,7 +249,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Active Speeding Concerns',
-    group: 'Traffic calming',
+    group: 'Traffic calming and neighbourhood safety',
     summary: 'Recurring speeding concern on a street or in a neighbourhood.',
     whenToUse: 'Use this when vehicles regularly appear to speed through an area.',
     examples: ['speeding near school', 'speeding on residential street', 'cut through traffic'],
@@ -239,7 +257,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Request Speed Display Board and Traffic Calming Device',
-    group: 'Traffic calming',
+    group: 'Traffic calming and neighbourhood safety',
     summary: 'Request for speed display board or traffic calming review.',
     whenToUse: 'Use this when a location may need speed awareness or calming measures.',
     examples: ['speed board request', 'traffic calming request', 'school zone speeding'],
@@ -247,7 +265,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Damaged Trees',
-    group: 'Trees and parks',
+    group: 'Trees, parks, and public spaces',
     summary: 'Tree damage requiring inspection or cleanup review.',
     whenToUse: 'Use this for damaged branches, storm damage, or visible tree damage.',
     examples: ['broken limb', 'storm damaged tree', 'split trunk'],
@@ -255,7 +273,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Dead or Unhealthy Trees',
-    group: 'Trees and parks',
+    group: 'Trees, parks, and public spaces',
     summary: 'Dead, dying, or unhealthy tree concern.',
     whenToUse: 'Use this when a tree appears dead, diseased, or in poor condition.',
     examples: ['dead tree', 'no leaves', 'fungus or decay'],
@@ -263,7 +281,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Tree Debris Cleanup Required',
-    group: 'Trees and parks',
+    group: 'Trees, parks, and public spaces',
     summary: 'Tree branches or debris requiring cleanup.',
     whenToUse: 'Use this for fallen branches or tree debris on public property.',
     examples: ['fallen branches', 'tree debris on boulevard', 'storm cleanup'],
@@ -271,7 +289,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Tree Pruning or Removal Required',
-    group: 'Trees and parks',
+    group: 'Trees, parks, and public spaces',
     summary: 'Tree pruning, trimming, or removal review request.',
     whenToUse: 'Use this when a city tree may need pruning or removal review.',
     examples: ['branches touching wires', 'low branches', 'tree blocking sign'],
@@ -279,7 +297,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Request New/Replacement Tree',
-    group: 'Trees and parks',
+    group: 'Trees, parks, and public spaces',
     summary: 'Request a new or replacement tree.',
     whenToUse: 'Use this when a boulevard or public location may need a tree planted or replaced.',
     examples: ['replacement tree', 'missing boulevard tree', 'new tree request'],
@@ -287,7 +305,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Dead or Damaged Sod',
-    group: 'Trees and parks',
+    group: 'Trees, parks, and public spaces',
     summary: 'Dead or damaged sod in a public area or boulevard.',
     whenToUse: 'Use this when sod restoration may be needed.',
     examples: ['dead sod on boulevard', 'damaged grass after work', 'bare patch'],
@@ -295,7 +313,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Grass Cutting on City Property',
-    group: 'Trees and parks',
+    group: 'Trees, parks, and public spaces',
     summary: 'Grass cutting request for city property.',
     whenToUse: 'Use this when city owned grass appears overdue for cutting.',
     examples: ['long grass in park', 'boulevard grass', 'city lot grass'],
@@ -303,7 +321,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Graffiti',
-    group: 'Signs and graffiti',
+    group: 'Waste, dumping, signs, and nuisance',
     summary: 'Graffiti on public or private property requiring review or removal.',
     whenToUse: 'Use this when graffiti is visible on buildings, signs, benches, walls, or public assets.',
     examples: ['graffiti on wall', 'graffiti on sign', 'tagging on utility box'],
@@ -311,7 +329,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report an Illegal/Junk Sign',
-    group: 'Signs and graffiti',
+    group: 'Waste, dumping, signs, and nuisance',
     summary: 'Illegal, junk, temporary, or nuisance sign concern.',
     whenToUse: 'Use this when a sign appears unauthorized, abandoned, or obstructive.',
     examples: ['junk sign on boulevard', 'illegal advertising sign', 'temporary sign concern'],
@@ -319,7 +337,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report Fireworks',
-    group: 'Noise and nuisance',
+    group: 'Waste, dumping, signs, and nuisance',
     summary: 'Fireworks related nuisance or bylaw concern.',
     whenToUse: 'Use this for fireworks concerns that are not emergencies.',
     examples: ['fireworks late at night', 'recurring fireworks', 'debris after fireworks'],
@@ -327,7 +345,7 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Report of Structures too Close to Property Line (Shed, decks etc.)',
-    group: 'Zoning and structures',
+    group: 'Property standards and private property',
     summary: 'Structure placement concern near a property line.',
     whenToUse: 'Use this when a shed, deck, or similar structure may be too close to a property line.',
     examples: ['shed near fence', 'deck setback concern', 'structure close to lot line'],
@@ -335,15 +353,120 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
   },
   {
     label: 'Request a Parking Consideration',
-    group: 'Parking and roads',
+    group: 'Parking and vehicles',
     summary: 'Request short term parking consideration.',
     whenToUse: 'Use this when temporary parking flexibility is being requested.',
     examples: ['overnight guests', 'temporary driveway work', 'short term parking need'],
     prompt: 'Describe the parking consideration needed, date, street, and number of vehicles.',
   },
+  {
+    label: 'Report a Parking Infraction',
+    group: 'Parking and vehicles',
+    summary: 'A vehicle parked in violation of a city parking by-law on a street, boulevard, or municipal property.',
+    whenToUse: 'Use this to report a vehicle that appears to be parked against the parking by-laws.',
+    examples: [
+      'facing the wrong way',
+      'within 3 m of a fire hydrant',
+      'obstructing traffic',
+      'at an expired meter',
+      'more than 15 cm from the curb',
+      'on the boulevard',
+      'in a prohibited area',
+      'on municipal property',
+      'within 9 m of an intersection',
+      'parked over 3 hours',
+      'parked between 2:00 am and 6:00 am',
+      'in an accessible space without a permit',
+    ],
+    prompt: 'Describe the vehicle (plate, make, and colour if known), exactly where it is parked, and which parking rule appears to be broken.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: PRIORITY_1_CALL_NOTE,
+    notHandled:
+      'The City does not respond to parking violations on private property such as plazas, unless the vehicle is in an accessible space without a permit. For private property concerns, contact the property management company.',
+    related: ['Request a Parking Consideration', 'Report a Driveway Too Wide', 'Report Litter, Debris or Obstructions'],
+  },
+  {
+    label: 'Report a Parks/Recreational Trails Issue',
+    group: 'Trees, parks, and public spaces',
+    summary: 'A maintenance or safety issue in a city park or on a recreational trail.',
+    whenToUse: 'Use this for damage, hazards, or maintenance concerns in parks and on trails.',
+    examples: ['damaged trail surface', 'broken park equipment', 'fallen tree across a trail', 'flooded path', 'damaged bench'],
+    prompt: 'Describe the park or trail name, the closest entrance or landmark, and the issue you observed.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: PRIORITY_1_CALL_NOTE,
+    related: ['Report Damaged Trees', 'Tree Debris Cleanup Required', 'Report Grass Cutting on City Property'],
+  },
+  {
+    label: 'Report a Concern with Flowerbed and/or Hanging Basket',
+    group: 'Trees, parks, and public spaces',
+    summary: 'A concern with a city flowerbed or hanging basket, including watering or irrigation issues.',
+    whenToUse: 'Use this for an issue with a city flowerbed, hanging basket, or its sprinkler/irrigation system.',
+    examples: [
+      'general flowerbed or hanging basket inquiry',
+      'damaged or unhealthy flowerbed or basket',
+      'sprinkler system issue',
+      'water line breakage causing pooling or bubbling water',
+    ],
+    prompt: 'Describe the flowerbed or hanging basket location and what you noticed (damage, a watering issue, or pooling water).',
+    serviceLevels: [
+      { label: 'Urgent issues', value: '3 business days' },
+      { label: 'Flowerbeds and hanging baskets', value: '5 business days' },
+      { label: 'Non-urgent issues', value: '30 business days' },
+    ],
+    call311When: 'For urgent matters such as a water line breakage, contact 311 within Brampton or 905-874-2000 from outside the city.',
+    related: ['Report Grass Cutting on City Property', 'Report Dead or Damaged Sod'],
+  },
+  {
+    label: 'Report a Driveway Too Wide',
+    group: 'Parking and vehicles',
+    summary: 'A residential driveway or front-yard parking area that appears wider than the by-law permits.',
+    whenToUse: 'Use this when a driveway or front-yard parking area appears to exceed the permitted width.',
+    examples: ['widened driveway over the boulevard', 'front yard paved for extra parking', 'driveway wider than the permitted allowance'],
+    prompt: 'Describe the property and why the driveway appears too wide (for example, paving over the boulevard or most of the front yard).',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    related: ['Report a Parking Infraction', 'Report of Structures too Close to Property Line (Shed, decks etc.)'],
+  },
+  {
+    label: 'Report a Noise Concern',
+    group: 'Waste, dumping, signs, and nuisance',
+    summary: 'A noise concern that may breach the city noise by-law.',
+    whenToUse: 'Use this for ongoing or recurring noise that is not an emergency.',
+    examples: ['loud music', 'construction outside permitted hours', 'persistent barking', 'amplified noise late at night'],
+    prompt: 'Describe the type of noise, the time(s) it happens, how often, and the source location if known.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: 'If the noise involves an emergency or immediate danger, call 911. Otherwise call 311 or 905-874-2000 to reach a live representative.',
+    related: ['Report Fireworks', 'Report Short-term Rental Housing Concern (e.g. AirBNB and VRBO)'],
+  },
+  {
+    label: 'Report a Traffic Sign Issue',
+    group: 'Roads, sidewalks, and traffic assets',
+    summary: 'A damaged, missing, or obstructed traffic or street sign on a city road.',
+    whenToUse: 'Use this when a traffic or street sign is down, damaged, turned, or hidden from view.',
+    examples: ['stop sign knocked down', 'faded or damaged sign', 'sign blocked by branches', 'missing street name sign'],
+    prompt: 'Describe the sign type, the intersection or nearest address, and what is wrong with it.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: PRIORITY_1_CALL_NOTE,
+    related: ['Report a Traffic Signal Issue', 'Street Light Repairs Needed', 'Report an Illegal/Junk Sign'],
+  },
 ]
 
-const CATEGORY_GROUPS = Array.from(new Set(BRAMPTON_SERVICE_CATEGORIES.map((c) => c.group)))
+// Intake groups in the order shown as filter chips. Every Brampton request type
+// is assigned to exactly one of these so residents see clear groups instead of
+// one flat 40+ item list. Broad portal categories (Road Closures, Transit,
+// Taxes, Voters, etc.) are intentionally NOT intake options in this POC.
+const CATEGORY_GROUPS = [
+  'Parking and vehicles',
+  'Property standards and private property',
+  'Roads, sidewalks, and traffic assets',
+  'Traffic calming and neighbourhood safety',
+  'Trees, parks, and public spaces',
+  'Waste, dumping, signs, and nuisance',
+] as const
+
+const GROUP_RANK = (group: string) => {
+  const i = CATEGORY_GROUPS.indexOf(group as (typeof CATEGORY_GROUPS)[number])
+  return i === -1 ? CATEGORY_GROUPS.length : i
+}
 
 const DEMO_COMPLAINTS: Array<Partial<FormState>> = [
   {
@@ -472,6 +595,42 @@ const DEMO_COMPLAINTS: Array<Partial<FormState>> = [
     location: '44 Ray Lawson Blvd',
     concernPostalCode: 'L6Y 5L7',
   },
+  {
+    requestType: 'Report a Parking Infraction',
+    happeningNow: 'Yes',
+    description:
+      'A vehicle has been parked within about 2 metres of the fire hydrant for most of the day and is facing the wrong way on the street. It is making it hard to see oncoming traffic.',
+    addressType: 'Street Address',
+    location: '85 Vodden St E',
+    concernPostalCode: 'L6V 1M8',
+  },
+  {
+    requestType: 'Report a Noise Concern',
+    happeningNow: 'Yes',
+    description:
+      'Loud amplified music has been coming from a backyard gathering well past 11 pm for several nights this week. It is clearly audible inside neighbouring homes.',
+    addressType: 'Street Address',
+    location: '142 Conestoga Dr',
+    concernPostalCode: 'L6Z 3A5',
+  },
+  {
+    requestType: 'Report a Traffic Sign Issue',
+    happeningNow: 'Yes',
+    description:
+      'The stop sign at this intersection has been knocked down and is lying in the grass. Drivers are rolling through without stopping.',
+    addressType: 'Intersection',
+    location: 'Howden Blvd & Dixie Rd',
+    concernPostalCode: '',
+  },
+  {
+    requestType: 'Report a Parks/Recreational Trails Issue',
+    happeningNow: 'No',
+    description:
+      'A large branch has fallen across the recreational trail near the park entrance and is blocking the path for walkers and cyclists.',
+    addressType: 'Street Address',
+    location: '9050 Bramalea Rd',
+    concernPostalCode: 'L6S 6G7',
+  },
 ]
 
 type Status =
@@ -499,6 +658,9 @@ export default function ResidentNewRequestPage() {
         .toLowerCase()
       return matchesGroup && (!q || searchable.includes(q))
     })
+      // Keep cards organized by intake group (stable within a group) so the
+      // "All" view reads as grouped sections rather than a flat list.
+      .sort((a, b) => GROUP_RANK(a.group) - GROUP_RANK(b.group))
   }, [activeGroup, categoryQuery])
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -702,7 +864,7 @@ export default function ResidentNewRequestPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-sm font-semibold text-navy-900">Generate a realistic Brampton demo request</div>
-              <p className="mt-0.5 text-xs text-ink-subtle">Creates a random property, road, tree, housing, dumping, sign, or traffic case. Your email is never autofilled.</p>
+              <p className="mt-0.5 text-xs text-ink-subtle">Creates a random property, road, tree, parking, noise, housing, dumping, sign, or traffic case. Your email is never autofilled.</p>
             </div>
             <button
               type="button"
@@ -762,8 +924,12 @@ export default function ResidentNewRequestPage() {
             {selectedCategory && (
               <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-sm text-blue-950">
                 <div className="font-semibold">About this request</div>
-                <p className="mt-1">{selectedCategory.whenToUse}</p>
-                <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-blue-900">Common examples</div>
+                <p className="mt-1">{selectedCategory.summary}</p>
+
+                <InfoLabel>Use this when</InfoLabel>
+                <p className="mt-1 text-blue-950/90">{selectedCategory.whenToUse}</p>
+
+                <InfoLabel>Examples</InfoLabel>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {selectedCategory.examples.map((example) => (
                     <span key={example} className="rounded-full bg-white px-2.5 py-1 text-xs text-blue-950 ring-1 ring-blue-100">
@@ -771,6 +937,69 @@ export default function ResidentNewRequestPage() {
                     </span>
                   ))}
                 </div>
+
+                {selectedCategory.serviceLevels && selectedCategory.serviceLevels.length > 0 && (
+                  <>
+                    <InfoLabel>Expected service level</InfoLabel>
+                    <ul className="mt-1.5 space-y-1">
+                      {selectedCategory.serviceLevels.map((lvl) => (
+                        <li key={lvl.label} className="flex items-baseline justify-between gap-3 border-b border-blue-100/70 pb-1 last:border-0">
+                          <span className="text-blue-950/90">{lvl.label}</span>
+                          <span className="flex-none font-semibold">{lvl.value}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+
+                {selectedCategory.priorityGuidance && (
+                  <>
+                    <InfoLabel>Priority guidance</InfoLabel>
+                    <p className="mt-1 text-blue-950/90">{selectedCategory.priorityGuidance}</p>
+                  </>
+                )}
+
+                {selectedCategory.call311When && (
+                  <>
+                    <InfoLabel>When to call 311</InfoLabel>
+                    <p className="mt-1 text-blue-950/90">{selectedCategory.call311When}</p>
+                  </>
+                )}
+
+                {selectedCategory.notHandled && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <span className="font-semibold">Not handled by the City: </span>
+                    {selectedCategory.notHandled}
+                  </div>
+                )}
+
+                {selectedCategory.related && selectedCategory.related.length > 0 && (
+                  <>
+                    <InfoLabel>Related request types</InfoLabel>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedCategory.related.map((rel) => {
+                        const target = BRAMPTON_SERVICE_CATEGORIES.find((c) => c.label === rel)
+                        return target ? (
+                          <button
+                            key={rel}
+                            type="button"
+                            onClick={() => {
+                              setActiveGroup('All')
+                              chooseCategory(target)
+                            }}
+                            className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-blue-800 ring-1 ring-blue-200 transition hover:bg-blue-100"
+                          >
+                            {rel}
+                          </button>
+                        ) : (
+                          <span key={rel} className="rounded-full bg-white px-2.5 py-1 text-xs text-blue-950 ring-1 ring-blue-100">
+                            {rel}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -901,6 +1130,10 @@ export default function ResidentNewRequestPage() {
       </div>
     </div>
   )
+}
+
+function InfoLabel({ children }: { children: ReactNode }) {
+  return <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-blue-900">{children}</div>
 }
 
 function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
