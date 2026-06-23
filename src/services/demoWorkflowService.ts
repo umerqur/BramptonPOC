@@ -374,15 +374,20 @@ export const FIELD_OUTCOME_LABELS: Record<FieldVisitOutcome, string> = {
 export const ENFORCEMENT_ACTION_LABELS: Record<EnforcementAction, string> = {
   warning_education: 'Education / warning provided',
   notice_issued: 'Notice issued',
-  ticket_issued: 'Parking ticket / penalty notice issued',
+  ticket_issued: 'Ticket / penalty notice issued',
   no_action: 'No action taken',
   other: 'Other',
 }
 
-/** Label for each method of service (ticket / penalty notice only). */
+/**
+ * Label for each method of service (ticket / penalty notice only). Stored enum
+ * values are kept stable for existing DB rows, but the display labels are
+ * generalized so they read sensibly for any by-law ticket / penalty notice, not
+ * just parking (e.g. illegal dumping, property standards, zoning).
+ */
 export const SERVICE_METHOD_LABELS: Record<ServiceMethod, string> = {
-  placed_on_vehicle: 'Placed on vehicle',
-  handed_to_driver: 'Handed to driver / owner',
+  placed_on_vehicle: 'Posted at location / placed on vehicle',
+  handed_to_driver: 'Served in person',
   sent_by_mail: 'Sent by mail',
   other: 'Other',
 }
@@ -402,8 +407,9 @@ export const SERVICE_METHOD_LABELS: Record<ServiceMethod, string> = {
  *
  * A "no" violation always takes precedence and is recorded as no_violation. A
  * ticket is ONLY ever claimed when the officer explicitly selected the
- * "Parking ticket / penalty notice issued" action — never inferred from a
- * violation being observed.
+ * "Ticket / penalty notice issued" action — a general by-law ticket /
+ * administrative penalty / offence notice, valid for any violation type — never
+ * inferred from a violation being observed.
  */
 export function deriveFieldVisitOutcome(
   violationObserved: string | null,
@@ -512,13 +518,14 @@ function closureOutcomeParagraph(
         inviteBack
       )
     case 'ticket_issued': {
-      // Only ever reached when the officer selected "Parking ticket / penalty
-      // notice issued" (deriveFieldVisitOutcome). Include the notice number only
-      // if it was provided — never invent one.
+      // Only ever reached when the officer selected "Ticket / penalty notice
+      // issued" (deriveFieldVisitOutcome). This is a general by-law ticket /
+      // penalty notice, not parking-specific. Include the notice number only if
+      // it was provided — never invent one.
       const ticketRef = fieldAction.referenceNumber ? ` (number ${fieldAction.referenceNumber})` : ''
       return (
         `A by-law enforcement officer attended the location${where} on ${date} and observed a violation of ${policy}. ` +
-        `A parking penalty notice${ticketRef} was issued. This file has now been closed.` +
+        `A by-law ticket or penalty notice${ticketRef} was issued. This file has now been closed.` +
         inviteBack
       )
     }

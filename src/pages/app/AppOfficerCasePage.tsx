@@ -74,7 +74,9 @@ const EMPTY_FIELD_DRAFT: OfficerFieldDraft = {
   violationObserved: 'unclear',
   enforcementAction: '',
   referenceNumber: '',
-  serviceMethod: 'placed_on_vehicle',
+  // "Served in person" is the most generally applicable default across violation
+  // types (not parking-specific); the stored enum value stays handed_to_driver.
+  serviceMethod: 'handed_to_driver',
   actionTaken: '',
   officerNotes: '',
   followUpRequired: false,
@@ -376,7 +378,7 @@ function FieldOutcomeForm({
     }
     const isTicket = fieldDraft.enforcementAction === 'ticket_issued'
     if (isTicket && !fieldDraft.referenceNumber.trim()) {
-      setError('Enter the ticket / penalty notice number for the ticket issued, before completing the field outcome.')
+      setError('Enter the ticket / penalty notice number before completing the field outcome.')
       return
     }
     if (!fieldDraft.actionTaken.trim()) {
@@ -501,7 +503,9 @@ const ENFORCEMENT_ACTION_ORDER: EnforcementAction[] = [
   'no_action',
   'other',
 ]
-const SERVICE_METHOD_ORDER: ServiceMethod[] = ['placed_on_vehicle', 'handed_to_driver', 'sent_by_mail', 'other']
+// "Served in person" leads — it applies across violation types; the placed-on-
+// vehicle option is no longer the default first choice. Stored enum values stay.
+const SERVICE_METHOD_ORDER: ServiceMethod[] = ['handed_to_driver', 'placed_on_vehicle', 'sent_by_mail', 'other']
 
 /** Resolve a stored enforcement-action / service-method code to its label, or '—'. */
 function enforcementActionLabel(value: string | null): string {
@@ -515,9 +519,10 @@ function serviceMethodLabel(value: string | null): string {
 
 // Shared structured enforcement-action fields, used by BOTH the resident
 // Supabase form and the local NYC benchmark form so the two paths capture the
-// same disposition. Selecting "Parking ticket / penalty notice issued" reveals
-// the notice number and method-of-service fields. This only records what the
-// officer did — it is not a payment or ticket-issuance system.
+// same disposition. Selecting "Ticket / penalty notice issued" (a general by-law
+// ticket / penalty notice, valid for any violation type) reveals the notice
+// number and method-of-service fields. This only records what the officer did —
+// it is not a payment or ticket-issuance system.
 function EnforcementActionFields({
   enforcementAction,
   setEnforcementAction,
@@ -767,7 +772,8 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
   const [violationObserved, setViolationObserved] = useState<'yes' | 'no' | 'unclear'>('unclear')
   const [enforcementAction, setEnforcementAction] = useState<EnforcementAction | ''>('')
   const [referenceNumber, setReferenceNumber] = useState('')
-  const [serviceMethod, setServiceMethod] = useState<ServiceMethod>('placed_on_vehicle')
+  // Default to the most generally applicable method (stored enum stays handed_to_driver).
+  const [serviceMethod, setServiceMethod] = useState<ServiceMethod>('handed_to_driver')
   const [actionTaken, setActionTaken] = useState('')
   const [officerNotes, setOfficerNotes] = useState('')
   const [followUpRequired, setFollowUpRequired] = useState(false)
@@ -788,7 +794,7 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
     }
     const isTicket = enforcementAction === 'ticket_issued'
     if (isTicket && !referenceNumber.trim()) {
-      setError('Enter the ticket / penalty notice number for the ticket issued, before completing the field outcome.')
+      setError('Enter the ticket / penalty notice number before completing the field outcome.')
       return
     }
     if (!actionTaken.trim()) {
