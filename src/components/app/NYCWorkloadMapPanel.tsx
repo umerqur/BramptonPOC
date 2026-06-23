@@ -15,6 +15,7 @@ import {
   type AreaMetricValue,
   type MapMetric,
 } from './mapMetrics'
+import { NYC_BOROUGH_BOUNDARIES } from '../../data/nycBoroughBoundaries'
 
 // The deck.gl 3D workload view is heavy, so it is code-split and only loaded when
 // the user opens the 3D tab. The default 2D operational map never pulls deck.gl.
@@ -326,7 +327,7 @@ function NYCWorkloadHeatMap({
 }) {
   const adapter = ADAPTERS[mode]
   const cfg = metricConfig(metric)
-  const map = useMemo(() => buildAreaMap(units), [units])
+  const map = useMemo(() => buildAreaMap(units, mode === 'district'), [units, mode])
 
   // Index metric rows by area key.
   const byArea = useMemo(() => {
@@ -533,6 +534,21 @@ function NYCWorkloadHeatMap({
                       </path>
                     )
                   })}
+                  {/* Borough outline overlay (district mode) — drawn above the
+                      district polygons for geographic context. Non-interactive so
+                      it never blocks district hover/click. */}
+                  {map.boroughPaths.map((d, i) => (
+                    <path
+                      key={`borough-${i}`}
+                      d={d}
+                      fill="none"
+                      stroke="#0f172a"
+                      strokeOpacity={0.55}
+                      strokeWidth={1.4}
+                      strokeLinejoin="round"
+                      pointerEvents="none"
+                    />
+                  ))}
                   {/* Area labels */}
                   {map.shapes.map((shape) => (
                     <text
@@ -747,6 +763,8 @@ type AreaMap = {
   height: number
   labelSize: number
   shapes: AreaShape[]
+  /** Borough outline paths, projected in the same space — overlaid in district mode. */
+  boroughPaths: string[]
 }
 
 type MapEntry = {
@@ -802,8 +820,10 @@ function extractRings(geometry: unknown): LngLat[][] {
   return rings
 }
 
-/** Projects geometry-bearing entries into a shared SVG coordinate space. */
-function buildMap(entries: MapEntry[]): AreaMap | null {
+/** Projects geometry-bearing entries into a shared SVG coordinate space. The
+ *  optional overlay rings (e.g. borough boundaries) are projected with the SAME
+ *  transform so they align exactly on top of the primary shapes. */
+function buildMap(entries: MapEntry[], overlayRings: LngLat[][][] = []): AreaMap | null {
   const usable = entries.filter((e) => e.rings.length > 0)
   if (usable.length === 0) return null
 
@@ -867,14 +887,31 @@ function buildMap(entries: MapEntry[]): AreaMap | null {
     return { id: entry.id, label: entry.label, short: entry.short, key: entry.key, d, cx: fmt(cx), cy: fmt(cy) }
   })
 
+  // Borough overlay paths, projected with the same transform as the shapes above.
+  const boroughPaths = overlayRings
+    .map((rings) =>
+      rings
+        .map((ring) => {
+          const segs = ring.map(([lng, lat], i) => {
+            const [x, y] = project(lng, lat)
+            return `${i === 0 ? 'M' : 'L'}${fmt(x)} ${fmt(y)}`
+          })
+          return `${segs.join(' ')} Z`
+        })
+        .join(' '),
+    )
+    .filter((d) => d.length > 0)
+
   // Smaller labels when there are many areas (e.g. 51 council districts).
   const baseLabel = Math.max(9, Math.min(16, width / 48))
   const labelSize = shapes.length > 20 ? Math.max(6.5, baseLabel * 0.62) : baseLabel
-  return { width: fmt(width), height: fmt(height), labelSize, shapes }
+  return { width: fmt(width), height: fmt(height), labelSize, shapes, boroughPaths }
 }
 
-/** Projects the real NYC area polygons into the shared SVG space. */
-function buildAreaMap(units: AreaUnit[]): AreaMap | null {
+/** Projects the real NYC area polygons into the shared SVG space. When
+ *  `boroughOverlay` is set (district mode), borough outlines are projected with
+ *  the same transform so they can be drawn on top for geographic context. */
+function buildAreaMap(units: AreaUnit[], boroughOverlay = false): AreaMap | null {
   const entries: MapEntry[] = units.map((u, idx) => ({
     id: u.id || String(idx),
     label: u.label,
@@ -882,5 +919,8 @@ function buildAreaMap(units: AreaUnit[]): AreaMap | null {
     key: u.key,
     rings: extractRings(u.geometry),
   }))
-  return buildMap(entries)
+  const overlayRings = boroughOverlay
+    ? NYC_BOROUGH_BOUNDARIES.map((b) => extractRings(b.geojson_geometry))
+    : []
+  return buildMap(entries, overlayRings)
 }
