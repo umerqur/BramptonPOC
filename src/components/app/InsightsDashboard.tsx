@@ -365,16 +365,19 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
 function OperationalSnapshot() {
   const hist = useLive<InsightsKpis>(getInsightsKpis)
   const open = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
-  const slow = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(1))
+  // Simulated field-activity estimate for the "Field activity load" KPI. Loaded
+  // independently so a synthetic-view failure never breaks the live snapshot.
+  const synth = useLive<SyntheticFieldActivitySummary>(getSyntheticFieldActivitySummary)
 
   const k = hist.data
-  const slowRow = slow.data?.[0] ?? null
 
   // Each value cell degrades to "…" while loading and "—" on error or null.
   const fromOpen = (n: number | null | undefined) =>
     open.loading ? '…' : open.error || n == null ? '—' : fmtInt(n)
   const fromHist = (s: string | null) => (hist.loading ? '…' : hist.error ? '—' : s ?? '—')
-  const fromSlow = (s: string | null) => (slow.loading ? '…' : slow.error ? '—' : s ?? '—')
+  // Field activity load degrades to "—" on its own — it never blocks the snapshot.
+  const fieldLoad =
+    synth.loading ? '…' : synth.error || synth.data?.planned_field_activities == null ? '—' : fmtInt(synth.data.planned_field_activities)
 
   const topPressure =
     [k?.top_complaint_type, k?.busiest_council_district ? `District ${k.busiest_council_district}` : null]
@@ -397,8 +400,8 @@ function OperationalSnapshot() {
         <div>
           <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
           <p className="mt-0.5 text-xs text-ink-subtle">
-            A live summary of the workload analytics below — drawn only from the open review queue and closed NYC 311
-            benchmark records.
+            A live summary of the workload analytics below — from the open review queue and closed NYC 311 benchmark
+            records, plus a simulated field-activity estimate.
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
@@ -444,13 +447,11 @@ function OperationalSnapshot() {
           helper="Highest workload issue and district in the benchmark view"
         />
         <KpiCard
-          title="Slowest closure type"
-          value={fromSlow(slowRow?.complaint_type ?? null)}
-          valueClass="text-lg font-semibold leading-snug"
-          detail={slowRow?.avg_closure_days != null ? `Avg closure ${fmtDays(slowRow.avg_closure_days)}` : undefined}
-          tone="priority"
-          statusLabel="Slowest"
-          helper="Complaint type with the longest average closure time"
+          title="Field activity load"
+          value={fieldLoad}
+          tone="pressure"
+          statusLabel="Simulated"
+          helper="Estimated patrol and follow-up actions"
         />
       </div>
 
@@ -529,18 +530,18 @@ function SyntheticFieldActivity() {
   const summary = useLive<SyntheticFieldActivitySummary>(getSyntheticFieldActivitySummary)
   const s = summary.data
 
-  const cardValue = (n: number | null | undefined, fmt: (n: number) => string) =>
+  const val = (n: number | null | undefined, fmt: (n: number) => string = fmtInt) =>
     summary.loading ? '…' : summary.error || n == null ? '—' : fmt(n)
 
   return (
     <section className="card p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-navy-900">Synthetic field activity simulation</h2>
+          <h2 className="text-sm font-semibold text-navy-900">Synthetic field activity</h2>
           <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-ink-subtle">
-            This is generated operational activity from NYC 311 benchmark timing and status patterns. It is not Brampton
-            operational patrol data. It is used to demonstrate how patrol logs, officer activity, and closure bottlenecks
-            could be visualized once Brampton operational data is connected.
+            Synthetic field activity estimates how many patrol, inspection, and follow-up actions a complaint workload
+            could create. It translates service requests into officer workload using NYC 311 benchmark timing and status
+            patterns. This is simulated data, not Brampton patrol history.
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-violet-700">
@@ -549,36 +550,62 @@ function SyntheticFieldActivity() {
       </div>
 
       {summary.error ? (
-        <div className="mt-4">
-          <SectionError name="the synthetic field activity summary" error={summary.error} />
+        // Calm unavailable state — never expose a raw database/timeout error here.
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-ink-subtle">
+          Synthetic field activity is temporarily unavailable.
         </div>
       ) : (
         <>
-          {/* On portrait mobile: 2 columns × 2 rows; 4-wide on large screens. */}
-          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <SyntheticCard label="Sampled cases" value={cardValue(s?.sampled_cases, fmtInt)} />
-            <SyntheticCard label="Planned activities" value={cardValue(s?.planned_field_activities, fmtInt)} />
-            <SyntheticCard label="Active cases" value={cardValue(s?.active_style_cases, fmtInt)} />
-            <SyntheticCard label="Avg intensity" value={cardValue(s?.avg_activity_intensity, (n) => n.toFixed(2))} />
+          {/* The core idea, read left → right: cases become field activities, some
+              of which stay active-style work requiring supervisor attention. */}
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <FlowStat label="Sampled cases" value={val(s?.sampled_cases)} sub="Benchmark service requests" />
+            <FlowArrow />
+            <FlowStat
+              label="Planned field activities"
+              value={val(s?.planned_field_activities)}
+              sub="Patrol, inspection, follow-up"
+              accent
+            />
+            <FlowArrow />
+            <FlowStat label="Active-style cases" value={val(s?.active_style_cases)} sub="Still need supervisor attention" />
           </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+            Case volume is not the same as field workload: one case may need a single review, another a patrol, and others
+            repeated follow-up (average activity intensity {val(s?.avg_activity_intensity, (n) => n.toFixed(2))}).
+          </p>
 
           <div className="mt-5 grid gap-5 lg:grid-cols-2">
             <SyntheticByBorough />
             <SyntheticByClosureBucket />
           </div>
+
+          <p className="mt-4 text-[11px] text-ink-subtle">
+            Simulated from NYC 311 benchmark patterns. Not Brampton patrol history.
+          </p>
         </>
       )}
     </section>
   )
 }
 
-/** One compact synthetic-activity KPI tile. Short label so 2-up mobile cards stay readable. */
-function SyntheticCard({ label, value }: { label: string; value: string }) {
+/** One stage of the cases → field activities → officer workload flow. */
+function FlowStat({ label, value, sub, accent = false }: { label: string; value: string; sub: string; accent?: boolean }) {
   return (
-    <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3.5">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-700/80">{label}</div>
-      <div className="mt-1.5 text-2xl font-bold tabular-nums text-navy-900">{value}</div>
+    <div className={`flex-1 rounded-xl border p-3.5 ${accent ? 'border-violet-200 bg-violet-50/60' : 'border-slate-200 bg-slate-50/60'}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-1 text-2xl font-bold tabular-nums text-navy-900">{value}</div>
+      <div className="mt-0.5 text-[11px] leading-snug text-ink-subtle">{sub}</div>
     </div>
+  )
+}
+
+/** Connector between flow stages: points down on mobile, right on sm+. */
+function FlowArrow() {
+  return (
+    <span aria-hidden className="self-center rotate-90 text-base text-ink-subtle sm:rotate-0">
+      →
+    </span>
   )
 }
 
@@ -591,7 +618,6 @@ function SyntheticByBorough() {
   }, [data])
   return (
     <SyntheticPanel
-      name="synthetic field activity by borough"
       title="Field activity by borough"
       loading={loading}
       error={error}
@@ -630,7 +656,6 @@ function SyntheticByClosureBucket() {
   }, [data])
   return (
     <SyntheticPanel
-      name="synthetic field activity by closure bucket"
       title="Field activity by closure bucket"
       loading={loading}
       error={error}
@@ -660,14 +685,12 @@ function SyntheticByClosureBucket() {
 
 /** Lightweight panel wrapper for the two synthetic-activity bar lists. */
 function SyntheticPanel({
-  name,
   title,
   loading,
   error,
   empty,
   children,
 }: {
-  name: string
   title: string
   loading: boolean
   error: string | null
@@ -679,7 +702,10 @@ function SyntheticPanel({
       <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-subtle">{title}</h3>
       <div className="mt-3">
         {error ? (
-          <SectionError name={name} error={error} />
+          // Calm unavailable state — synthetic panels never surface raw DB errors.
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-5 text-center text-sm text-ink-subtle">
+            Synthetic field activity is temporarily unavailable.
+          </div>
         ) : loading ? (
           <div className="animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">
             Loading live data…
