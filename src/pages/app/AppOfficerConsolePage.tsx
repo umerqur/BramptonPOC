@@ -66,30 +66,18 @@ function localCaseToItem(c: DemoCase): OfficerItem {
   }
 }
 
-type OfficerTab = 'assigned' | 'due_today' | 'in_review' | 'follow_up' | 'completed'
+type OfficerTab = 'active' | 'closed'
 
 const TABS: { key: OfficerTab; label: string }[] = [
-  { key: 'assigned', label: 'My assigned cases' },
-  { key: 'due_today', label: 'Due today' },
-  { key: 'in_review', label: 'In field review' },
-  { key: 'follow_up', label: 'Follow up required' },
-  { key: 'completed', label: 'Completed field outcomes' },
+  { key: 'active', label: 'Active' },
+  { key: 'closed', label: 'Closed' },
 ]
-
-function isToday(iso: string | null): boolean {
-  if (!iso) return false
-  const d = new Date(iso)
-  const now = new Date()
-  return (
-    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-  )
-}
 
 export default function AppOfficerConsolePage() {
   const { role, userEmail, cases } = useWorkflow()
   const [rows, setRows] = useState<ResidentRequestRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<OfficerTab>('assigned')
+  const [tab, setTab] = useState<OfficerTab>('active')
 
   // The officer whose cases this console shows is always the signed-in officer.
   // Only officer-role accounts reach this page (non-officers are redirected
@@ -130,13 +118,9 @@ export default function AppOfficerConsolePage() {
   const items = useMemo(() => [...(rows ?? []).map(residentToItem), ...localItems], [rows, localItems])
 
   const groups = useMemo(() => {
-    const open = items.filter((i) => !i.isClosed)
     return {
-      assigned: open.filter((i) => !i.fieldVisitCompleted),
-      due_today: open.filter((i) => !i.fieldVisitCompleted && isToday(i.assignedAt)),
-      in_review: items.filter((i) => i.inReview),
-      follow_up: items.filter((i) => i.followUpRequired),
-      completed: items.filter((i) => i.fieldVisitCompleted),
+      active: items.filter((i) => !i.isClosed),
+      closed: items.filter((i) => i.isClosed),
     } satisfies Record<OfficerTab, OfficerItem[]>
   }, [items])
 
@@ -193,7 +177,9 @@ export default function AppOfficerConsolePage() {
         ) : items.length === 0 ? (
           <EmptyState />
         ) : visible.length === 0 ? (
-          <div className="card p-8 text-center text-sm text-ink-subtle">No cases in this list right now.</div>
+          <div className="card p-8 text-center text-sm text-ink-subtle">
+            {tab === 'active' ? 'No active assigned cases right now.' : 'No closed cases yet.'}
+          </div>
         ) : (
           <ul className="space-y-4">
             {visible.map((item) => (
