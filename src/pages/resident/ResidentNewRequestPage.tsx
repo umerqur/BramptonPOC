@@ -77,6 +77,64 @@ const ISSUE_HINTS: Record<string, string> = {
   'Other bylaw concern': 'Anything else for by-law enforcement to review',
 }
 
+// Deterministic, rules-based demo scenarios for the "Create a realistic demo
+// complaint" autofill button. No AI, no external service — just a small set of
+// plausible, self-contained cases. Note: email is intentionally NOT included so
+// the resident's own (or blank) email is preserved, and files are never set.
+const DEMO_COMPLAINTS: Array<Partial<FormState>> = [
+  {
+    requestType: 'Property standards',
+    happeningNow: 'No',
+    description:
+      'There is a property on the street with overflowing garbage, damaged fencing, and debris that has been left outside for several weeks. The condition appears to be attracting pests and affecting nearby homes.',
+    addressType: 'Street Address',
+    location: '24 Main St N',
+    concernUnitNumber: '',
+    city: 'Brampton',
+    province: 'Ontario',
+    concernPostalCode: 'L6V 1N6',
+    firstName: 'Demo',
+    lastName: 'Resident',
+    phone: '',
+    methodOfContact: 'Email',
+    resolutionFollowup: true,
+  },
+  {
+    requestType: 'Illegal dumping',
+    happeningNow: 'Not sure',
+    description:
+      'Several bags of garbage and loose construction debris have been dumped near the rear lane. The material has been there for multiple days and may need by-law review.',
+    addressType: 'Intersection',
+    location: 'Queen St E & Kennedy Rd N',
+    concernUnitNumber: '',
+    city: 'Brampton',
+    province: 'Ontario',
+    concernPostalCode: '',
+    firstName: 'Demo',
+    lastName: 'Resident',
+    phone: '',
+    methodOfContact: 'Email',
+    resolutionFollowup: true,
+  },
+  {
+    requestType: 'Noise complaint',
+    happeningNow: 'Yes',
+    description:
+      'There has been repeated loud noise from the same property late at night. The noise has occurred on multiple evenings and is disrupting nearby residents.',
+    addressType: 'Street Address',
+    location: '100 Queen St W',
+    concernUnitNumber: '',
+    city: 'Brampton',
+    province: 'Ontario',
+    concernPostalCode: 'L6X 1A4',
+    firstName: 'Demo',
+    lastName: 'Resident',
+    phone: '',
+    methodOfContact: 'Email',
+    resolutionFollowup: true,
+  },
+]
+
 type Status =
   | { kind: 'idle' }
   | { kind: 'submitting' }
@@ -92,6 +150,22 @@ export default function ResidentNewRequestPage() {
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
     if (formError) setFormError(null)
+    if (status.kind === 'error') setStatus({ kind: 'idle' })
+  }
+
+  // Rules-based demo autofill — fills a deterministic, plausible complaint while
+  // preserving the resident's own email (never auto-filled) and never attaching
+  // files. No AI or external service is involved.
+  function fillDemoComplaint() {
+    const scenario = DEMO_COMPLAINTS[Math.floor(Math.random() * DEMO_COMPLAINTS.length)]
+    setForm((current) => ({
+      ...current,
+      ...scenario,
+      email: current.email,
+      files: [],
+    }))
+    setFormError(null)
+    setFileError(null)
     if (status.kind === 'error') setStatus({ kind: 'idle' })
   }
 
@@ -132,7 +206,6 @@ export default function ResidentNewRequestPage() {
     if (!form.lastName.trim()) return 'Please enter your last name.'
     if (!form.email.trim()) return 'Please enter a contact email address.'
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Please enter a valid email address.'
-    if (!form.phone.trim()) return 'Please enter a contact phone number.'
     if (!form.methodOfContact) return 'Please choose a method of contact.'
     return null
   }
@@ -271,6 +344,24 @@ export default function ResidentNewRequestPage() {
           </div>
         </header>
 
+        <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-navy-900">Need a quick demo case?</div>
+              <p className="mt-0.5 text-xs text-ink-subtle">
+                Rules based autofill creates a realistic complaint. Enter your own email before submitting.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={fillDemoComplaint}
+              className="inline-flex items-center justify-center rounded-md bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-navy-900 focus:ring-offset-2"
+            >
+              Create a realistic demo complaint
+            </button>
+          </div>
+        </div>
+
         <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Not for emergencies. If you need urgent help, contact your local police or dial 911.
         </div>
@@ -407,8 +498,8 @@ export default function ResidentNewRequestPage() {
               <Field label="Email" required>
                 <input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} className={inputClass} autoComplete="email" placeholder="you@example.com" />
               </Field>
-              <Field label="Phone" required>
-                <input type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} className={inputClass} autoComplete="tel" placeholder="Provide a phone number" />
+              <Field label="Phone" hint="optional">
+                <input type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} className={inputClass} autoComplete="tel" placeholder="Optional phone number" />
               </Field>
               <Field label="Method of contact" required>
                 <select value={form.methodOfContact} onChange={(e) => update('methodOfContact', e.target.value)} className={inputClass}>
