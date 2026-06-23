@@ -1,25 +1,12 @@
 import { useMemo, useState } from 'react'
 import DeckGL from '@deck.gl/react'
-import { GeoJsonLayer } from '@deck.gl/layers'
+import { GeoJsonLayer, TextLayer } from '@deck.gl/layers'
 import { MapView, WebMercatorViewport } from '@deck.gl/core'
 import type { Color, MapViewState, PickingInfo } from '@deck.gl/core'
 import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon } from 'geojson'
 import { calmWorkloadRgb } from './workloadColor'
 import type { AreaUnit } from './NYCWorkloadMapPanel'
 import { formatMetric, metricConfig, metricRawValue, type AreaMetricValue, type MapMetric } from './mapMetrics'
-import { NYC_BOROUGH_BOUNDARIES } from '../../data/nycBoroughBoundaries'
-
-// Bundled NYC borough outlines, drawn as a non-extruded stroked overlay on top of
-// the extruded districts so the borough shapes stay legible even when council
-// districts are raised. Built once — the geometry never changes at runtime.
-const BOROUGH_BOUNDARY_FC: FeatureCollection<Geometry, { name: string }> = {
-  type: 'FeatureCollection',
-  features: NYC_BOROUGH_BOUNDARIES.map((b) => ({
-    type: 'Feature',
-    geometry: b.geojson_geometry,
-    properties: { name: b.borough_name },
-  })),
-}
 
 // Professional 3D workload view built on deck.gl's GeoJsonLayer (extruded
 // polygons). It renders the real NYC borough / council-district GeoJSON, extruded
@@ -192,6 +179,88 @@ function fillFor(p: MetricProps): Color {
   return [r, g, b, 235]
 }
 
+// --- District / borough labels --------------------------------------------
+
+/** One TextLayer label: a centroid position (with z lift) and its short text. */
+type LabelDatum = { position: [number, number, number]; text: string }
+
+// Meters added above a feature's extruded height so its label floats just over
+// the top of the column rather than being buried inside it.
+const LABEL_Z_OFFSET = 400
+
+/** Signed shoelace area of a ring (lng/lat units — only relative size matters). */
+function ringArea(ring: number[][]): number {
+  let area = 0
+  for (let i = 0, n = ring.length; i < n; i++) {
+    const [x1, y1] = ring[i]
+    const [x2, y2] = ring[(i + 1) % n]
+    area += x1 * y2 - x2 * y1
+  }
+  return area / 2
+}
+
+/** Area-weighted centroid of a ring, falling back to the vertex average. */
+function ringCentroid(ring: number[][]): [number, number] {
+  let cx = 0
+  let cy = 0
+  let a = 0
+  for (let i = 0, n = ring.length; i < n; i++) {
+    const [x1, y1] = ring[i]
+    const [x2, y2] = ring[(i + 1) % n]
+    const cross = x1 * y2 - x2 * y1
+    a += cross
+    cx += (x1 + x2) * cross
+    cy += (y1 + y2) * cross
+  }
+  a *= 0.5
+  if (Math.abs(a) < 1e-12) {
+    let sx = 0
+    let sy = 0
+    for (const [x, y] of ring) {
+      sx += x
+      sy += y
+    }
+    const k = ring.length || 1
+    return [sx / k, sy / k]
+  }
+  return [cx / (6 * a), cy / (6 * a)]
+}
+
+/** Centroid of the largest exterior ring of a Polygon/MultiPolygon. */
+function polygonCentroid(geom: PolyGeom): [number, number] {
+  const rings = geom.type === 'Polygon' ? [geom.coordinates[0]] : geom.coordinates.map((p) => p[0])
+  let best: number[][] | null = null
+  let bestArea = -Infinity
+  for (const ring of rings) {
+    if (!ring || ring.length < 3) continue
+    const area = Math.abs(ringArea(ring))
+    if (area > bestArea) {
+      bestArea = area
+      best = ring
+    }
+  }
+  return best ? ringCentroid(best) : [NaN, NaN]
+}
+
+/**
+ * Build one label per rendered feature, positioned at the polygon centroid and
+ * lifted to the top of its extruded column. Uses the short label when present
+ * (district numbers like "28" / borough short codes), else the full label.
+ */
+function buildLabels(fc: FeatureCollection<Geometry, MetricProps>): LabelDatum[] {
+  const out: LabelDatum[] = []
+  for (const f of fc.features) {
+    const geom = f.geometry
+    if (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon') continue
+    const text = (f.properties.short || f.properties.label || '').trim()
+    if (!text) continue
+    const [lng, lat] = polygonCentroid(geom as PolyGeom)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue
+    out.push({ position: [lng, lat, f.properties.elevation + LABEL_Z_OFFSET], text })
+  }
+  return out
+}
+
 export default function NYCWorkload3DDeck({
   units,
   values,
@@ -251,8 +320,10 @@ export default function NYCWorkload3DDeck({
         elevationScale: 1,
         getElevation: (f: MetricFeature) => f.properties.elevation,
         getFillColor: (f: MetricFeature) => fillFor(f.properties),
+        // Darker, subtle slate division lines make internal district boundaries
+        // readable without a separate heavy outer borough outline.
         getLineColor: (f: MetricFeature): Color =>
-          f.properties.key === activeKey ? [15, 23, 42, 255] : [255, 255, 255, 90],
+          f.properties.key === activeKey ? [15, 23, 42, 255] : [30, 41, 59, 130],
         getLineWidth: (f: MetricFeature) => (f.properties.key === activeKey ? 2 : 1),
         lineWidthUnits: 'pixels',
         // Soft lighting so the calm colors read with depth, not as flat blocks.
@@ -274,25 +345,36 @@ export default function NYCWorkload3DDeck({
     [fc, min, max, metric, activeKey, onHover, onSelect],
   )
 
-  // Borough outline overlay — stroked only, never filled or extruded, and not
-  // pickable so it can't intercept district selection or map rotation. Drawn
-  // above the extruded districts to keep borough shapes readable.
-  const boroughOutlineLayer = useMemo(
+  // Labels for the currently rendered geography (district numbers like "28", or
+  // borough short labels), one per feature, placed at the polygon centroid and
+  // lifted to the top of its extruded column. Built only from the live fc, so it
+  // tracks whatever geography level is in view. Non-pickable so it never blocks
+  // district selection or map rotation.
+  const labelData = useMemo<LabelDatum[]>(() => buildLabels(fc), [fc])
+
+  const labelLayer = useMemo(
     () =>
-      new GeoJsonLayer({
-        id: 'borough-boundary-outline',
-        data: BOROUGH_BOUNDARY_FC,
-        stroked: true,
-        filled: false,
-        extruded: false,
+      new TextLayer<LabelDatum>({
+        id: 'nyc-workload-3d-labels',
+        data: labelData,
         pickable: false,
-        getLineColor: [15, 23, 42, 180],
-        getLineWidth: 2,
-        lineWidthUnits: 'pixels',
-        lineWidthMinPixels: 1,
-        lineWidthMaxPixels: 3,
+        // [lng, lat, z] — z lifts the label just above the extruded column top.
+        getPosition: (d: LabelDatum) => d.position,
+        getText: (d: LabelDatum) => d.text,
+        getSize: 13,
+        sizeUnits: 'pixels',
+        getColor: [255, 255, 255, 255],
+        // Dark outline so white text stays legible over green/yellow/red fills.
+        outlineWidth: 2,
+        outlineColor: [15, 23, 42, 255],
+        fontSettings: { sdf: true },
+        fontWeight: 700,
+        getTextAnchor: 'middle',
+        getAlignmentBaseline: 'center',
+        billboard: true,
+        characterSet: 'auto',
       }),
-    [],
+    [labelData],
   )
 
   const getTooltip = (info: PickingInfo<MetricFeature>) => {
@@ -335,7 +417,7 @@ export default function NYCWorkload3DDeck({
         initialViewState={initialViewState}
         // Left-drag pans, right-drag / two-finger rotates and tilts.
         controller={{ dragRotate: true, touchRotate: true, doubleClickZoom: false }}
-        layers={[layer, boroughOutlineLayer]}
+        layers={[layer, labelLayer]}
         getTooltip={getTooltip}
         getCursor={({ isHovering }) => (isHovering ? 'pointer' : 'grab')}
         style={{ position: 'absolute', inset: '0' }}
