@@ -76,7 +76,10 @@ const ANTHROPIC_TIMEOUT_MS = 12_000
 // Configure with GROQ_API_KEY (required) and optionally GROQ_OFFICER_ASSISTANT_MODEL
 // to pick the open-source model; otherwise a sensible default is used.
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const GROQ_DEFAULT_MODEL = 'llama-3.3-70b-versatile'
+// Open-source GPT-OSS 20B on Groq — small and fast, available on this account.
+// Override with GROQ_OFFICER_ASSISTANT_MODEL to use another available model
+// (e.g. openai/gpt-oss-120b, llama-3.3-70b-versatile).
+const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b'
 const GROQ_MAX_TOKENS = 900
 const GROQ_TEMPERATURE = 0.2
 const GROQ_TIMEOUT_MS = 12_000
