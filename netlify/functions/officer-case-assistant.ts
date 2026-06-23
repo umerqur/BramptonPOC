@@ -27,8 +27,9 @@
 //
 // SECURITY
 // --------
-// ANTHROPIC_API_KEY, COHERE_API_KEY, and the Supabase service role key are read
-// from the Netlify environment and used ONLY inside this server-side function.
+// GROQ_API_KEY, ANTHROPIC_API_KEY, COHERE_API_KEY, and the Supabase service role
+// key are read from the Netlify environment and used ONLY inside this server-side
+// function (Groq is the preferred generation provider; see resolveProvider).
 // They are never sent to the browser, never exposed through a VITE_* variable,
 // and never logged. Do not create VITE_ copies of any of these. We log model
 // status codes only — never keys, never the full prompt. The only audit signal
@@ -68,6 +69,17 @@ const ANTHROPIC_VERSION = '2023-06-01'
 const ANTHROPIC_MAX_TOKENS = 900
 const ANTHROPIC_TEMPERATURE = 0.2
 const ANTHROPIC_TIMEOUT_MS = 12_000
+
+// Groq (OpenAI-compatible chat completions on their LPU hardware). Preferred for
+// the officer assistant: it serves open-source models very fast, which avoids the
+// slow/timeout behavior seen on the Anthropic path for this interactive screen.
+// Configure with GROQ_API_KEY (required) and optionally GROQ_OFFICER_ASSISTANT_MODEL
+// to pick the open-source model; otherwise a sensible default is used.
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
+const GROQ_DEFAULT_MODEL = 'llama-3.3-70b-versatile'
+const GROQ_MAX_TOKENS = 900
+const GROQ_TEMPERATURE = 0.2
+const GROQ_TIMEOUT_MS = 12_000
 
 /** Prompt caching is opt-in. It only ever caches the stable guardrail/system
  *  prompt (which embeds the JSON schema and decision-support rules); the
@@ -117,19 +129,32 @@ function checkAssistantRate(key: string): boolean {
 // ---------------------------------------------------------------------------
 
 type ProviderConfig =
+  | { kind: 'groq'; model: string; apiKey: string }
   | { kind: 'anthropic'; model: string; apiKey: string }
   | { kind: 'cohere'; model: string; apiKey: string }
 
 /**
  * Resolve which model provider generates the answer:
- *   1. Anthropic when ANTHROPIC_API_KEY and ANTHROPIC_OFFICER_ASSISTANT_MODEL
+ *   1. Groq (LPU, open-source models) when GROQ_API_KEY is set — preferred for
+ *      this interactive officer screen because it is fast and avoids the
+ *      slow/timeout behavior seen on the Anthropic path. Model id comes from
+ *      GROQ_OFFICER_ASSISTANT_MODEL, falling back to GROQ_DEFAULT_MODEL.
+ *   2. Otherwise Anthropic when ANTHROPIC_API_KEY and ANTHROPIC_OFFICER_ASSISTANT_MODEL
  *      are both set.
- *   2. Otherwise Cohere Command when COHERE_API_KEY and a Command model id are
+ *   3. Otherwise Cohere Command when COHERE_API_KEY and a Command model id are
  *      both set (the original behavior).
- *   3. Otherwise null — the handler returns the calm 503.
+ *   4. Otherwise null — the handler returns the calm 503.
  * This only affects generation; benchmark retrieval stays on Cohere.
  */
 function resolveProvider(): ProviderConfig | null {
+  const groqKey = process.env.GROQ_API_KEY
+  if (groqKey) {
+    return {
+      kind: 'groq',
+      model: process.env.GROQ_OFFICER_ASSISTANT_MODEL || GROQ_DEFAULT_MODEL,
+      apiKey: groqKey,
+    }
+  }
   const anthropicKey = process.env.ANTHROPIC_API_KEY
   const anthropicModel = process.env.ANTHROPIC_OFFICER_ASSISTANT_MODEL
   if (anthropicKey && anthropicModel) {
@@ -692,6 +717,42 @@ function parseResult(text: string, allowedCaseIds: Set<string>): AssistantResult
 // Provider calls — each returns the raw model text (the JSON object), or throws
 // ---------------------------------------------------------------------------
 
+/**
+ * Groq (OpenAI-compatible chat completions). Uses the SAME strict guardrail/
+ * system prompt as the other providers and forces a JSON object response so the
+ * structured contract is reliable. Small max output, low temperature, and a
+ * server-side timeout so a slow upstream never hangs the request.
+ */
+async function callGroq(model: string, apiKey: string, userMessage: string): Promise<string> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS)
+  try {
+    const res = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: PREAMBLE },
+          { role: 'user', content: userMessage },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: GROQ_TEMPERATURE,
+        max_tokens: GROQ_MAX_TOKENS,
+      }),
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`Groq returned status ${res.status}`)
+    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> }
+    return (data.choices?.[0]?.message?.content ?? '').trim()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Cohere Command (v2 chat). The original generation path, unchanged. */
 async function callCohere(model: string, apiKey: string, userMessage: string): Promise<string> {
   const res = await fetch(COHERE_CHAT_URL, {
@@ -776,8 +837,8 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'Method not allowed. Use POST.' }, 405)
   }
 
-  // Choose the generation provider (Anthropic preferred, Cohere fallback). Calm
-  // 503 when neither is wired up in this environment.
+  // Choose the generation provider (Groq preferred, then Anthropic, then Cohere).
+  // Calm 503 when none is wired up in this environment.
   const provider = resolveProvider()
   if (!provider) {
     return json({ error: 'Officer Case Assistant is not configured.' }, 503)
@@ -905,9 +966,11 @@ export default async function handler(req: Request): Promise<Response> {
   let text: string
   try {
     text =
-      provider.kind === 'anthropic'
-        ? await callAnthropic(provider.model, provider.apiKey, userMessage)
-        : await callCohere(provider.model, provider.apiKey, userMessage)
+      provider.kind === 'groq'
+        ? await callGroq(provider.model, provider.apiKey, userMessage)
+        : provider.kind === 'anthropic'
+          ? await callAnthropic(provider.model, provider.apiKey, userMessage)
+          : await callCohere(provider.model, provider.apiKey, userMessage)
   } catch (err) {
     // Log status/message only — never the key or the full prompt.
     console.error(`officer-case-assistant: ${provider.kind} request failed:`, errorText(err))
