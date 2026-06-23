@@ -1,9 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
-  getNYCBoroughBoundaries,
-  getNYCCouncilDistrictBoundaries,
-  getNYCMapMetricsByBorough,
-  getNYCMapMetricsByCouncilDistrict,
+  getNYCBoroughBoundariesCached,
+  getNYCCouncilDistrictBoundariesCached,
+  getNYCMapMetricsByBoroughCached,
+  getNYCMapMetricsByCouncilDistrictCached,
 } from '../../services/municipalServiceRequests'
 import { calmWorkloadCss } from './workloadColor'
 import {
@@ -91,7 +91,7 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
     helper: 'Operational view by NYC council district.',
     cardLabel: 'Highest council district',
     async loadUnits() {
-      const districts = await getNYCCouncilDistrictBoundaries()
+      const districts = await getNYCCouncilDistrictBoundariesCached()
       return districts.map((d) => ({
         id: String(d.id),
         key: String(d.council_district),
@@ -101,7 +101,7 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
       }))
     },
     async loadMetrics() {
-      const rows = await getNYCMapMetricsByCouncilDistrict()
+      const rows = await getNYCMapMetricsByCouncilDistrictCached()
       return rows.map((r) => toAreaMetric(r.area, `District ${r.area}`, r))
     },
   },
@@ -111,7 +111,7 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
     helper: 'Executive overview by NYC borough.',
     cardLabel: 'Highest borough',
     async loadUnits() {
-      const boroughs = await getNYCBoroughBoundaries()
+      const boroughs = await getNYCBoroughBoundariesCached()
       return boroughs.map((b, idx) => ({
         id: String(b.id ?? idx),
         key: boroughKey(b.borough_name),
@@ -121,7 +121,7 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
       }))
     },
     async loadMetrics() {
-      const rows = await getNYCMapMetricsByBorough()
+      const rows = await getNYCMapMetricsByBoroughCached()
       return rows.map((r) => toAreaMetric(boroughKey(r.area), r.area, r))
     },
   },
@@ -162,30 +162,30 @@ export default function NYCWorkloadMapPanel({
     setRows([])
     setUnavailable(false)
 
-    adapter
-      .loadUnits()
-      .then((data) => active && setUnits(data))
-      .catch((err: unknown) => {
-        // The geometry is bundled, so this should not fail; log and continue.
+    // Load geometry + metric aggregates together so a mode switch is one combined
+    // load instead of two separate chains. Both are cached for the session, so
+    // repeat visits resolve instantly. The geometry loader catches its own error
+    // (bundled data — should not fail) so a metrics failure never blanks the map
+    // geometry, and a metrics failure still surfaces the unavailable state. No fake
+    // fallback is ever substituted.
+    Promise.all([
+      adapter.loadUnits().catch((err: unknown) => {
         console.error('Failed to load NYC area boundaries:', err)
-        if (active) setUnits([])
-      })
-
-    adapter
-      .loadMetrics()
-      .then((data) => {
-        if (!active) return
-        setRows(data)
-        setUnavailable(data.length === 0)
-      })
-      .catch((err: unknown) => {
-        // No fake fallback — surface the unavailable state instead.
-        console.error('Failed to load NYC map metrics from Supabase:', err)
-        if (active) {
-          setRows([])
-          setUnavailable(true)
-        }
-      })
+        return [] as AreaUnit[]
+      }),
+      adapter.loadMetrics().then(
+        (data) => ({ ok: true as const, data }),
+        (err: unknown) => {
+          console.error('Failed to load NYC map metrics from Supabase:', err)
+          return { ok: false as const, data: [] as AreaMetricValue[] }
+        },
+      ),
+    ]).then(([unitData, metrics]) => {
+      if (!active) return
+      setUnits(unitData)
+      setRows(metrics.data)
+      setUnavailable(!metrics.ok || metrics.data.length === 0)
+    })
 
     return () => {
       active = false

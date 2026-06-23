@@ -715,6 +715,66 @@ export async function getNYCMapMetricsByBorough(): Promise<NYCMapMetricRow[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Session-scoped caches for the NYC workload map
+// ---------------------------------------------------------------------------
+//
+// The workload map reloads its geometry + metric aggregates every time the user
+// switches geography tabs, toggles 2D/3D, or returns to Insights. The geometry is
+// bundled and stable, and the metric views are small aggregate reads, so we cache
+// each as a module-scoped promise for the browser session — switching tabs feels
+// instant after the first load. A FAILED request clears its promise so the next
+// call retries (we never cache an error forever). No external cache library.
+
+let boroughBoundariesPromise: Promise<NYCBoroughBoundary[]> | null = null
+let councilDistrictBoundariesPromise: Promise<NYCCouncilDistrictBoundary[]> | null = null
+let boroughMapMetricsPromise: Promise<NYCMapMetricRow[]> | null = null
+let councilDistrictMapMetricsPromise: Promise<NYCMapMetricRow[]> | null = null
+
+/** Cached NYC borough boundaries (bundled geometry). */
+export async function getNYCBoroughBoundariesCached(): Promise<NYCBoroughBoundary[]> {
+  if (!boroughBoundariesPromise) {
+    boroughBoundariesPromise = getNYCBoroughBoundaries().catch((err) => {
+      boroughBoundariesPromise = null
+      throw err
+    })
+  }
+  return boroughBoundariesPromise
+}
+
+/** Cached NYC council district boundaries (bundled geometry). */
+export async function getNYCCouncilDistrictBoundariesCached(): Promise<NYCCouncilDistrictBoundary[]> {
+  if (!councilDistrictBoundariesPromise) {
+    councilDistrictBoundariesPromise = getNYCCouncilDistrictBoundaries().catch((err) => {
+      councilDistrictBoundariesPromise = null
+      throw err
+    })
+  }
+  return councilDistrictBoundariesPromise
+}
+
+/** Cached NYC borough map metrics (small aggregate read). */
+export async function getNYCMapMetricsByBoroughCached(): Promise<NYCMapMetricRow[]> {
+  if (!boroughMapMetricsPromise) {
+    boroughMapMetricsPromise = getNYCMapMetricsByBorough().catch((err) => {
+      boroughMapMetricsPromise = null
+      throw err
+    })
+  }
+  return boroughMapMetricsPromise
+}
+
+/** Cached NYC council district map metrics (small aggregate read). */
+export async function getNYCMapMetricsByCouncilDistrictCached(): Promise<NYCMapMetricRow[]> {
+  if (!councilDistrictMapMetricsPromise) {
+    councilDistrictMapMetricsPromise = getNYCMapMetricsByCouncilDistrict().catch((err) => {
+      councilDistrictMapMetricsPromise = null
+      throw err
+    })
+  }
+  return councilDistrictMapMetricsPromise
+}
+
+// ---------------------------------------------------------------------------
 // Operations Workflow Console
 // ---------------------------------------------------------------------------
 
