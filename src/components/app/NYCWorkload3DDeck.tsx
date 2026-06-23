@@ -243,17 +243,17 @@ function polygonCentroid(geom: PolyGeom): [number, number] {
   return best ? ringCentroid(best) : [NaN, NaN]
 }
 
-// Borough labels float above the tallest possible column so they read as area
-// headers over the whole borough, regardless of how districts are extruded.
-const BOROUGH_LABEL_Z = MAX_HEIGHT + 1200
-
-// Always-on borough orientation labels (MAN, BX, BK, QNS, SI). Built once from
-// the bundled borough geometry, so the user keeps geographic context even when
-// the choropleth is in district mode and individual districts are extruded.
-const BOROUGH_LABELS: LabelDatum[] = NYC_BOROUGH_BOUNDARIES.map((b) => {
-  const [lng, lat] = polygonCentroid(b.geojson_geometry as PolyGeom)
-  return { position: [lng, lat, BOROUGH_LABEL_Z] as [number, number, number], text: b.short_label }
-}).filter((d) => Number.isFinite(d.position[0]) && Number.isFinite(d.position[1]))
+// Borough outline overlay — apparent (but not heavy black) division lines that
+// trace the borough boundaries on the ground plane, so borough divisions stay
+// readable without bold text labels sitting over the map. Built once.
+const BOROUGH_BOUNDARY_FC: FeatureCollection<Geometry, { name: string }> = {
+  type: 'FeatureCollection',
+  features: NYC_BOROUGH_BOUNDARIES.map((b) => ({
+    type: 'Feature',
+    geometry: b.geojson_geometry,
+    properties: { name: b.borough_name },
+  })),
+}
 
 /**
  * District labels, decluttered: instead of labelling all ~51 council districts,
@@ -380,29 +380,24 @@ export default function NYCWorkload3DDeck({
     [fc, min, max, metric, activeKey, onHover, onSelect],
   )
 
-  // Always-on borough orientation labels (MAN, BX, …). Dark text with a white
-  // halo so they read as area headers over any fill colour. depthTest is off so
-  // they're never occluded by the extruded district columns. Non-pickable.
-  const boroughLabelLayer = useMemo(
+  // Borough boundary outline — an apparent (but not heavy black) slate division
+  // line tracing the borough borders on the ground plane, so borough divisions
+  // stay readable without bold text labels over the map. Stroked only, never
+  // filled or extruded, and non-pickable so it can't intercept clicks/rotation.
+  const boroughOutlineLayer = useMemo(
     () =>
-      new TextLayer<LabelDatum>({
-        id: 'nyc-workload-3d-borough-labels',
-        data: BOROUGH_LABELS,
+      new GeoJsonLayer({
+        id: 'nyc-workload-3d-borough-outline',
+        data: BOROUGH_BOUNDARY_FC,
+        stroked: true,
+        filled: false,
+        extruded: false,
         pickable: false,
-        getPosition: (d: LabelDatum) => d.position,
-        getText: (d: LabelDatum) => d.text,
-        getSize: 15,
-        sizeUnits: 'pixels',
-        getColor: [15, 23, 42, 255],
-        outlineWidth: 3,
-        outlineColor: [255, 255, 255, 235],
-        fontSettings: { sdf: true },
-        fontWeight: 800,
-        getTextAnchor: 'middle',
-        getAlignmentBaseline: 'center',
-        billboard: true,
-        characterSet: 'auto',
-        parameters: { depthCompare: 'always' },
+        getLineColor: [71, 85, 105, 205],
+        getLineWidth: 1.6,
+        lineWidthUnits: 'pixels',
+        lineWidthMinPixels: 1,
+        lineWidthMaxPixels: 2.5,
       }),
     [],
   )
@@ -480,7 +475,7 @@ export default function NYCWorkload3DDeck({
         initialViewState={initialViewState}
         // Left-drag pans, right-drag / two-finger rotates and tilts.
         controller={{ dragRotate: true, touchRotate: true, doubleClickZoom: false }}
-        layers={[layer, boroughLabelLayer, districtLabelLayer]}
+        layers={[layer, boroughOutlineLayer, districtLabelLayer]}
         getTooltip={getTooltip}
         getCursor={({ isHovering }) => (isHovering ? 'pointer' : 'grab')}
         style={{ position: 'absolute', inset: '0' }}
