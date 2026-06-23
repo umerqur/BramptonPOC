@@ -32,9 +32,8 @@ export default function LandingPage() {
               AI Assisted Municipal Enforcement Intake &amp; Closure POC
             </h1>
             <p className="mt-6 max-w-xl text-lg text-white/85">
-              A proof of concept showing how AI assisted intake, triage, and closure support can help municipal staff
-              turn resident complaints into structured service requests, review workflows, field follow up, and clearer
-              closure updates.
+              A Brampton POC showing how AI assisted intake and staff review can turn resident complaints into structured
+              cases, faster triage, and clearer closure responses.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Link
