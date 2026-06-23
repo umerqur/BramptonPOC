@@ -9,6 +9,7 @@ import {
   getInsightsDepartmentWorkload,
   getInsightsMonthlyTrend,
   getInsightsChannelMix,
+  getInsightsClosureDurationDistribution,
   getInsightsSourceMeta,
   isChannelMixMeaningful,
   formatPlainDate,
@@ -20,6 +21,7 @@ import {
   type InsightsDepartmentWorkload,
   type MonthlyTrendPoint,
   type ChannelMixRow,
+  type ClosureDurationBucket,
 } from '../../services/insightsDashboard'
 import {
   getNycCaseExplorerPage,
@@ -315,6 +317,7 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
         <OpenStatusMixDonut />
       </div>
       <TrendSection onExplore={onExplore} />
+      <ClosureDurationDistribution />
       <ClosureScatter onExplore={onExplore} />
       <ClosureBottlenecks onExplore={onExplore} />
       {/* District workload pressure (leaderboard) needs full width so the bars
@@ -665,6 +668,54 @@ function ChannelMixDonut() {
         </div>
       )}
       {data && meaningful && <Donut slices={slices} />}
+    </SectionShell>
+  )
+}
+
+// --- Closure time distribution --------------------------------------------
+
+/**
+ * Closure time distribution — a simple horizontal bar distribution of how long
+ * closed historical requests took to close, from same-day closures to the long
+ * 6-month-plus tail. Reads a precomputed aggregate view (never raw rows). This
+ * is descriptive historical context, not a prediction.
+ */
+function ClosureDurationDistribution() {
+  const { data, loading, error } = useLive<ClosureDurationBucket[]>(getInsightsClosureDurationDistribution)
+  const { rows, total, max } = useMemo(() => {
+    const all = data ?? []
+    const grand = all.reduce((n, r) => n + r.total_cases, 0)
+    return { rows: all, total: grand, max: Math.max(1, ...all.map((r) => r.total_cases)) }
+  }, [data])
+  return (
+    <SectionShell
+      name="the closure time distribution"
+      title="Closure time distribution"
+      subtitle="How long historical requests took to close. This shows the long tail of slower cases, not a prediction."
+      loading={loading}
+      error={error}
+      empty={data?.length === 0 || total === 0}
+    >
+      {data && total > 0 && (
+        <ul className="space-y-2.5">
+          {rows.map((row) => (
+            <li key={row.bucket_order}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="truncate text-ink">{row.closure_bucket}</span>
+                <span className="shrink-0 tabular-nums text-ink-muted">
+                  {fmtInt(row.total_cases)} <span className="text-ink-subtle">· {fmtPct(row.total_cases, total)}</span>
+                </span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-accent-500"
+                  style={{ width: `${Math.max(2, (row.total_cases / max) * 100)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </SectionShell>
   )
 }

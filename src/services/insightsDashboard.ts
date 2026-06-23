@@ -23,6 +23,7 @@ const INSIGHTS_AREA_BOTTLENECKS_VIEW = 'v_insights_area_bottlenecks'
 const INSIGHTS_DEPARTMENT_WORKLOAD_VIEW = 'v_insights_department_workload'
 const INSIGHTS_MONTHLY_TREND_VIEW = 'v_insights_monthly_trend'
 const INSIGHTS_CHANNEL_MIX_VIEW = 'v_insights_channel_mix'
+const INSIGHTS_CLOSURE_DURATION_DISTRIBUTION_VIEW = 'v_insights_closure_duration_distribution'
 
 function requireClient() {
   if (!isSupabaseConfigured || !supabase) {
@@ -287,6 +288,36 @@ export async function getInsightsStatusMix(): Promise<StatusMixRow[]> {
   if (error) throw error
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     status: (r.status as string) || 'Unknown',
+    total_cases: num(r.total_cases),
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// 9. Closure time distribution
+// ---------------------------------------------------------------------------
+
+export type ClosureDurationBucket = {
+  closure_bucket: string
+  bucket_order: number
+  total_cases: number
+}
+
+/**
+ * Closure time distribution — closed historical requests bucketed by how long
+ * they took to close, ordered fastest → slowest (bucket_order). This is
+ * descriptive historical context that shows the long tail of slower cases, not
+ * a prediction. Reads the precomputed aggregate view, never raw case rows.
+ */
+export async function getInsightsClosureDurationDistribution(): Promise<ClosureDurationBucket[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(INSIGHTS_CLOSURE_DURATION_DISTRIBUTION_VIEW)
+    .select('closure_bucket, bucket_order, total_cases')
+    .order('bucket_order', { ascending: true })
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    closure_bucket: (r.closure_bucket as string) || '—',
+    bucket_order: num(r.bucket_order),
     total_cases: num(r.total_cases),
   }))
 }
