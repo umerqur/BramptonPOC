@@ -11,6 +11,9 @@ import {
   getInsightsChannelMix,
   getInsightsClosureDurationDistribution,
   getInsightsSourceMeta,
+  getSyntheticFieldActivitySummary,
+  getSyntheticFieldActivityByBorough,
+  getSyntheticFieldActivityByClosureBucket,
   isChannelMixMeaningful,
   formatPlainDate,
   type InsightsSourceMeta,
@@ -22,6 +25,9 @@ import {
   type MonthlyTrendPoint,
   type ChannelMixRow,
   type ClosureDurationBucket,
+  type SyntheticFieldActivitySummary,
+  type SyntheticFieldActivityByBorough,
+  type SyntheticFieldActivityByClosureBucket,
 } from '../../services/insightsDashboard'
 import {
   getNycCaseExplorerPage,
@@ -202,7 +208,11 @@ export default function InsightsDashboard() {
 
   return (
     <div className="mt-6">
-      <div role="tablist" aria-label="Insights sections" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+      <div
+        role="tablist"
+        aria-label="Insights sections"
+        className="-mx-1 grid grid-cols-2 gap-2 px-1 pb-1 sm:flex sm:gap-2 sm:overflow-x-auto"
+      >
         {INSIGHTS_TABS.map((t) => (
           <InsightsTabCard key={t.id} tab={t} active={tab === t.id} onClick={() => setTab(t.id)} />
         ))}
@@ -276,10 +286,10 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`group relative flex min-w-[168px] flex-1 items-start gap-2.5 overflow-hidden rounded-xl border px-3.5 py-2.5 text-left transition ${
+      className={`group relative flex min-w-0 flex-1 items-start gap-2.5 overflow-hidden rounded-xl border px-3.5 py-2.5 text-left transition sm:min-w-[168px] ${
         active
-          ? 'border-slate-200 bg-white shadow-sm ring-1 ring-slate-100'
-          : 'border-transparent bg-slate-50/70 hover:bg-slate-100'
+          ? 'border-accent-300 bg-white shadow-sm ring-1 ring-accent-200'
+          : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-100'
       }`}
     >
       {/* Accent top border marks the active mode. */}
@@ -288,6 +298,7 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
         {tab.icon}
       </span>
       <span className="min-w-0">
+        {/* Title stays fully visible (no truncation); subtitle may truncate. */}
         <span className={`block text-sm font-semibold ${active ? 'text-navy-900' : 'text-ink-muted group-hover:text-navy-900'}`}>
           {tab.title}
         </span>
@@ -309,6 +320,7 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
   return (
     <div className="mt-6 space-y-6">
       <OperationalSnapshot />
+      <SyntheticFieldActivity />
       <NYCWorkloadMapPanel onSelectArea={(mode, value) => setSelectedArea({ mode, value })} />
       <BottleneckDrilldownPanel selectedArea={selectedArea} onExplore={onExplore} />
       <ComplaintTypeRanked onExplore={onExplore} />
@@ -487,6 +499,186 @@ function KpiCard({
       <div className={`mt-1.5 tabular-nums text-navy-900 ${valueClass}`}>{value}</div>
       {detail && <div className="mt-1 text-xs font-medium text-ink-muted">{detail}</div>}
       <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
+  )
+}
+
+// --- Synthetic field activity simulation -----------------------------------
+
+/**
+ * Synthetic field activity simulation — generated operational activity derived
+ * from NYC 311 benchmark timing and status patterns. This is NOT Brampton
+ * operational patrol data; it demonstrates how patrol logs, officer activity, and
+ * closure bottlenecks could be visualized once real Brampton operational data is
+ * connected. Reads four small precomputed aggregate views, never raw rows.
+ */
+function SyntheticFieldActivity() {
+  const summary = useLive<SyntheticFieldActivitySummary>(getSyntheticFieldActivitySummary)
+  const s = summary.data
+
+  const cardValue = (n: number | null | undefined, fmt: (n: number) => string) =>
+    summary.loading ? '…' : summary.error || n == null ? '—' : fmt(n)
+
+  return (
+    <section className="card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-navy-900">Synthetic field activity simulation</h2>
+          <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-ink-subtle">
+            This is generated operational activity from NYC 311 benchmark timing and status patterns. It is not Brampton
+            operational patrol data. It is used to demonstrate how patrol logs, officer activity, and closure bottlenecks
+            could be visualized once Brampton operational data is connected.
+          </p>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-violet-700">
+          Simulated
+        </span>
+      </div>
+
+      {summary.error ? (
+        <div className="mt-4">
+          <SectionError name="the synthetic field activity summary" error={summary.error} />
+        </div>
+      ) : (
+        <>
+          {/* On portrait mobile: 2 columns × 2 rows; 4-wide on large screens. */}
+          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <SyntheticCard label="Sampled cases" value={cardValue(s?.sampled_cases, fmtInt)} />
+            <SyntheticCard label="Planned activities" value={cardValue(s?.planned_field_activities, fmtInt)} />
+            <SyntheticCard label="Active cases" value={cardValue(s?.active_style_cases, fmtInt)} />
+            <SyntheticCard label="Avg intensity" value={cardValue(s?.avg_activity_intensity, (n) => n.toFixed(2))} />
+          </div>
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            <SyntheticByBorough />
+            <SyntheticByClosureBucket />
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+/** One compact synthetic-activity KPI tile. Short label so 2-up mobile cards stay readable. */
+function SyntheticCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-violet-700/80">{label}</div>
+      <div className="mt-1.5 text-2xl font-bold tabular-nums text-navy-900">{value}</div>
+    </div>
+  )
+}
+
+/** Horizontal bar list of planned field activities by borough. */
+function SyntheticByBorough() {
+  const { data, loading, error } = useLive<SyntheticFieldActivityByBorough[]>(getSyntheticFieldActivityByBorough)
+  const { rows, max } = useMemo(() => {
+    const all = data ?? []
+    return { rows: all, max: Math.max(1, ...all.map((r) => r.planned_field_activities)) }
+  }, [data])
+  return (
+    <SyntheticPanel
+      name="synthetic field activity by borough"
+      title="Field activity by borough"
+      loading={loading}
+      error={error}
+      empty={data?.length === 0}
+    >
+      {data && data.length > 0 && (
+        <ul className="space-y-2.5">
+          {rows.map((row) => (
+            <li key={row.borough}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="truncate text-ink">{row.borough}</span>
+                <span className="shrink-0 tabular-nums text-ink-muted">{fmtInt(row.planned_field_activities)}</span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-violet-400"
+                  style={{ width: `${Math.max(2, (row.planned_field_activities / max) * 100)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SyntheticPanel>
+  )
+}
+
+/** Horizontal bar list of planned field activities by closure bucket (ordered). */
+function SyntheticByClosureBucket() {
+  const { data, loading, error } = useLive<SyntheticFieldActivityByClosureBucket[]>(
+    getSyntheticFieldActivityByClosureBucket,
+  )
+  const { rows, max } = useMemo(() => {
+    const all = data ?? []
+    return { rows: all, max: Math.max(1, ...all.map((r) => r.planned_field_activities)) }
+  }, [data])
+  return (
+    <SyntheticPanel
+      name="synthetic field activity by closure bucket"
+      title="Field activity by closure bucket"
+      loading={loading}
+      error={error}
+      empty={data?.length === 0}
+    >
+      {data && data.length > 0 && (
+        <ul className="space-y-2.5">
+          {rows.map((row) => (
+            <li key={row.bucket_order}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="truncate text-ink">{row.closure_bucket}</span>
+                <span className="shrink-0 tabular-nums text-ink-muted">{fmtInt(row.planned_field_activities)}</span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-violet-400"
+                  style={{ width: `${Math.max(2, (row.planned_field_activities / max) * 100)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SyntheticPanel>
+  )
+}
+
+/** Lightweight panel wrapper for the two synthetic-activity bar lists. */
+function SyntheticPanel({
+  name,
+  title,
+  loading,
+  error,
+  empty,
+  children,
+}: {
+  name: string
+  title: string
+  loading: boolean
+  error: string | null
+  empty?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-subtle">{title}</h3>
+      <div className="mt-3">
+        {error ? (
+          <SectionError name={name} error={error} />
+        ) : loading ? (
+          <div className="animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">
+            Loading live data…
+          </div>
+        ) : empty ? (
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-5 text-center text-sm text-ink-subtle">
+            No records available.
+          </div>
+        ) : (
+          children
+        )}
+      </div>
     </div>
   )
 }

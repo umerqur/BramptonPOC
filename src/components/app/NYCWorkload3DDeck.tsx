@@ -7,6 +7,19 @@ import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon } from
 import { calmWorkloadRgb } from './workloadColor'
 import type { AreaUnit } from './NYCWorkloadMapPanel'
 import { formatMetric, metricConfig, metricRawValue, type AreaMetricValue, type MapMetric } from './mapMetrics'
+import { NYC_BOROUGH_BOUNDARIES } from '../../data/nycBoroughBoundaries'
+
+// Bundled NYC borough outlines, drawn as a non-extruded stroked overlay on top of
+// the extruded districts so the borough shapes stay legible even when council
+// districts are raised. Built once — the geometry never changes at runtime.
+const BOROUGH_BOUNDARY_FC: FeatureCollection<Geometry, { name: string }> = {
+  type: 'FeatureCollection',
+  features: NYC_BOROUGH_BOUNDARIES.map((b) => ({
+    type: 'Feature',
+    geometry: b.geojson_geometry,
+    properties: { name: b.borough_name },
+  })),
+}
 
 // Professional 3D workload view built on deck.gl's GeoJsonLayer (extruded
 // polygons). It renders the real NYC borough / council-district GeoJSON, extruded
@@ -261,6 +274,27 @@ export default function NYCWorkload3DDeck({
     [fc, min, max, metric, activeKey, onHover, onSelect],
   )
 
+  // Borough outline overlay — stroked only, never filled or extruded, and not
+  // pickable so it can't intercept district selection or map rotation. Drawn
+  // above the extruded districts to keep borough shapes readable.
+  const boroughOutlineLayer = useMemo(
+    () =>
+      new GeoJsonLayer({
+        id: 'borough-boundary-outline',
+        data: BOROUGH_BOUNDARY_FC,
+        stroked: true,
+        filled: false,
+        extruded: false,
+        pickable: false,
+        getLineColor: [15, 23, 42, 180],
+        getLineWidth: 2,
+        lineWidthUnits: 'pixels',
+        lineWidthMinPixels: 1,
+        lineWidthMaxPixels: 3,
+      }),
+    [],
+  )
+
   const getTooltip = (info: PickingInfo<MetricFeature>) => {
     const p = info.object?.properties
     if (!p) return null
@@ -301,7 +335,7 @@ export default function NYCWorkload3DDeck({
         initialViewState={initialViewState}
         // Left-drag pans, right-drag / two-finger rotates and tilts.
         controller={{ dragRotate: true, touchRotate: true, doubleClickZoom: false }}
-        layers={[layer]}
+        layers={[layer, boroughOutlineLayer]}
         getTooltip={getTooltip}
         getCursor={({ isHovering }) => (isHovering ? 'pointer' : 'grab')}
         style={{ position: 'absolute', inset: '0' }}
