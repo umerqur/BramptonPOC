@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
   getInsightsComplaintTypeVolume,
   getInsightsClosureBottlenecks,
@@ -315,6 +316,10 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
 function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   return (
     <div className="mt-6 space-y-6">
+      {/* Geographic heat map of service-request workload — kept as the leading
+          analytic. (The synthetic field-activity cards and the misleading
+          Operational Snapshot were removed; the heat map itself stays.) */}
+      <NYCWorkloadMapPanel />
       <ComplaintTypeRanked onExplore={onExplore} />
       <div className="grid gap-6 lg:grid-cols-2">
         <ChannelMixDonut />
