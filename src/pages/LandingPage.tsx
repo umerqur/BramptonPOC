@@ -23,18 +23,25 @@ export default function LandingPage() {
         />
         <div className="container-page py-24 lg:py-32">
           <div className="max-w-2xl">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-white">
+            {/* The official Brampton use-case name stays visible as an eyebrow,
+                while the hero title reads as a plain-language description. */}
+            <p className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-white/70">
               Proactive Enforcement Response
+            </p>
+            <h1 className="mt-3 text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-white">
+              AI Assisted Municipal Enforcement Intake &amp; Closure POC
             </h1>
             <p className="mt-6 max-w-xl text-lg text-white/85">
-              A proof of concept showing how a resident complaint moves from intake to staff review and closure update.
+              A proof of concept showing how AI assisted intake, triage, and closure support can help municipal staff
+              turn resident complaints into structured service requests, review workflows, field follow up, and clearer
+              closure updates.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Link
                 to="/resident/new-request"
                 className="btn bg-white text-navy-900 hover:bg-white/90 focus:ring-offset-navy-900"
               >
-                File a complaint
+                Create demo request
               </Link>
               <Link
                 to="/login"
