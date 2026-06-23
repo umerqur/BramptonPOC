@@ -43,6 +43,16 @@ import {
   type OpenStatusMixRow,
   type OpenQueueSummary,
 } from '../../services/caseExplorer'
+import {
+  getWorkloadByOfficerUnit,
+  getWorkloadByDistrict,
+  getWorkloadByClosureBucket,
+  getWorkloadByComplaintType,
+  type OfficerUnitWorkload,
+  type DistrictWorkload,
+  type ClosureBucketWorkload,
+  type ComplaintTypeWorkload,
+} from '../../services/stressTesting'
 
 // Insights — operational workload intelligence over the New York City 311 public
 // service request dataset. Three tabs: Overview (map, KPIs, charts), Case
@@ -1180,6 +1190,200 @@ const isHighTier = (tier: string | null) => (tier ?? '').trim().toLowerCase() ==
  * and review sequencing. It never predicts enforcement outcomes.
  */
 function SimulationLab() {
+  // Primary view: synthetic field-workload aggregates. Each synthetic case maps
+  // to one officer unit / district, so the officer-unit partition is the
+  // canonical basis for the headline totals.
+  const officerUnits = useLive<OfficerUnitWorkload[]>(getWorkloadByOfficerUnit)
+  const districts = useLive<DistrictWorkload[]>(getWorkloadByDistrict)
+  const closureBuckets = useLive<ClosureBucketWorkload[]>(getWorkloadByClosureBucket)
+  const complaintTypes = useLive<ComplaintTypeWorkload[]>(getWorkloadByComplaintType)
+
+  const units = useMemo(() => officerUnits.data ?? [], [officerUnits.data])
+  const totalHours = useMemo(() => units.reduce((a, u) => a + u.estimated_hours, 0), [units])
+  const totalCases = useMemo(() => units.reduce((a, u) => a + u.case_count, 0), [units])
+  const totalSupervisor = useMemo(() => units.reduce((a, u) => a + u.supervisor_review_count, 0), [units])
+  const topUnit = units[0] ?? null // views arrive ordered by estimated_hours desc
+
+  const workloadLoading = officerUnits.loading
+  const workloadUnavailable = !officerUnits.loading && (officerUnits.error != null || units.length === 0)
+
+  return (
+    <div className="mt-6 space-y-6">
+      {/* Primary banner — frames the whole view as synthetic planning data. */}
+      <section className="card overflow-hidden">
+        <div className="border-b border-slate-200 bg-navy-900 px-5 py-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-white">Synthetic workload simulation</h2>
+            <span className="inline-flex items-center rounded-full bg-amber-400/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-inset ring-amber-400/30">
+              Benchmark based simulation
+            </span>
+          </div>
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-navy-100">
+            This view uses synthetic patrol activity generated from public NYC 311 benchmark patterns. It is for capacity
+            planning and stress testing only, not officer performance scoring or enforcement decisions.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {['Synthetic workload', 'Planning estimate', 'Decision support only', 'Not Brampton live workload'].map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-navy-100 ring-1 ring-inset ring-white/15"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-5 py-5">
+          {workloadLoading ? (
+            <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">
+              Loading synthetic workload…
+            </div>
+          ) : workloadUnavailable ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+              <div className="font-semibold">Synthetic workload data unavailable.</div>
+              <div className="mt-0.5">
+                The synthetic patrol workload aggregates could not be loaded. No planning estimates are shown rather than
+                inventing numbers.
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <SimCard label="Estimated field hours" value={fmtInt(Math.round(totalHours))} helper="Synthetic planning estimate across all units" />
+              <SimCard label="Cases with synthetic field activity" value={fmtInt(totalCases)} helper="Benchmark cases carrying synthetic logs" />
+              <SimCard label="Supervisor review count" value={fmtInt(totalSupervisor)} helper="Synthetic activities flagged for review" />
+              <SimCard
+                label="Top workload unit"
+                value={topUnit ? topUnit.officer_unit : '—'}
+                helper={topUnit ? `${fmtInt(Math.round(topUnit.estimated_hours))} est. hours (synthetic)` : 'No units available'}
+              />
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* 1. Officer workload */}
+      <WorkloadSection
+        title="Officer workload"
+        subtitle="Synthetic estimated field hours by officer unit. Planning estimate, not performance scoring."
+        state={officerUnits}
+        rows={units}
+        labelOf={(r) => r.officer_unit}
+      />
+
+      {/* 2. District pressure */}
+      <WorkloadSection
+        title="District pressure"
+        subtitle="Synthetic workload concentration by district or area. Decision support only."
+        state={districts}
+        rows={districts.data ?? []}
+        labelOf={(r) => r.district_or_area}
+      />
+
+      {/* 3. Closure bucket pressure */}
+      <WorkloadSection
+        title="Closure bucket pressure"
+        subtitle="Where slow-closing cases concentrate synthetic follow-up workload."
+        state={closureBuckets}
+        rows={closureBuckets.data ?? []}
+        labelOf={(r) => r.closure_bucket}
+      />
+
+      {/* 4. Complaint type workload */}
+      <WorkloadSection
+        title="Complaint type workload"
+        subtitle="Which complaint types generate the most synthetic field workload."
+        state={complaintTypes}
+        rows={complaintTypes.data ?? []}
+        labelOf={(r) => r.complaint_type}
+      />
+
+      {/* Secondary: the original deterministic backlog-clearance calculator. */}
+      <CapacityCalculator />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Ranked synthetic workload section (compact table, not a heavy chart)
+// ---------------------------------------------------------------------------
+
+type WorkloadRow = OfficerUnitWorkload | DistrictWorkload | ClosureBucketWorkload | ComplaintTypeWorkload
+
+function WorkloadSection<T extends WorkloadRow>({
+  title,
+  subtitle,
+  state,
+  rows,
+  labelOf,
+}: {
+  title: string
+  subtitle: string
+  state: LiveState<T[]>
+  rows: T[]
+  labelOf: (row: T) => string
+}) {
+  // Rank by estimated field hours (rows arrive ordered, but be defensive).
+  const ranked = useMemo(() => [...rows].sort((a, b) => b.estimated_hours - a.estimated_hours).slice(0, 12), [rows])
+  const maxHours = ranked.length ? Math.max(...ranked.map((r) => r.estimated_hours), 1) : 1
+
+  return (
+    <section className="card p-5">
+      <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
+      <p className="mt-0.5 text-[11px] text-ink-subtle">{subtitle}</p>
+
+      {state.loading ? (
+        <div className="mt-4 animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading…</div>
+      ) : state.error || ranked.length === 0 ? (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+          Synthetic workload data unavailable for this section.
+        </div>
+      ) : (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                <th className="py-2 pr-3">#</th>
+                <th className="py-2 pr-3">{title.replace(' workload', '').replace(' pressure', '')}</th>
+                <th className="py-2 pr-3 text-right">Est. hours</th>
+                <th className="py-2 pr-3 text-right">Logs</th>
+                <th className="py-2 pr-3 text-right">Cases</th>
+                <th className="py-2 text-right">Supervisor review</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranked.map((r, i) => (
+                <tr key={labelOf(r) + i} className="border-b border-slate-100 last:border-0">
+                  <td className="py-2 pr-3 text-ink-subtle tabular-nums">{i + 1}</td>
+                  <td className="py-2 pr-3">
+                    <div className="font-medium text-navy-900">{labelOf(r)}</div>
+                    {/* Subtle inline rank bar — relative to the section's top unit. */}
+                    <div className="mt-1 h-1 w-full max-w-[180px] overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-accent-400"
+                        style={{ width: `${Math.max(3, Math.round((r.estimated_hours / maxHours) * 100))}%` }}
+                      />
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3 text-right font-semibold tabular-nums text-navy-900">{fmtInt(Math.round(r.estimated_hours))}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums text-ink-muted">{fmtInt(r.log_count)}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums text-ink-muted">{fmtInt(r.case_count)}</td>
+                  <td className="py-2 text-right tabular-nums text-ink-muted">{fmtInt(r.supervisor_review_count)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Secondary: deterministic backlog-clearance calculator (open review queue)
+// ---------------------------------------------------------------------------
+
+function CapacityCalculator() {
   const summary = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
   const aging = useLive<OpenAgingBucket[]>(getNycOpenAgingBuckets)
   // A bounded, diversified sample — used as an honest fallback for the open/high
@@ -1251,11 +1455,11 @@ function SimulationLab() {
       <section className="card p-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold text-navy-900">Capacity Stress Testing</h2>
-            <p className="mt-0.5 text-xs text-ink-subtle">Backlog clearance under staffing assumptions — deterministic math, not a forecast.</p>
+            <h3 className="text-sm font-semibold text-navy-900">Backlog clearance calculator</h3>
+            <p className="mt-0.5 text-xs text-ink-subtle">Secondary tool — deterministic open-queue clearance math under staffing assumptions, not a forecast.</p>
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
-            Deterministic scenario
+            Secondary · deterministic
           </span>
         </div>
 
