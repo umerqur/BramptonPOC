@@ -32,6 +32,8 @@ type FormState = {
   resolutionFollowup: boolean
 }
 
+type ServiceLevel = { label: string; value: string }
+
 type BramptonServiceCategory = {
   label: string
   group: string
@@ -39,7 +41,23 @@ type BramptonServiceCategory = {
   whenToUse: string
   examples: string[]
   prompt: string
+  // Optional knowledge-article metadata, modelled on the Brampton 311 service
+  // pages. When present, it is surfaced in the inline "About this request" tile
+  // so a resident sees expectations before submitting — no separate article page.
+  serviceLevels?: ServiceLevel[]
+  priorityGuidance?: string
+  call311When?: string
+  notHandled?: string
+  related?: string[]
 }
+
+// Brampton 311 priority matrix — shared guidance reused by time-sensitive,
+// safety-related request types so the wording stays consistent.
+const PRIORITY_MATRIX_NOTE =
+  'Priority 1 (immediate safety risk to vehicle, cycling, or pedestrian traffic within the City right-of-way) is responded to within 1 day. Priority 2 (no immediate safety risk) within 14 days. Priority 3 (general information request) within 35 days.'
+
+const PRIORITY_1_CALL_NOTE =
+  'For a Priority 1 safety risk, call 311 within city limits or 905-874-2000 from outside Brampton to speak with a live representative.'
 
 const INITIAL: FormState = {
   requestType: '',
@@ -341,6 +359,95 @@ const BRAMPTON_SERVICE_CATEGORIES: BramptonServiceCategory[] = [
     examples: ['overnight guests', 'temporary driveway work', 'short term parking need'],
     prompt: 'Describe the parking consideration needed, date, street, and number of vehicles.',
   },
+  {
+    label: 'Report a Parking Infraction',
+    group: 'Parking and roads',
+    summary: 'A vehicle parked in violation of a city parking by-law on a street, boulevard, or municipal property.',
+    whenToUse: 'Use this to report a vehicle that appears to be parked against the parking by-laws.',
+    examples: [
+      'facing the wrong way',
+      'within 3 m of a fire hydrant',
+      'obstructing traffic',
+      'at an expired meter',
+      'more than 15 cm from the curb',
+      'on the boulevard',
+      'in a prohibited area',
+      'on municipal property',
+      'within 9 m of an intersection',
+      'parked over 3 hours',
+      'parked between 2:00 am and 6:00 am',
+      'in an accessible space without a permit',
+    ],
+    prompt: 'Describe the vehicle (plate, make, and colour if known), exactly where it is parked, and which parking rule appears to be broken.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: PRIORITY_1_CALL_NOTE,
+    notHandled:
+      'The City does not respond to parking violations on private property such as plazas, unless the vehicle is in an accessible space without a permit. For private property concerns, contact the property management company.',
+    related: ['Request a Parking Consideration', 'Report a Driveway Too Wide', 'Report Litter, Debris or Obstructions'],
+  },
+  {
+    label: 'Report a Parks/Recreational Trails Issue',
+    group: 'Trees and parks',
+    summary: 'A maintenance or safety issue in a city park or on a recreational trail.',
+    whenToUse: 'Use this for damage, hazards, or maintenance concerns in parks and on trails.',
+    examples: ['damaged trail surface', 'broken park equipment', 'fallen tree across a trail', 'flooded path', 'damaged bench'],
+    prompt: 'Describe the park or trail name, the closest entrance or landmark, and the issue you observed.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: PRIORITY_1_CALL_NOTE,
+    related: ['Report Damaged Trees', 'Tree Debris Cleanup Required', 'Report Grass Cutting on City Property'],
+  },
+  {
+    label: 'Report a Concern with Flowerbed and/or Hanging Basket',
+    group: 'Trees and parks',
+    summary: 'A concern with a city flowerbed or hanging basket, including watering or irrigation issues.',
+    whenToUse: 'Use this for an issue with a city flowerbed, hanging basket, or its sprinkler/irrigation system.',
+    examples: [
+      'general flowerbed or hanging basket inquiry',
+      'damaged or unhealthy flowerbed or basket',
+      'sprinkler system issue',
+      'water line breakage causing pooling or bubbling water',
+    ],
+    prompt: 'Describe the flowerbed or hanging basket location and what you noticed (damage, a watering issue, or pooling water).',
+    serviceLevels: [
+      { label: 'Urgent issues', value: '3 business days' },
+      { label: 'Flowerbeds and hanging baskets', value: '5 business days' },
+      { label: 'Non-urgent issues', value: '30 business days' },
+    ],
+    call311When: 'For urgent matters such as a water line breakage, contact 311 within Brampton or 905-874-2000 from outside the city.',
+    related: ['Report Grass Cutting on City Property', 'Report Dead or Damaged Sod'],
+  },
+  {
+    label: 'Report a Driveway Too Wide',
+    group: 'Parking and roads',
+    summary: 'A residential driveway or front-yard parking area that appears wider than the by-law permits.',
+    whenToUse: 'Use this when a driveway or front-yard parking area appears to exceed the permitted width.',
+    examples: ['widened driveway over the boulevard', 'front yard paved for extra parking', 'driveway wider than the permitted allowance'],
+    prompt: 'Describe the property and why the driveway appears too wide (for example, paving over the boulevard or most of the front yard).',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    related: ['Report a Parking Infraction', 'Report of Structures too Close to Property Line (Shed, decks etc.)'],
+  },
+  {
+    label: 'Report a Noise Concern',
+    group: 'Noise and nuisance',
+    summary: 'A noise concern that may breach the city noise by-law.',
+    whenToUse: 'Use this for ongoing or recurring noise that is not an emergency.',
+    examples: ['loud music', 'construction outside permitted hours', 'persistent barking', 'amplified noise late at night'],
+    prompt: 'Describe the type of noise, the time(s) it happens, how often, and the source location if known.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: 'If the noise involves an emergency or immediate danger, call 911. Otherwise call 311 or 905-874-2000 to reach a live representative.',
+    related: ['Report Fireworks', 'Report Short-term Rental Housing Concern (e.g. AirBNB and VRBO)'],
+  },
+  {
+    label: 'Report a Traffic Sign Issue',
+    group: 'Roads, sidewalks, and traffic',
+    summary: 'A damaged, missing, or obstructed traffic or street sign on a city road.',
+    whenToUse: 'Use this when a traffic or street sign is down, damaged, turned, or hidden from view.',
+    examples: ['stop sign knocked down', 'faded or damaged sign', 'sign blocked by branches', 'missing street name sign'],
+    prompt: 'Describe the sign type, the intersection or nearest address, and what is wrong with it.',
+    priorityGuidance: PRIORITY_MATRIX_NOTE,
+    call311When: PRIORITY_1_CALL_NOTE,
+    related: ['Report a Traffic Signal Issue', 'Street Light Repairs Needed', 'Report an Illegal/Junk Sign'],
+  },
 ]
 
 const CATEGORY_GROUPS = Array.from(new Set(BRAMPTON_SERVICE_CATEGORIES.map((c) => c.group)))
@@ -471,6 +578,42 @@ const DEMO_COMPLAINTS: Array<Partial<FormState>> = [
     addressType: 'Street Address',
     location: '44 Ray Lawson Blvd',
     concernPostalCode: 'L6Y 5L7',
+  },
+  {
+    requestType: 'Report a Parking Infraction',
+    happeningNow: 'Yes',
+    description:
+      'A vehicle has been parked within about 2 metres of the fire hydrant for most of the day and is facing the wrong way on the street. It is making it hard to see oncoming traffic.',
+    addressType: 'Street Address',
+    location: '85 Vodden St E',
+    concernPostalCode: 'L6V 1M8',
+  },
+  {
+    requestType: 'Report a Noise Concern',
+    happeningNow: 'Yes',
+    description:
+      'Loud amplified music has been coming from a backyard gathering well past 11 pm for several nights this week. It is clearly audible inside neighbouring homes.',
+    addressType: 'Street Address',
+    location: '142 Conestoga Dr',
+    concernPostalCode: 'L6Z 3A5',
+  },
+  {
+    requestType: 'Report a Traffic Sign Issue',
+    happeningNow: 'Yes',
+    description:
+      'The stop sign at this intersection has been knocked down and is lying in the grass. Drivers are rolling through without stopping.',
+    addressType: 'Intersection',
+    location: 'Howden Blvd & Dixie Rd',
+    concernPostalCode: '',
+  },
+  {
+    requestType: 'Report a Parks/Recreational Trails Issue',
+    happeningNow: 'No',
+    description:
+      'A large branch has fallen across the recreational trail near the park entrance and is blocking the path for walkers and cyclists.',
+    addressType: 'Street Address',
+    location: '9050 Bramalea Rd',
+    concernPostalCode: 'L6S 6G7',
   },
 ]
 
@@ -702,7 +845,7 @@ export default function ResidentNewRequestPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-sm font-semibold text-navy-900">Generate a realistic Brampton demo request</div>
-              <p className="mt-0.5 text-xs text-ink-subtle">Creates a random property, road, tree, housing, dumping, sign, or traffic case. Your email is never autofilled.</p>
+              <p className="mt-0.5 text-xs text-ink-subtle">Creates a random property, road, tree, parking, noise, housing, dumping, sign, or traffic case. Your email is never autofilled.</p>
             </div>
             <button
               type="button"
@@ -762,8 +905,12 @@ export default function ResidentNewRequestPage() {
             {selectedCategory && (
               <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-sm text-blue-950">
                 <div className="font-semibold">About this request</div>
-                <p className="mt-1">{selectedCategory.whenToUse}</p>
-                <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-blue-900">Common examples</div>
+                <p className="mt-1">{selectedCategory.summary}</p>
+
+                <InfoLabel>Use this when</InfoLabel>
+                <p className="mt-1 text-blue-950/90">{selectedCategory.whenToUse}</p>
+
+                <InfoLabel>Examples</InfoLabel>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {selectedCategory.examples.map((example) => (
                     <span key={example} className="rounded-full bg-white px-2.5 py-1 text-xs text-blue-950 ring-1 ring-blue-100">
@@ -771,6 +918,69 @@ export default function ResidentNewRequestPage() {
                     </span>
                   ))}
                 </div>
+
+                {selectedCategory.serviceLevels && selectedCategory.serviceLevels.length > 0 && (
+                  <>
+                    <InfoLabel>Expected service level</InfoLabel>
+                    <ul className="mt-1.5 space-y-1">
+                      {selectedCategory.serviceLevels.map((lvl) => (
+                        <li key={lvl.label} className="flex items-baseline justify-between gap-3 border-b border-blue-100/70 pb-1 last:border-0">
+                          <span className="text-blue-950/90">{lvl.label}</span>
+                          <span className="flex-none font-semibold">{lvl.value}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+
+                {selectedCategory.priorityGuidance && (
+                  <>
+                    <InfoLabel>Priority guidance</InfoLabel>
+                    <p className="mt-1 text-blue-950/90">{selectedCategory.priorityGuidance}</p>
+                  </>
+                )}
+
+                {selectedCategory.call311When && (
+                  <>
+                    <InfoLabel>When to call 311</InfoLabel>
+                    <p className="mt-1 text-blue-950/90">{selectedCategory.call311When}</p>
+                  </>
+                )}
+
+                {selectedCategory.notHandled && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <span className="font-semibold">Not handled by the City: </span>
+                    {selectedCategory.notHandled}
+                  </div>
+                )}
+
+                {selectedCategory.related && selectedCategory.related.length > 0 && (
+                  <>
+                    <InfoLabel>Related request types</InfoLabel>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedCategory.related.map((rel) => {
+                        const target = BRAMPTON_SERVICE_CATEGORIES.find((c) => c.label === rel)
+                        return target ? (
+                          <button
+                            key={rel}
+                            type="button"
+                            onClick={() => {
+                              setActiveGroup('All')
+                              chooseCategory(target)
+                            }}
+                            className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-blue-800 ring-1 ring-blue-200 transition hover:bg-blue-100"
+                          >
+                            {rel}
+                          </button>
+                        ) : (
+                          <span key={rel} className="rounded-full bg-white px-2.5 py-1 text-xs text-blue-950 ring-1 ring-blue-100">
+                            {rel}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -901,6 +1111,10 @@ export default function ResidentNewRequestPage() {
       </div>
     </div>
   )
+}
+
+function InfoLabel({ children }: { children: ReactNode }) {
+  return <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-blue-900">{children}</div>
 }
 
 function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
