@@ -13,6 +13,22 @@
   h1, h2, h3, h4 {
     @apply text-navy-900;
   }
+
+  /* Global guard against horizontal overflow on mobile portrait: a single wide
+     element (e.g. a fixed-width row) should never push the whole page sideways
+     and clip content at the edges. `overflow-x: clip` contains it without
+     creating a scroll container, so it does not break the sticky header. Any
+     element that genuinely needs to scroll sideways opts in with its own
+     `overflow-x-auto` on an inner wrapper. */
+  html,
+  body {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+  #root {
+    overflow-x: clip;
+    max-width: 100%;
+  }
 }
 
 @layer components {
