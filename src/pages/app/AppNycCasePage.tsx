@@ -439,18 +439,63 @@ function PatrolStatusBadge({ status }: { status: string }) {
 // Raw source record (collapsible, for transparency / debugging)
 // ---------------------------------------------------------------------------
 
+// Human-readable labels for the stored benchmark source fields. The raw record
+// holds snake_case / UPPERCASE database column names; staff should never see
+// those directly. Note that the ai_* fields are STORED enrichment columns from
+// the offline benchmark dataset — not the product of a live LLM call. The only
+// live AI request is the explicit, click-triggered "Generate AI review".
+const RAW_FIELD_LABELS: Record<string, string> = {
+  ai_category: 'Suggested service category',
+  ai_priority: 'Suggested review priority',
+  ai_recommended_action: 'Recommended staff action',
+  ai_summary: 'Decision support summary',
+  assigned_department: 'Assigned department',
+  borough: 'Borough',
+  case_id: 'Case ID',
+  channel: 'Source channel',
+  closed_at: 'Closed date',
+  complaint_type: 'Complaint type',
+  council_district: 'Council district',
+  created_at: 'Created date',
+  description: 'Source description',
+  resolution_description: 'Source resolution text',
+  resolution_action_updated_at: 'Resolution update date',
+  source_channel: 'Source channel',
+  source_city: 'Source city',
+  source_dataset: 'Source dataset',
+  source_dataset_id: 'Source dataset ID',
+  status: 'Status',
+  submitted_at: 'Submitted date',
+  workflow_stage: 'Workflow stage',
+}
+
+/** Fallback label for unknown raw keys — never expose the raw DB key as the
+ * primary label. Drops the ai_ prefix, de-snakes, and Title Cases. */
+function toHumanLabel(key: string) {
+  return key
+    .replace(/^ai_/i, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 function RawSourceRecord({ raw }: { raw: Record<string, unknown> }) {
   const entries = Object.entries(raw)
-    .map(([key, value]) => ({ key, value: formatRawValue(value) }))
+    .map(([key, value]) => {
+      const normalizedKey = key.toLowerCase()
+      const label = RAW_FIELD_LABELS[normalizedKey] ?? toHumanLabel(key)
+      return { key, label, value: formatRawValue(value) }
+    })
     .filter((e) => e.value != null)
-    .sort((a, b) => a.key.localeCompare(b.key))
+    .sort((a, b) => a.label.localeCompare(b.label))
 
   return (
     <details className="group rounded-xl border border-slate-200 bg-slate-50/60">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-3.5">
         <span className="min-w-0">
-          <span className="block text-sm font-semibold text-navy-900">Raw source record details</span>
-          <span className="block text-[11px] text-ink-subtle">Every field as stored in the public 311 source data.</span>
+          <span className="block text-sm font-semibold text-navy-900">Source record details</span>
+          <span className="block text-[11px] text-ink-subtle">
+            Technical source fields from the public NYC 311 benchmark record. Shown for transparency.
+          </span>
         </span>
         <svg
           viewBox="0 0 24 24"
@@ -466,14 +511,18 @@ function RawSourceRecord({ raw }: { raw: Record<string, unknown> }) {
         </svg>
       </summary>
       <div className="border-t border-slate-200 px-5 py-4">
+        <p className="mb-4 rounded-lg bg-slate-100 px-3 py-2 text-[11px] leading-relaxed text-ink-subtle">
+          These fields are stored benchmark data. Opening this section does not trigger a live AI call.
+        </p>
         {entries.length === 0 ? (
           <p className="text-xs text-ink-subtle">No source fields available for this record.</p>
         ) : (
           <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {entries.map((e) => (
               <div key={e.key} className="min-w-0">
-                <dt className="font-mono text-[10px] uppercase tracking-wider text-ink-subtle">{e.key}</dt>
+                <dt className="text-xs font-semibold text-navy-900">{e.label}</dt>
                 <dd className="mt-0.5 break-words text-sm text-ink">{e.value}</dd>
+                <dd className="mt-0.5 font-mono text-[10px] lowercase tracking-wide text-ink-subtle/70">{e.key}</dd>
               </div>
             ))}
           </dl>
