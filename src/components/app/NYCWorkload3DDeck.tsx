@@ -7,6 +7,7 @@ import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon } from
 import { calmWorkloadRgb } from './workloadColor'
 import type { AreaUnit } from './NYCWorkloadMapPanel'
 import { formatMetric, metricConfig, metricRawValue, type AreaMetricValue, type MapMetric } from './mapMetrics'
+import { NYC_BOROUGH_BOUNDARIES } from '../../data/nycBoroughBoundaries'
 
 // Professional 3D workload view built on deck.gl's GeoJsonLayer (extruded
 // polygons). It renders the real NYC borough / council-district GeoJSON, extruded
@@ -242,19 +243,50 @@ function polygonCentroid(geom: PolyGeom): [number, number] {
   return best ? ringCentroid(best) : [NaN, NaN]
 }
 
+// Borough labels float above the tallest possible column so they read as area
+// headers over the whole borough, regardless of how districts are extruded.
+const BOROUGH_LABEL_Z = MAX_HEIGHT + 1200
+
+// Always-on borough orientation labels (MAN, BX, BK, QNS, SI). Built once from
+// the bundled borough geometry, so the user keeps geographic context even when
+// the choropleth is in district mode and individual districts are extruded.
+const BOROUGH_LABELS: LabelDatum[] = NYC_BOROUGH_BOUNDARIES.map((b) => {
+  const [lng, lat] = polygonCentroid(b.geojson_geometry as PolyGeom)
+  return { position: [lng, lat, BOROUGH_LABEL_Z] as [number, number, number], text: b.short_label }
+}).filter((d) => Number.isFinite(d.position[0]) && Number.isFinite(d.position[1]))
+
 /**
- * Build one label per rendered feature, positioned at the polygon centroid and
- * lifted to the top of its extruded column. Uses the short label when present
- * (district numbers like "28" / borough short codes), else the full label.
+ * District labels, decluttered: instead of labelling all ~51 council districts,
+ * label only the highest-value district (the operational headline) plus the
+ * currently selected district. Each sits at the top of its own extruded column.
+ * Returns [] in borough mode, where the always-on borough labels already cover it.
  */
-function buildLabels(fc: FeatureCollection<Geometry, MetricProps>): LabelDatum[] {
-  const out: LabelDatum[] = []
+function buildDistrictLabels(
+  fc: FeatureCollection<Geometry, MetricProps>,
+  activeKey: string | null,
+): LabelDatum[] {
+  const wanted = new Map<string, Feature<Geometry, MetricProps>>()
+
+  // Highest-value rendered district.
+  let top: Feature<Geometry, MetricProps> | null = null
   for (const f of fc.features) {
-    const geom = f.geometry
-    if (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon') continue
+    if (f.properties.value == null) continue
+    if (!top || (f.properties.value ?? -Infinity) > (top.properties.value ?? -Infinity)) top = f
+  }
+  if (top) wanted.set(top.properties.key, top)
+
+  // Currently selected district, if any.
+  if (activeKey) {
+    const active = fc.features.find((f) => f.properties.key === activeKey)
+    if (active) wanted.set(activeKey, active)
+  }
+
+  const out: LabelDatum[] = []
+  for (const f of wanted.values()) {
+    if (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon') continue
     const text = (f.properties.short || f.properties.label || '').trim()
     if (!text) continue
-    const [lng, lat] = polygonCentroid(geom as PolyGeom)
+    const [lng, lat] = polygonCentroid(f.geometry as PolyGeom)
     if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue
     out.push({ position: [lng, lat, f.properties.elevation + LABEL_Z_OFFSET], text })
   }
@@ -269,6 +301,7 @@ export default function NYCWorkload3DDeck({
   max,
   unitLabel,
   activeKey,
+  mode = 'district',
   onHover,
   onSelect,
 }: {
@@ -279,6 +312,8 @@ export default function NYCWorkload3DDeck({
   max: number
   unitLabel: string
   activeKey: string | null
+  /** Geography level in view — district mode adds the decluttered district labels. */
+  mode?: 'district' | 'borough'
   onHover: (key: string | null) => void
   onSelect: (key: string, label: string) => void
 }) {
@@ -345,18 +380,46 @@ export default function NYCWorkload3DDeck({
     [fc, min, max, metric, activeKey, onHover, onSelect],
   )
 
-  // Labels for the currently rendered geography (district numbers like "28", or
-  // borough short labels), one per feature, placed at the polygon centroid and
-  // lifted to the top of its extruded column. Built only from the live fc, so it
-  // tracks whatever geography level is in view. Non-pickable so it never blocks
-  // district selection or map rotation.
-  const labelData = useMemo<LabelDatum[]>(() => buildLabels(fc), [fc])
-
-  const labelLayer = useMemo(
+  // Always-on borough orientation labels (MAN, BX, …). Dark text with a white
+  // halo so they read as area headers over any fill colour. depthTest is off so
+  // they're never occluded by the extruded district columns. Non-pickable.
+  const boroughLabelLayer = useMemo(
     () =>
       new TextLayer<LabelDatum>({
-        id: 'nyc-workload-3d-labels',
-        data: labelData,
+        id: 'nyc-workload-3d-borough-labels',
+        data: BOROUGH_LABELS,
+        pickable: false,
+        getPosition: (d: LabelDatum) => d.position,
+        getText: (d: LabelDatum) => d.text,
+        getSize: 15,
+        sizeUnits: 'pixels',
+        getColor: [15, 23, 42, 255],
+        outlineWidth: 3,
+        outlineColor: [255, 255, 255, 235],
+        fontSettings: { sdf: true },
+        fontWeight: 800,
+        getTextAnchor: 'middle',
+        getAlignmentBaseline: 'center',
+        billboard: true,
+        characterSet: 'auto',
+        parameters: { depthCompare: 'always' },
+      }),
+    [],
+  )
+
+  // Decluttered district labels: only the highest-value district plus the
+  // selected one (district mode only), sitting atop their own columns. White
+  // text with a dark outline for legibility over the green/amber/red ramp.
+  const districtLabelData = useMemo<LabelDatum[]>(
+    () => (mode === 'borough' ? [] : buildDistrictLabels(fc, activeKey)),
+    [fc, activeKey, mode],
+  )
+
+  const districtLabelLayer = useMemo(
+    () =>
+      new TextLayer<LabelDatum>({
+        id: 'nyc-workload-3d-district-labels',
+        data: districtLabelData,
         pickable: false,
         // [lng, lat, z] — z lifts the label just above the extruded column top.
         getPosition: (d: LabelDatum) => d.position,
@@ -364,7 +427,6 @@ export default function NYCWorkload3DDeck({
         getSize: 13,
         sizeUnits: 'pixels',
         getColor: [255, 255, 255, 255],
-        // Dark outline so white text stays legible over green/yellow/red fills.
         outlineWidth: 2,
         outlineColor: [15, 23, 42, 255],
         fontSettings: { sdf: true },
@@ -373,8 +435,9 @@ export default function NYCWorkload3DDeck({
         getAlignmentBaseline: 'center',
         billboard: true,
         characterSet: 'auto',
+        parameters: { depthCompare: 'always' },
       }),
-    [labelData],
+    [districtLabelData],
   )
 
   const getTooltip = (info: PickingInfo<MetricFeature>) => {
@@ -417,7 +480,7 @@ export default function NYCWorkload3DDeck({
         initialViewState={initialViewState}
         // Left-drag pans, right-drag / two-finger rotates and tilts.
         controller={{ dragRotate: true, touchRotate: true, doubleClickZoom: false }}
-        layers={[layer, labelLayer]}
+        layers={[layer, boroughLabelLayer, districtLabelLayer]}
         getTooltip={getTooltip}
         getCursor={({ isHovering }) => (isHovering ? 'pointer' : 'grab')}
         style={{ position: 'absolute', inset: '0' }}

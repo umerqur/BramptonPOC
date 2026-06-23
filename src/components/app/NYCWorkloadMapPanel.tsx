@@ -566,6 +566,7 @@ function NYCWorkloadHeatMap({
                     max={max}
                     unitLabel={adapter.unitLabel}
                     activeKey={activeKey}
+                    mode={mode}
                     onHover={setHovered}
                     onSelect={(key, label) => {
                       setSelected(key)
