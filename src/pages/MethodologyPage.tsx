@@ -239,11 +239,25 @@ export default function MethodologyPage() {
         </Section>
 
         <Section title="Simple architecture">
-          <div className="space-y-4">
-            <DiagramRow label="Resident and staff workflow" items={WORKFLOW_ROW} />
-            <DiagramRow label="System layer" items={SYSTEM_ROW} />
+          <div className="space-y-3">
+            <DiagramRow
+              accent="navy"
+              label="Resident and staff workflow"
+              caption="How a request moves from a resident to a resolved update."
+              items={WORKFLOW_ROW}
+            />
+            <DiagramRow
+              accent="accent"
+              label="System layer"
+              caption="How the system organizes data to support each step above."
+              items={SYSTEM_ROW}
+            />
           </div>
           <p className="mt-4 text-xs leading-relaxed text-ink-muted">
+            Data is organized once, then reused across staff review, workload insights, and resident communication
+            support.
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-ink-muted">
             The current demo uses public benchmark data. In a Brampton POC, approved City data sources would connect
             into the same case and insights structure.
           </p>
@@ -294,18 +308,41 @@ function InfoCard({ title, body }: { title: string; body: string }) {
   )
 }
 
-// One labelled row of the architecture diagram: equal-width cards joined by
-// arrows. Cards stack vertically (arrows point down) on mobile and sit in a row
-// (arrows point right) from sm up.
-function DiagramRow({ label, items }: { label: string; items: string[] }) {
+// One labelled row of the architecture diagram: a clear row header with an accent
+// dot, then numbered, equal-width cards joined by arrows. Cards stack vertically
+// (arrows point down) on mobile and sit in a row (arrows point right) from sm up.
+function DiagramRow({
+  label,
+  caption,
+  items,
+  accent,
+}: {
+  label: string
+  caption: string
+  items: string[]
+  accent: 'navy' | 'accent'
+}) {
+  const dot = accent === 'navy' ? 'bg-navy-900' : 'bg-accent-500'
+  const ring = accent === 'navy' ? 'ring-navy-100' : 'ring-accent-100'
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
-      <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+      <div className="flex items-center gap-2">
+        <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+        <h3 className="text-sm font-semibold text-navy-900">{label}</h3>
+      </div>
+      <p className="mt-0.5 text-xs text-ink-subtle">{caption}</p>
+      <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-stretch">
         {items.map((item, index) => (
           <Fragment key={item}>
-            <div className="flex flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-3 text-center text-xs font-semibold text-navy-900 shadow-sm">
-              {item}
+            <div
+              className={`flex flex-1 flex-col items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-3 text-center shadow-sm ring-1 ${ring}`}
+            >
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full ${dot} text-[10px] font-semibold text-white`}
+              >
+                {index + 1}
+              </span>
+              <span className="text-xs font-semibold text-navy-900">{item}</span>
             </div>
             {index < items.length - 1 && (
               <span aria-hidden className="self-center rotate-90 text-base text-ink-subtle sm:rotate-0">
