@@ -13,11 +13,17 @@ refresh materialized view public.mv_insights_department_workload;
 refresh materialized view public.mv_insights_monthly_trend;
 refresh materialized view public.mv_insights_channel_mix;
 refresh materialized view public.mv_insights_status_mix;
+refresh materialized view public.mv_insights_closure_duration_distribution;
 
 -- Source metadata + map workload aggregates (also materialized).
 refresh materialized view public.mv_insights_source_meta;
 refresh materialized view public.mv_nyc_service_request_workload;
 refresh materialized view public.mv_nyc_council_district_workload;
+
+-- Multi-metric map aggregates per geography (migration 030) — total requests,
+-- open backlog, closure days, high-priority open. Refresh after a data load.
+refresh materialized view public.mv_nyc_council_district_map_metrics;
+refresh materialized view public.mv_nyc_borough_map_metrics;
 
 -- Open-case aggregates — active review queue (migration 022). Refresh after an
 -- open-case data load in public.nyc_open_service_requests.

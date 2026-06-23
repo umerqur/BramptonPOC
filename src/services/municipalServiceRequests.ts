@@ -20,6 +20,12 @@ export const NYC_WORKLOAD_VIEW = 'v_nyc_service_request_workload'
 // ward-like operational unit (boroughs are too broad). See migration
 // 015_nyc_council_district_workload.sql.
 export const NYC_COUNCIL_DISTRICT_WORKLOAD_VIEW = 'v_nyc_council_district_workload'
+// Multi-metric map aggregates per geography (migration 030). Same NYC 311
+// benchmark complaints, but per area we expose total requests, open backlog,
+// closure-day statistics, and high-priority open counts so the workload map can
+// be shaded/extruded by a selected metric instead of complaint volume only.
+export const NYC_COUNCIL_DISTRICT_MAP_METRICS_VIEW = 'v_nyc_council_district_map_metrics'
+export const NYC_BOROUGH_MAP_METRICS_VIEW = 'v_nyc_borough_map_metrics'
 export const WORKFLOW_EVENTS_TABLE = 'workflow_events'
 export const AI_TRIAGE_TABLE = 'ai_triage_results'
 export const CASE_AI_REVIEWS_TABLE = 'case_ai_reviews'
@@ -616,6 +622,156 @@ export async function getNYCWorkloadByCouncilDistrict(): Promise<NYCCouncilDistr
       complaint_volume: Number(r.complaint_volume) || 0,
     }))
     .filter((r) => r.area.length > 0 && r.area !== 'NaN' && r.area !== '0')
+}
+
+/**
+ * Normalized per-area map metrics for the workload map. `area` joins to the
+ * bundled geometry (council district number, or borough name). Closure-day
+ * metrics are null when an area has no closed cases — callers render those as
+ * no-data grey, never as zero. NYC 311 benchmark decision support only.
+ */
+export type NYCMapMetricRow = {
+  area: string
+  total_requests: number
+  open_backlog: number
+  closed_requests: number
+  avg_closure_days: number | null
+  p90_closure_days: number | null
+  high_priority_open: number
+}
+
+// Raw shape of a public.v_nyc_*_map_metrics row (Postgres bigint/numeric arrive
+// as number or string).
+type NYCMapMetricViewRow = {
+  area: string | null
+  total_requests: number | string | null
+  open_backlog: number | string | null
+  closed_requests: number | string | null
+  avg_closure_days: number | string | null
+  p90_closure_days: number | string | null
+  high_priority_open: number | string | null
+}
+
+const MAP_METRIC_COLUMNS =
+  'area, total_requests, open_backlog, closed_requests, avg_closure_days, p90_closure_days, high_priority_open'
+
+const mapMetricNum = (v: number | string | null): number => {
+  const n = typeof v === 'string' ? Number(v) : v
+  return Number.isFinite(n as number) ? (n as number) : 0
+}
+
+const mapMetricNumOrNull = (v: number | string | null): number | null => {
+  if (v == null) return null
+  const n = typeof v === 'string' ? Number(v) : v
+  return Number.isFinite(n as number) ? (n as number) : null
+}
+
+function normalizeMapMetricRow(r: NYCMapMetricViewRow, area: string): NYCMapMetricRow {
+  return {
+    area,
+    total_requests: mapMetricNum(r.total_requests),
+    open_backlog: mapMetricNum(r.open_backlog),
+    closed_requests: mapMetricNum(r.closed_requests),
+    avg_closure_days: mapMetricNumOrNull(r.avg_closure_days),
+    p90_closure_days: mapMetricNumOrNull(r.p90_closure_days),
+    high_priority_open: mapMetricNum(r.high_priority_open),
+  }
+}
+
+/**
+ * Per City Council district map metrics from public.v_nyc_council_district_map_metrics.
+ * `area` is normalized to a plain district number string so it joins to the bundled
+ * geometry. Any Supabase/RLS error is thrown so the caller can surface it.
+ */
+export async function getNYCMapMetricsByCouncilDistrict(): Promise<NYCMapMetricRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(NYC_COUNCIL_DISTRICT_MAP_METRICS_VIEW)
+    .select(MAP_METRIC_COLUMNS)
+    .order('total_requests', { ascending: false })
+
+  if (error) throw error
+  return ((data ?? []) as NYCMapMetricViewRow[])
+    .map((r) => normalizeMapMetricRow(r, String(Number((r.area ?? '').trim()))))
+    .filter((r) => r.area.length > 0 && r.area !== 'NaN' && r.area !== '0')
+}
+
+/**
+ * Per borough map metrics from public.v_nyc_borough_map_metrics. `area` is the
+ * borough name, joined to the bundled geometry case-insensitively. Any
+ * Supabase/RLS error is thrown so the caller can surface it.
+ */
+export async function getNYCMapMetricsByBorough(): Promise<NYCMapMetricRow[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(NYC_BOROUGH_MAP_METRICS_VIEW)
+    .select(MAP_METRIC_COLUMNS)
+    .order('total_requests', { ascending: false })
+
+  if (error) throw error
+  return ((data ?? []) as NYCMapMetricViewRow[])
+    .map((r) => normalizeMapMetricRow(r, (r.area ?? '').trim()))
+    .filter((r) => r.area.length > 0 && r.area.toLowerCase() !== 'unknown')
+}
+
+// ---------------------------------------------------------------------------
+// Session-scoped caches for the NYC workload map
+// ---------------------------------------------------------------------------
+//
+// The workload map reloads its geometry + metric aggregates every time the user
+// switches geography tabs, toggles 2D/3D, or returns to Insights. The geometry is
+// bundled and stable, and the metric views are small aggregate reads, so we cache
+// each as a module-scoped promise for the browser session — switching tabs feels
+// instant after the first load. A FAILED request clears its promise so the next
+// call retries (we never cache an error forever). No external cache library.
+
+let boroughBoundariesPromise: Promise<NYCBoroughBoundary[]> | null = null
+let councilDistrictBoundariesPromise: Promise<NYCCouncilDistrictBoundary[]> | null = null
+let boroughMapMetricsPromise: Promise<NYCMapMetricRow[]> | null = null
+let councilDistrictMapMetricsPromise: Promise<NYCMapMetricRow[]> | null = null
+
+/** Cached NYC borough boundaries (bundled geometry). */
+export async function getNYCBoroughBoundariesCached(): Promise<NYCBoroughBoundary[]> {
+  if (!boroughBoundariesPromise) {
+    boroughBoundariesPromise = getNYCBoroughBoundaries().catch((err) => {
+      boroughBoundariesPromise = null
+      throw err
+    })
+  }
+  return boroughBoundariesPromise
+}
+
+/** Cached NYC council district boundaries (bundled geometry). */
+export async function getNYCCouncilDistrictBoundariesCached(): Promise<NYCCouncilDistrictBoundary[]> {
+  if (!councilDistrictBoundariesPromise) {
+    councilDistrictBoundariesPromise = getNYCCouncilDistrictBoundaries().catch((err) => {
+      councilDistrictBoundariesPromise = null
+      throw err
+    })
+  }
+  return councilDistrictBoundariesPromise
+}
+
+/** Cached NYC borough map metrics (small aggregate read). */
+export async function getNYCMapMetricsByBoroughCached(): Promise<NYCMapMetricRow[]> {
+  if (!boroughMapMetricsPromise) {
+    boroughMapMetricsPromise = getNYCMapMetricsByBorough().catch((err) => {
+      boroughMapMetricsPromise = null
+      throw err
+    })
+  }
+  return boroughMapMetricsPromise
+}
+
+/** Cached NYC council district map metrics (small aggregate read). */
+export async function getNYCMapMetricsByCouncilDistrictCached(): Promise<NYCMapMetricRow[]> {
+  if (!councilDistrictMapMetricsPromise) {
+    councilDistrictMapMetricsPromise = getNYCMapMetricsByCouncilDistrict().catch((err) => {
+      councilDistrictMapMetricsPromise = null
+      throw err
+    })
+  }
+  return councilDistrictMapMetricsPromise
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { addWorkflowEvent } from './municipalServiceRequests'
+import type { EnforcementAction, ServiceMethod } from '../data/demoWorkflowTypes'
 
 // Resident Intake Demo — service layer for the public resident simulation flow
 // and the staff-side intake workbench.
@@ -110,7 +111,9 @@ export const STAFF_ACTIONS: Array<{
   eventType: string
 }> = [
   { toStatus: 'received', label: 'Mark received', eventType: 'resident_request_received' },
-  { toStatus: 'assigned', label: 'Assign to officer', eventType: 'resident_request_assigned' },
+  // NOTE: there is intentionally NO generic "move to assigned" action here.
+  // Assigning a case must go through assignResidentRequestToOfficer so the
+  // officer email/name/assigned_at are written together with status 'assigned'.
   { toStatus: 'in_review', label: 'Move to review', eventType: 'resident_request_in_review' },
   { toStatus: 'closed', label: 'Close case', eventType: 'resident_request_closed' },
 ]
@@ -168,6 +171,9 @@ export type ResidentRequestRow = {
   field_visit_completed: boolean
   field_observed_condition: string | null
   field_violation_observed: string | null
+  field_enforcement_action: string | null
+  field_service_method: string | null
+  field_reference_number: string | null
   field_action_taken: string | null
   field_officer_notes: string | null
   field_follow_up_required: boolean
@@ -178,7 +184,14 @@ export type ResidentRequestRow = {
 export type FieldOutcomeInput = {
   observedCondition: string
   violationObserved: 'yes' | 'no' | 'unclear'
-  actionTaken: string
+  /** Structured enforcement action — what the officer actually did. */
+  enforcementAction: EnforcementAction
+  /** How the ticket / penalty notice was served (ticket_issued only). */
+  serviceMethod?: ServiceMethod
+  /** Ticket / penalty notice number (ticket_issued only, optional). */
+  referenceNumber?: string
+  /** Optional supporting "action taken" notes. */
+  actionTaken?: string
   officerNotes?: string
   followUpRequired: boolean
 }
@@ -387,22 +400,20 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
 
-  // Demo-only fields the public form collects but the existing schema has no
-  // dedicated columns for are appended into the description, so we avoid a DB
-  // migration while still preserving the resident's input for staff review.
+  // Supplemental issue/location fields collected by the public form but not stored
+  // in dedicated columns yet. Append only operational details to the case
+  // description so staff can see them, without mixing resident contact details into
+  // the reported issue text.
   const baseDescription = input.description.trim()
-  const demoDetailLines = [
+  const supplementalDetailLines = [
     input.happeningNow ? `Is this happening now: ${input.happeningNow}` : null,
     input.concernUnitNumber ? `Location unit or apartment number: ${input.concernUnitNumber.trim()}` : null,
     input.concernPostalCode ? `Location postal code: ${input.concernPostalCode.trim()}` : null,
-    input.contactStreetAddress ? `Contact street address: ${input.contactStreetAddress.trim()}` : null,
-    input.contactCity ? `Contact city: ${input.contactCity.trim()}` : null,
-    input.contactProvince ? `Contact province: ${input.contactProvince.trim()}` : null,
   ].filter((line): line is string => Boolean(line))
 
   const combinedDescription = [
     baseDescription,
-    demoDetailLines.length > 0 ? `Demo form details:\n${demoDetailLines.join('\n')}` : '',
+    supplementalDetailLines.length > 0 ? `Additional intake details:\n${supplementalDetailLines.join('\n')}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -483,16 +494,54 @@ export async function getResidentRequestStatus(caseId: string): Promise<Resident
   return rows[0] ?? null
 }
 
-// Base columns that exist before migration 017. The assignment / field-outcome
-// columns are appended in the extended set below.
+// Column tiers, richest → oldest. Each tier corresponds to a migration:
+//   BASE        — pre-017 (migration 011 only).
+//   ASSIGNMENT  — adds migration 017 (officer assignment + field outcome).
+//   FULL        — adds migration 028 (structured enforcement action).
+// Reads/writes try the richest tier first and fall back on a missing-column
+// error, so a database where a later migration has not been applied yet still
+// works WITHOUT silently dropping the columns from the migrations that ARE
+// applied (e.g. a missing 028 must not wipe the 017 assignment columns).
 const RESIDENT_REQUEST_BASE_COLUMNS =
   'id, case_id, address_type, location, city, province, request_type, description, first_name, last_name, resident_name, unit_number, postal_code, country, resident_phone, resident_email, resolution_followup, method_of_contact, status, is_demo, created_at, updated_at'
 
-const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_BASE_COLUMNS}, assigned_officer_email, assigned_officer_name, assigned_at, field_visit_completed, field_observed_condition, field_violation_observed, field_action_taken, field_officer_notes, field_follow_up_required, field_outcome_recorded_at`
+const RESIDENT_REQUEST_ASSIGNMENT_COLUMNS = `${RESIDENT_REQUEST_BASE_COLUMNS}, assigned_officer_email, assigned_officer_name, assigned_at, field_visit_completed, field_observed_condition, field_violation_observed, field_action_taken, field_officer_notes, field_follow_up_required, field_outcome_recorded_at`
 
-/** Postgres "undefined_column" — migration 017 not applied yet. */
+// Columns added by migration 028 (structured enforcement action).
+const RESIDENT_REQUEST_ENFORCEMENT_COLUMNS = 'field_enforcement_action, field_service_method, field_reference_number'
+
+const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_ASSIGNMENT_COLUMNS}, ${RESIDENT_REQUEST_ENFORCEMENT_COLUMNS}`
+
+// Ordered richest → oldest for graceful degradation when a migration is missing.
+const RESIDENT_COLUMN_TIERS = [
+  RESIDENT_REQUEST_COLUMNS,
+  RESIDENT_REQUEST_ASSIGNMENT_COLUMNS,
+  RESIDENT_REQUEST_BASE_COLUMNS,
+] as const
+
+/** Postgres "undefined_column" — a referenced migration has not been applied yet. */
 function isUndefinedColumnError(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === '42703'
+}
+
+/**
+ * Run a Supabase select/return query against the richest column tier that the
+ * database actually has. Retries on a missing-column error (42703) with the next
+ * tier down, so a not-yet-applied migration degrades gracefully instead of
+ * throwing — and, critically, without falling all the way back to BASE (which
+ * would drop the assignment columns and make every row look unassigned).
+ */
+async function withResidentColumnFallback<T>(
+  run: (columns: string) => PromiseLike<{ data: unknown; error: unknown }>,
+): Promise<T | null> {
+  let lastError: unknown = null
+  for (const columns of RESIDENT_COLUMN_TIERS) {
+    const { data, error } = await run(columns)
+    if (!error) return (data as T | null) ?? null
+    if (!isUndefinedColumnError(error)) throw error
+    lastError = error
+  }
+  throw lastError
 }
 
 /** Fill the migration-017 fields with safe defaults when they aren't present yet. */
@@ -505,6 +554,9 @@ function withAssignmentDefaults(row: Record<string, unknown>): ResidentRequestRo
     field_visit_completed: (row.field_visit_completed as boolean | undefined) ?? false,
     field_observed_condition: (row.field_observed_condition as string | null) ?? null,
     field_violation_observed: (row.field_violation_observed as string | null) ?? null,
+    field_enforcement_action: (row.field_enforcement_action as string | null) ?? null,
+    field_service_method: (row.field_service_method as string | null) ?? null,
+    field_reference_number: (row.field_reference_number as string | null) ?? null,
     field_action_taken: (row.field_action_taken as string | null) ?? null,
     field_officer_notes: (row.field_officer_notes as string | null) ?? null,
     field_follow_up_required: (row.field_follow_up_required as boolean | undefined) ?? false,
@@ -515,48 +567,18 @@ function withAssignmentDefaults(row: Record<string, unknown>): ResidentRequestRo
 /** Staff (authenticated) — read a single resident request by case id. */
 export async function getResidentRequestByCaseId(caseId: string): Promise<ResidentRequestRow | null> {
   const client = requireClient()
-  const ext = await client
-    .from(RESIDENT_REQUESTS_TABLE)
-    .select(RESIDENT_REQUEST_COLUMNS)
-    .eq('case_id', caseId)
-    .maybeSingle()
-  let data = ext.data as Record<string, unknown> | null
-  let error = ext.error
-  if (error && isUndefinedColumnError(error)) {
-    const base = await client
-      .from(RESIDENT_REQUESTS_TABLE)
-      .select(RESIDENT_REQUEST_BASE_COLUMNS)
-      .eq('case_id', caseId)
-      .maybeSingle()
-    data = base.data as Record<string, unknown> | null
-    error = base.error
-  }
-  if (error) throw error
+  const data = await withResidentColumnFallback<Record<string, unknown>>((columns) =>
+    client.from(RESIDENT_REQUESTS_TABLE).select(columns).eq('case_id', caseId).maybeSingle(),
+  )
   return data ? withAssignmentDefaults(data) : null
 }
 
 /** Staff (authenticated) — read resident demo requests, newest first. */
 export async function getResidentRequests(limit = 100): Promise<ResidentRequestRow[]> {
   const client = requireClient()
-  const ext = await client
-    .from(RESIDENT_REQUESTS_TABLE)
-    .select(RESIDENT_REQUEST_COLUMNS)
-    .order('created_at', { ascending: false })
-    .limit(limit)
-  let data = ext.data as Record<string, unknown>[] | null
-  let error = ext.error
-  // Fall back to the pre-017 columns so the queue still works before the
-  // assignment migration is applied.
-  if (error && isUndefinedColumnError(error)) {
-    const base = await client
-      .from(RESIDENT_REQUESTS_TABLE)
-      .select(RESIDENT_REQUEST_BASE_COLUMNS)
-      .order('created_at', { ascending: false })
-      .limit(limit)
-    data = base.data as Record<string, unknown>[] | null
-    error = base.error
-  }
-  if (error) throw error
+  const data = await withResidentColumnFallback<Record<string, unknown>[]>((columns) =>
+    client.from(RESIDENT_REQUESTS_TABLE).select(columns).order('created_at', { ascending: false }).limit(limit),
+  )
   return (data ?? []).map(withAssignmentDefaults)
 }
 
@@ -582,6 +604,13 @@ export async function applyStaffStatusUpdate(
 ): Promise<StaffStatusUpdateResult> {
   const client = requireClient()
   const fromStatus = request.status
+
+  // Guard: a case may only become 'assigned' through assignResidentRequestToOfficer,
+  // which writes the officer email/name/assigned_at atomically. A bare status move
+  // to 'assigned' would leave the row assigned with no officer on file.
+  if (action.toStatus === 'assigned') {
+    throw new Error('Use assignResidentRequestToOfficer to assign a case to an officer.')
+  }
 
   const { data, error } = await client
     .from(RESIDENT_REQUESTS_TABLE)
@@ -730,18 +759,22 @@ export async function assignResidentRequestToOfficer(
   const client = requireClient()
   const now = new Date().toISOString()
 
-  const { data, error } = await client
-    .from(RESIDENT_REQUESTS_TABLE)
-    .update({
-      assigned_officer_email: officer.email.trim().toLowerCase(),
-      assigned_officer_name: officer.name,
-      assigned_at: now,
-      status: 'assigned',
-    })
-    .eq('case_id', caseId)
-    .select(RESIDENT_REQUEST_COLUMNS)
-    .single()
-  if (error) throw error
+  // The update only touches assignment columns (migration 017), so the returning
+  // select is the only part that can hit a missing migration-028 column — the
+  // tiered fallback keeps assignment working even before 028 is applied.
+  const data = await withResidentColumnFallback<Record<string, unknown>>((columns) =>
+    client
+      .from(RESIDENT_REQUESTS_TABLE)
+      .update({
+        assigned_officer_email: officer.email.trim().toLowerCase(),
+        assigned_officer_name: officer.name,
+        assigned_at: now,
+        status: 'assigned',
+      })
+      .eq('case_id', caseId)
+      .select(columns)
+      .single(),
+  )
   const updated = withAssignmentDefaults(data as Record<string, unknown>)
 
   await addWorkflowEvent({
@@ -771,21 +804,48 @@ export async function recordResidentFieldOutcome(
   const client = requireClient()
   const now = new Date().toISOString()
 
-  const { data, error } = await client
+  // Fields present since migration 017 (the core field outcome).
+  const basePayload = {
+    field_visit_completed: true,
+    field_observed_condition: outcome.observedCondition.trim() || null,
+    field_violation_observed: outcome.violationObserved,
+    field_action_taken: outcome.actionTaken?.trim() ? outcome.actionTaken.trim() : null,
+    field_officer_notes: outcome.officerNotes?.trim() ? outcome.officerNotes.trim() : null,
+    field_follow_up_required: outcome.followUpRequired,
+    field_outcome_recorded_at: now,
+    status: 'in_review' as const,
+  }
+  // Structured enforcement action — added by migration 028. Method of service and
+  // notice number only apply to a ticket / penalty notice.
+  const enforcementPayload = {
+    field_enforcement_action: outcome.enforcementAction,
+    field_service_method: outcome.enforcementAction === 'ticket_issued' ? outcome.serviceMethod ?? null : null,
+    field_reference_number:
+      outcome.enforcementAction === 'ticket_issued' ? outcome.referenceNumber?.trim() || null : null,
+  }
+
+  // Persist the full outcome including the structured enforcement action. If the
+  // migration-028 columns are not present yet, fall back to recording the rest of
+  // the outcome so the officer is never hard-blocked. (Apply migration 028 to
+  // enable structured enforcement-action storage.)
+  const full = await client
     .from(RESIDENT_REQUESTS_TABLE)
-    .update({
-      field_visit_completed: true,
-      field_observed_condition: outcome.observedCondition.trim() || null,
-      field_violation_observed: outcome.violationObserved,
-      field_action_taken: outcome.actionTaken.trim() || null,
-      field_officer_notes: outcome.officerNotes?.trim() ? outcome.officerNotes.trim() : null,
-      field_follow_up_required: outcome.followUpRequired,
-      field_outcome_recorded_at: now,
-      status: 'in_review',
-    })
+    .update({ ...basePayload, ...enforcementPayload })
     .eq('case_id', caseId)
     .select(RESIDENT_REQUEST_COLUMNS)
     .single()
+  let data = full.data as Record<string, unknown> | null
+  let error: unknown = full.error
+  if (error && isUndefinedColumnError(error)) {
+    const fallback = await client
+      .from(RESIDENT_REQUESTS_TABLE)
+      .update(basePayload)
+      .eq('case_id', caseId)
+      .select(RESIDENT_REQUEST_ASSIGNMENT_COLUMNS)
+      .single()
+    data = fallback.data as Record<string, unknown> | null
+    error = fallback.error
+  }
   if (error) throw error
   const updated = withAssignmentDefaults(data as Record<string, unknown>)
 
@@ -796,8 +856,14 @@ export async function recordResidentFieldOutcome(
     from_status: STATUS_LABELS.assigned,
     to_status: STATUS_LABELS.in_review,
     actor_type: 'officer',
-    notes: `Violation observed: ${outcome.violationObserved}. Action taken: ${
-      outcome.actionTaken.trim() || '—'
+    notes: `Violation observed: ${outcome.violationObserved}. Enforcement action: ${
+      outcome.enforcementAction
+    }${
+      outcome.enforcementAction === 'ticket_issued' && outcome.referenceNumber?.trim()
+        ? ` (notice ${outcome.referenceNumber.trim()})`
+        : ''
+    }. Action notes: ${
+      outcome.actionTaken?.trim() || '—'
     }. Follow-up required: ${outcome.followUpRequired ? 'yes' : 'no'}.`,
   })
 

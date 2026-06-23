@@ -13,6 +13,22 @@
   h1, h2, h3, h4 {
     @apply text-navy-900;
   }
+
+  /* Global guard against horizontal overflow on mobile portrait: a single wide
+     element (e.g. a fixed-width row) should never push the whole page sideways
+     and clip content at the edges. `overflow-x: clip` contains it without
+     creating a scroll container, so it does not break the sticky header. Any
+     element that genuinely needs to scroll sideways opts in with its own
+     `overflow-x-auto` on an inner wrapper. */
+  html,
+  body {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+  #root {
+    overflow-x: clip;
+    max-width: 100%;
+  }
 }
 
 @layer components {
@@ -48,4 +64,18 @@
   .stat-value { @apply text-2xl font-semibold text-navy-900 mt-1; }
   .section-eyebrow { @apply text-xs font-semibold uppercase tracking-wider text-accent-700; }
   .link-quiet { @apply text-navy-700 hover:text-navy-900 underline-offset-2 hover:underline; }
+}
+
+/* Attention blink for the demo-autofill button — runs exactly three times on
+   mount to signal the button is clickable, then settles. Respects users who
+   prefer reduced motion. */
+@keyframes demo-blink {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(53, 143, 115, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(53, 143, 115, 0.45); }
+}
+.animate-demo-blink {
+  animation: demo-blink 0.6s ease-in-out 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-demo-blink { animation: none; }
 }

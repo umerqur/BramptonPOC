@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useWorkflow } from '../../lib/workflowStore'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
 import {
   getInsightsKpis,
@@ -10,6 +9,7 @@ import {
   getInsightsDepartmentWorkload,
   getInsightsMonthlyTrend,
   getInsightsChannelMix,
+  getInsightsClosureDurationDistribution,
   getInsightsSourceMeta,
   isChannelMixMeaningful,
   formatPlainDate,
@@ -21,6 +21,7 @@ import {
   type InsightsDepartmentWorkload,
   type MonthlyTrendPoint,
   type ChannelMixRow,
+  type ClosureDurationBucket,
 } from '../../services/insightsDashboard'
 import {
   getNycCaseExplorerPage,
@@ -50,7 +51,7 @@ import {
 // materialized view; the Case Explorer reads paginated, filtered rows — never the
 // full table. No fake placeholder values: a failed live read shows a clear error.
 
-type Tab = 'overview' | 'explorer' | 'open'
+type Tab = 'overview' | 'explorer' | 'open' | 'simulations'
 
 // ---------------------------------------------------------------------------
 // Live-data hook (aggregates) — on failure expose a dev-friendly error.
@@ -111,6 +112,39 @@ const fmtPct = (value: number, total: number): string => {
   return `${pct.toFixed(pct < 10 ? 1 : 0)}%`
 }
 
+// --- Closure pressure classification (shared by leaderboard + scatter) -------
+//
+// Deterministic, explainable thresholds on historical closure times. Not a
+// prediction — just a plain-language label for how long closures take.
+type Pressure = 'normal' | 'watch' | 'critical'
+
+function closurePressure(p90: number | null, avg: number | null): Pressure {
+  const p = p90 ?? 0
+  const a = avg ?? 0
+  if (p >= 120 || a >= 60) return 'critical'
+  if (p >= 45 || a >= 30) return 'watch'
+  return 'normal'
+}
+
+const PRESSURE_META: Record<Pressure, { label: string; badge: string; bar: string; dot: string }> = {
+  normal: { label: 'Normal', badge: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200', bar: 'bg-emerald-400', dot: '#10b981' },
+  watch: { label: 'Watch', badge: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200', bar: 'bg-amber-400', dot: '#f59e0b' },
+  critical: { label: 'Critical', badge: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200', bar: 'bg-rose-500', dot: '#ef4444' },
+}
+
+/** A labelled horizontal bar (volume / duration) for the closure leaderboard. */
+function MetricBar({ label, pct, barClass, valueText }: { label: string; pct: number; barClass: string; valueText: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-32 shrink-0 text-[10px] uppercase tracking-wider text-ink-subtle">{label}</span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
+      </div>
+      <span className="w-16 shrink-0 text-right text-[10px] tabular-nums text-ink-subtle">{valueText}</span>
+    </div>
+  )
+}
+
 const PALETTE = ['#2563eb', '#0ea5e9', '#7c3aed', '#f59e0b', '#10b981', '#94a3b8']
 
 // ---------------------------------------------------------------------------
@@ -152,9 +186,22 @@ function SourceLine({ label, value, emphasis }: { label: string; value: string; 
 // Dashboard shell + tabs
 // ---------------------------------------------------------------------------
 
+const VALID_TABS: Tab[] = ['overview', 'explorer', 'open', 'simulations']
+
 export default function InsightsDashboard() {
-  const [tab, setTab] = useState<Tab>('overview')
+  // The top nav links Stress-Testing to /app/insights?tab=simulations, so honor a
+  // `tab` query param (validated against the known tabs) and keep it in sync if
+  // the user navigates to a tab URL while already on the page.
+  const [searchParams] = useSearchParams()
+  const paramTab = searchParams.get('tab')
+  const [tab, setTab] = useState<Tab>(() =>
+    VALID_TABS.includes(paramTab as Tab) ? (paramTab as Tab) : 'overview',
+  )
   const [filters, setFilters] = useState<CaseExplorerFilters>({})
+
+  useEffect(() => {
+    if (paramTab && VALID_TABS.includes(paramTab as Tab)) setTab(paramTab as Tab)
+  }, [paramTab])
 
   // Drill into the Case Explorer from any chart segment.
   const explore = (f: CaseExplorerFilters) => {
@@ -164,7 +211,11 @@ export default function InsightsDashboard() {
 
   return (
     <div className="mt-6">
-      <div role="tablist" aria-label="Insights sections" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+      <div
+        role="tablist"
+        aria-label="Insights sections"
+        className="-mx-1 grid grid-cols-2 gap-2 px-1 pb-1 sm:flex sm:gap-2 sm:overflow-x-auto"
+      >
         {INSIGHTS_TABS.map((t) => (
           <InsightsTabCard key={t.id} tab={t} active={tab === t.id} onClick={() => setTab(t.id)} />
         ))}
@@ -173,6 +224,7 @@ export default function InsightsDashboard() {
       {tab === 'overview' && <Overview onExplore={explore} />}
       {tab === 'explorer' && <CaseExplorer filters={filters} onFiltersChange={setFilters} />}
       {tab === 'open' && <OpenCasesQueue />}
+      {tab === 'simulations' && <SimulationLab />}
     </div>
   )
 }
@@ -215,6 +267,18 @@ const INSIGHTS_TABS: InsightsTab[] = [
       </svg>
     ),
   },
+  {
+    id: 'simulations',
+    title: 'Stress Testing',
+    subtitle: 'Backlog clearance under staffing assumptions',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        <path d="M3 3v18h18" />
+        <path d="M7 16l3-4 3 2 4-6" />
+        <path d="M17 8h2v2" />
+      </svg>
+    ),
+  },
 ]
 
 /** Soft segmented tab-card: title + helper subtitle + icon, with a clear active state. */
@@ -225,10 +289,10 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`group relative flex min-w-[168px] flex-1 items-start gap-2.5 overflow-hidden rounded-xl border px-3.5 py-2.5 text-left transition ${
+      className={`group relative flex min-w-0 flex-1 items-start gap-2.5 overflow-hidden rounded-xl border px-3.5 py-2.5 text-left transition sm:min-w-[168px] ${
         active
-          ? 'border-slate-200 bg-white shadow-sm ring-1 ring-slate-100'
-          : 'border-transparent bg-slate-50/70 hover:bg-slate-100'
+          ? 'border-accent-300 bg-white shadow-sm ring-1 ring-accent-200'
+          : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-100'
       }`}
     >
       {/* Accent top border marks the active mode. */}
@@ -237,6 +301,7 @@ function InsightsTabCard({ tab, active, onClick }: { tab: InsightsTab; active: b
         {tab.icon}
       </span>
       <span className="min-w-0">
+        {/* Title stays fully visible (no truncation); subtitle may truncate. */}
         <span className={`block text-sm font-semibold ${active ? 'text-navy-900' : 'text-ink-muted group-hover:text-navy-900'}`}>
           {tab.title}
         </span>
@@ -254,61 +319,70 @@ function Overview({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }
   return (
     <div className="mt-6 space-y-6">
       <OperationalSnapshot />
-      <NYCWorkloadMapPanel
-        onSelectArea={(mode, value) =>
-          onExplore(mode === 'district' ? { councilDistrict: value } : { borough: value })
-        }
-      />
+      {/* Geographic heat map of service-request workload. */}
+      <NYCWorkloadMapPanel />
       <ComplaintTypeRanked onExplore={onExplore} />
       <div className="grid gap-6 lg:grid-cols-2">
         <ChannelMixDonut />
         <OpenStatusMixDonut />
       </div>
       <TrendSection onExplore={onExplore} />
+      <ClosureDurationDistribution />
       <ClosureScatter onExplore={onExplore} />
       <ClosureBottlenecks onExplore={onExplore} />
+      {/* District workload pressure (leaderboard) needs full width so the bars
+          and closure timing stay readable; department workload share is
+          supporting context below it. Stacked full-width on desktop and mobile. */}
       <AreaBottlenecks onExplore={onExplore} />
       <DepartmentWorkload onExplore={onExplore} />
     </div>
   )
 }
-
 // --- Operational snapshot --------------------------------------------------
 
 /**
- * Operational snapshot — six KPI cards, each with a current value, a benchmark
- * or target, a plain-language direction/status badge, and a helper line. Below
- * the cards sits a small benchmark-context strip with the historical NYC 311
- * reference figures in plain operational language (no statistical jargon).
- *
- * Live open-queue figures come from v_nyc_open_review_queue; the workflow
- * throughput figures (readiness, drafts, time saved, approved closures) come
- * from the in-app workflow store; the historical benchmark comes from
- * v_insights_kpis.
+ * Operational snapshot — six KPI cards that summarize the analytics shown below.
+ * Grounded only in aggregate services (no synthetic workflow-store figures): the
+ * open review queue (v_nyc_open_review_queue) and the closed NYC 311 benchmark
+ * (v_insights_kpis, v_insights_closure_bottlenecks). Every value is NYC 311
+ * BENCHMARK data, not a live Brampton operational backlog.
  */
 function OperationalSnapshot() {
   const hist = useLive<InsightsKpis>(getInsightsKpis)
   const open = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
-  const { metrics, cases } = useWorkflow()
+  // Closure bottlenecks power the "Longest closure pressure" KPI. Loaded
+  // independently so a bottleneck-view failure never breaks the snapshot.
+  const bottle = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(40))
 
-  const high = open.data?.highPriority ?? null
+  const k = hist.data
 
-  // Share of AI-summarized files that reached high review readiness (enough
-  // context to prepare a closure draft). AI assists readiness; staff still decide.
-  const readinessPct =
-    metrics.aiSummariesGenerated > 0
-      ? Math.round((metrics.closureDraftsPrepared / metrics.aiSummariesGenerated) * 100)
-      : null
-  // Assigned to an officer but no field outcome recorded yet — work stuck waiting
-  // on a field inspection.
-  const fieldPending = cases.filter((c) => c.assignedOfficer && !c.fieldAction && c.stage !== 'closed').length
-  // Closure drafts in staff-review (plus approved-awaiting-close) — work stuck
-  // waiting on a supervisor approval decision.
-  const approvalsPending = cases.filter((c) => c.stage === 'staff-review' || c.stage === 'approved').length
+  // Each value cell degrades to "…" while loading and "—" on error or null.
+  const fromOpen = (n: number | null | undefined) =>
+    open.loading ? '…' : open.error || n == null ? '—' : fmtInt(n)
+  const fromHist = (s: string | null) => (hist.loading ? '…' : hist.error ? '—' : s ?? '—')
 
-  // Open-queue value cells degrade to "—" with a clear note when not loaded.
-  const openValue = open.loading ? '…' : open.error ? '—' : fmtInt(open.data?.total ?? 0)
-  const highValue = open.loading ? '…' : open.error || high == null ? '—' : fmtInt(high)
+  // Longest closure pressure — the high-volume complaint type with the highest
+  // p90 closure time. Degrades on its own; never blocks the snapshot.
+  const longestClosure = useMemo(() => {
+    const highVol = (bottle.data ?? []).filter((r) => r.total_cases >= HIGH_VOLUME_MIN && r.p90_closure_days != null)
+    return highVol.length ? highVol.reduce((a, b) => (b.p90_closure_days! > a.p90_closure_days! ? b : a)) : null
+  }, [bottle.data])
+  const longestValue =
+    bottle.loading ? '…' : bottle.error || !longestClosure ? '—' : longestClosure.complaint_type
+  const longestDetail = longestClosure ? `90% closed within ${fmtDays(longestClosure.p90_closure_days)}` : undefined
+
+  const topPressure =
+    [k?.top_complaint_type, k?.busiest_council_district ? `District ${k.busiest_council_district}` : null]
+      .filter(Boolean)
+      .join(' · ') || null
+
+  // POC interpretation thresholds (not an official City SLA). These read the NYC
+  // 311 benchmark, so the open-case count is benchmark workload, NOT a live
+  // Brampton backlog — labelled "Benchmark" to avoid that misread.
+  const highCount = open.data?.highPriority ?? null
+  const p90 = k?.p90_closure_days ?? null
+  const highTone: KpiTone = highCount != null && highCount > 0 ? 'priority' : 'neutral'
+  const p90Tone: KpiTone = p90 != null && p90 >= 30 ? 'watch' : 'benchmark'
 
   return (
     <section className="card p-5">
@@ -316,201 +390,121 @@ function OperationalSnapshot() {
         <div>
           <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
           <p className="mt-0.5 text-xs text-ink-subtle">
-            Where work is stuck across the enforcement response workflow — each KPI shows a value, a benchmark, and
-            whether it is on track.
+            A summary of the workload analytics below, from the NYC 311 benchmark (open review queue and closed
+            records). Benchmark data, not a live Brampton backlog.
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
-          Live data
+          Benchmark data
         </span>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <KpiCard
-          title="Open cases waiting"
-          value={openValue}
-          direction="lower"
-          status="neutral"
-          benchmark={open.error ? 'Open queue not loaded' : 'Monitor vs. last refresh or operational target'}
-          helper="Current backlog of open cases that may need review"
+          title="Benchmark open cases"
+          value={fromOpen(open.data?.total)}
+          tone="benchmark"
+          statusLabel="Benchmark"
+          helper="Open cases in the NYC 311 benchmark review queue — not a live Brampton backlog"
         />
         <KpiCard
           title="High priority cases"
-          value={highValue}
-          direction="lower"
-          status={high == null || open.error ? 'neutral' : high >= 20 ? 'attention' : high >= 15 ? 'watch' : 'good'}
-          benchmark="Target below 20"
-          helper="Urgent cases surfaced first for review"
-          note="Lower is better after staff action"
+          value={fromOpen(open.data?.highPriority)}
+          tone={highTone}
+          statusLabel="High priority"
+          helper="Benchmark open cases surfaced for priority review"
         />
         <KpiCard
-          title="AI ready for staff review"
-          value={readinessPct == null ? '—' : `${readinessPct}%`}
-          direction="higher"
-          status={readinessPct == null ? 'neutral' : readinessPct >= 80 ? 'good' : readinessPct >= 60 ? 'watch' : 'attention'}
-          benchmark="Target 80% or higher"
-          helper="Files with enough context to prepare a closure draft"
+          title="Typical historical closure"
+          value={fromHist(k?.avg_closure_days == null ? null : `${k.avg_closure_days.toFixed(1)} d`)}
+          tone="benchmark"
+          statusLabel="Benchmark"
+          helper="Average closure time across closed benchmark records"
         />
         <KpiCard
-          title="Field investigation pending"
-          value={fmtInt(fieldPending)}
-          direction="lower"
-          status={fieldPending === 0 ? 'good' : 'neutral'}
-          benchmark="Target 0 pending overnight"
-          helper="Assigned cases waiting on officer outcome"
+          title="90% closed within"
+          value={fromHist(k?.p90_closure_days == null ? null : `${Math.round(k.p90_closure_days)} d`)}
+          tone={p90Tone}
+          statusLabel={p90Tone === 'watch' ? 'Watch' : 'Benchmark'}
+          helper="Long tail closure benchmark for closed records"
         />
         <KpiCard
-          title="Closure approvals pending"
-          value={fmtInt(approvalsPending)}
-          direction="lower"
-          status={approvalsPending === 0 ? 'good' : 'neutral'}
-          benchmark="Target 0 pending overnight"
-          helper="Drafts waiting for supervisor approval"
+          title="Top workload pressure"
+          value={fromHist(topPressure)}
+          valueClass="text-lg font-semibold leading-snug"
+          tone="pressure"
+          statusLabel="Pressure"
+          helper="Highest workload issue and district in the benchmark view"
         />
         <KpiCard
-          title="Estimated staff time saved"
-          value={`${fmtInt(metrics.manualResearchHoursAvoided)} hrs`}
-          direction="higher"
-          status="good"
-          benchmark="Compared with manual research and drafting baseline"
-          helper="Research and drafting effort avoided"
+          title="Longest closure pressure"
+          value={longestValue}
+          valueClass="text-lg font-semibold leading-snug truncate"
+          detail={longestDetail}
+          tone="pressure"
+          statusLabel="Pressure"
+          helper="Slowest-closing high-volume complaint type by 90% closure time"
         />
       </div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        AI assists readiness, summaries, and drafting. Staff assign, inspect, approve, and close.
+        Signals are based on POC thresholds, not official City SLA.
+        {hist.data && ` Based on ${fmtInt(hist.data.closed_requests)} closed NYC 311 benchmark records and the benchmark open review queue.`}
       </p>
-
-      <BenchmarkContextStrip state={hist} />
     </section>
   )
 }
 
-type KpiDirection = 'higher' | 'lower'
-// 'neutral' simply shows the orientation; 'good' is on-track; 'watch'/'attention'
-// flag a benchmark breach.
-type KpiStatus = 'neutral' | 'good' | 'watch' | 'attention'
+// Subtle status treatment for the snapshot KPI cards — a tinted left border, a
+// small coloured status label, and a faint tinted background. These are POC interpretation cues,
+// NOT an official City SLA. Kept restrained: one accent per card, soft tints.
+type KpiTone = 'neutral' | 'benchmark' | 'watch' | 'pressure' | 'priority'
 
-const KPI_BADGE: Record<KpiStatus, { className: string }> = {
-  neutral: { className: 'bg-slate-100 text-slate-600' },
-  good: { className: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200' },
-  watch: { className: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200' },
-  attention: { className: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200' },
-}
-
-/** Direction/status label: orientation by default, or Watch / Needs attention on a breach. */
-function kpiBadgeLabel(direction: KpiDirection, status: KpiStatus): string {
-  if (status === 'watch') return 'Watch'
-  if (status === 'attention') return 'Needs attention'
-  return direction === 'higher' ? 'Higher is better' : 'Lower is better'
+const KPI_TONE: Record<KpiTone, { border: string; card: string; label: string }> = {
+  neutral: { border: 'border-l-slate-300', card: 'bg-white', label: 'text-slate-600' },
+  benchmark: { border: 'border-l-emerald-400', card: 'bg-emerald-50/30', label: 'text-emerald-700' },
+  watch: { border: 'border-l-amber-400', card: 'bg-amber-50/30', label: 'text-amber-700' },
+  pressure: { border: 'border-l-orange-500', card: 'bg-orange-50/30', label: 'text-orange-700' },
+  priority: { border: 'border-l-rose-500', card: 'bg-rose-50/40', label: 'text-rose-700' },
 }
 
 /**
- * One KPI card: current value, benchmark/target, a plain-language direction or
- * status badge, and a helper line. No statistical jargon.
+ * One KPI card: a title, a value, an optional secondary detail line, and a
+ * plain-language helper. Values come only from aggregate benchmark services — no
+ * targets or synthetic baselines. An optional tone + status label give a subtle,
+ * POC-threshold reading of the metric.
  */
 function KpiCard({
   title,
   value,
-  benchmark,
   helper,
-  direction,
-  status,
-  note,
+  detail,
+  valueClass = 'text-3xl font-bold',
+  tone = 'neutral',
+  statusLabel,
 }: {
   title: string
   value: string
-  benchmark: string
   helper: string
-  direction: KpiDirection
-  status: KpiStatus
-  note?: string
+  detail?: string
+  valueClass?: string
+  tone?: KpiTone
+  statusLabel?: string
 }) {
+  const t = KPI_TONE[tone]
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
+    <div className={`rounded-xl border border-l-4 border-slate-200 p-4 ${t.border} ${t.card}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${KPI_BADGE[status].className}`}
-        >
-          {kpiBadgeLabel(direction, status)}
-        </span>
+        {statusLabel && (
+          <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider ${t.label}`}>
+            {statusLabel}
+          </span>
+        )}
       </div>
-      <div className="mt-1.5 text-3xl font-bold tabular-nums text-navy-900">{value}</div>
-      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-muted">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-          className={`h-3 w-3 shrink-0 ${direction === 'higher' ? 'text-emerald-600' : 'text-sky-600'}`}
-        >
-          {direction === 'higher' ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M12 5v14M5 12l7 7 7-7" />}
-        </svg>
-        <span>Benchmark: {benchmark}</span>
-      </div>
+      <div className={`mt-1.5 tabular-nums text-navy-900 ${valueClass}`}>{value}</div>
+      {detail && <div className="mt-1 text-xs font-medium text-ink-muted">{detail}</div>}
       <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
-      {note && <p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">{note}</p>}
-    </div>
-  )
-}
-
-/**
- * Benchmark context strip — the historical NYC 311 reference figures in plain
- * operational language. Uses "Typical historical closure" instead of an average
- * label, and "Slow case threshold" instead of "P90".
- */
-function BenchmarkContextStrip({ state }: { state: LiveState<InsightsKpis> }) {
-  const { data, loading, error } = state
-  return (
-    <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Benchmark context</div>
-      {error ? (
-        <p className="mt-1 text-xs text-ink-subtle">Historical benchmark unavailable right now.</p>
-      ) : loading ? (
-        <p className="mt-1 text-xs text-ink-subtle">Loading historical benchmark…</p>
-      ) : data ? (
-        <>
-          <p className="mt-1 text-xs text-ink-muted">
-            {fmtInt(data.closed_requests)} closed public NYC 311 records used to compare workload patterns and closure
-            language.
-          </p>
-          <dl className="mt-2 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-3">
-            <BenchmarkItem
-              label="Typical historical closure"
-              value={data.avg_closure_days == null ? '—' : `${data.avg_closure_days.toFixed(1)} days`}
-            />
-            <BenchmarkItem
-              label="Slow case threshold"
-              value={
-                data.p90_closure_days == null
-                  ? '—'
-                  : `most similar cases closed within ${Math.round(data.p90_closure_days)} days`
-              }
-            />
-            <BenchmarkItem
-              label="Top workload pressure"
-              value={
-                [data.top_complaint_type, data.busiest_council_district ? `District ${data.busiest_council_district}` : null]
-                  .filter(Boolean)
-                  .join(', ') || '—'
-              }
-            />
-          </dl>
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-function BenchmarkItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-navy-900">{value}</dd>
     </div>
   )
 }
@@ -696,6 +690,54 @@ function ChannelMixDonut() {
   )
 }
 
+// --- Closure time distribution --------------------------------------------
+
+/**
+ * Closure time distribution — a simple horizontal bar distribution of how long
+ * closed historical requests took to close, from same-day closures to the long
+ * 6-month-plus tail. Reads a precomputed aggregate view (never raw rows). This
+ * is descriptive historical context, not a prediction.
+ */
+function ClosureDurationDistribution() {
+  const { data, loading, error } = useLive<ClosureDurationBucket[]>(getInsightsClosureDurationDistribution)
+  const { rows, total, max } = useMemo(() => {
+    const all = data ?? []
+    const grand = all.reduce((n, r) => n + r.total_cases, 0)
+    return { rows: all, total: grand, max: Math.max(1, ...all.map((r) => r.total_cases)) }
+  }, [data])
+  return (
+    <SectionShell
+      name="the closure time distribution"
+      title="Closure time distribution"
+      subtitle="How long historical requests took to close. This shows the long tail of slower cases, not a prediction."
+      loading={loading}
+      error={error}
+      empty={data?.length === 0 || total === 0}
+    >
+      {data && total > 0 && (
+        <ul className="space-y-2.5">
+          {rows.map((row) => (
+            <li key={row.bucket_order}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="truncate text-ink">{row.closure_bucket}</span>
+                <span className="shrink-0 tabular-nums text-ink-muted">
+                  {fmtInt(row.total_cases)} <span className="text-ink-subtle">· {fmtPct(row.total_cases, total)}</span>
+                </span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-accent-500"
+                  style={{ width: `${Math.max(2, (row.total_cases / max) * 100)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionShell>
+  )
+}
+
 // --- High volume + slow closure scatter -----------------------------------
 
 function ClosureScatter({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
@@ -705,34 +747,85 @@ function ClosureScatter({ onExplore }: { onExplore: (f: CaseExplorerFilters) => 
     [data],
   )
   return (
-    <SectionShell name="the volume vs closure view" title="High volume + slow closure" subtitle="Each point is a complaint type. Top-right = busy and slow." loading={loading} error={error} empty={points.length === 0}>
+    <SectionShell name="the volume vs closure view" title="Volume vs closure time" subtitle="Each point is a complaint type. Upper-right means high volume and slower closure." loading={loading} error={error} empty={points.length === 0}>
       {data && points.length > 0 && <Scatter points={points} onExplore={onExplore} />}
     </SectionShell>
   )
 }
 
 function Scatter({ points, onExplore }: { points: ClosureBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
-  const W = 520
-  const H = 240
-  const pad = 34
-  const maxX = Math.max(1, ...points.map((p) => p.total_cases))
+  const W = 560
+  const H = 260
+  const pad = 40
+  // Log-scaled x so one very high-volume type doesn't squash everything into the
+  // bottom-left. Y (avg closure days) stays linear and intuitive.
+  const xs = points.map((p) => p.total_cases)
+  const minX = Math.max(1, Math.min(...xs))
+  const maxX = Math.max(minX + 1, ...xs)
+  const lMinX = Math.log10(minX)
+  const lMaxX = Math.log10(maxX)
   const maxY = Math.max(1, ...points.map((p) => p.avg_closure_days ?? 0))
-  const x = (v: number) => pad + (v / maxX) * (W - pad * 1.5)
+  const x = (v: number) => pad + ((Math.log10(Math.max(1, v)) - lMinX) / (lMaxX - lMinX)) * (W - pad * 1.5)
   const y = (v: number) => H - pad - (v / maxY) * (H - pad * 1.5)
+
+  // Median crosshair splits the plot into four readable quadrants.
+  const sortedX = [...xs].sort((a, b) => a - b)
+  const sortedY = points.map((p) => p.avg_closure_days ?? 0).sort((a, b) => a - b)
+  const medX = sortedX[Math.floor(sortedX.length / 2)] ?? minX
+  const medY = sortedY[Math.floor(sortedY.length / 2)] ?? 0
+  const cx = x(medX)
+  const cy = y(medY)
+
+  // Top 5 "pressure" points (high volume × slow closure) get a text label.
+  const topLabels = new Set(
+    [...points]
+      .sort((a, b) => (b.total_cases * (b.avg_closure_days ?? 0)) - (a.total_cases * (a.avg_closure_days ?? 0)))
+      .slice(0, 5)
+      .map((p) => p.complaint_type),
+  )
+
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Total cases vs average closure days by complaint type">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Total cases (log scale) versus average closure days by complaint type">
+        {/* Median crosshair + quadrant labels */}
+        <line x1={cx} y1={6} x2={cx} y2={H - pad} stroke="#e2e8f0" strokeDasharray="3 3" />
+        <line x1={pad} y1={cy} x2={W - 6} y2={cy} stroke="#e2e8f0" strokeDasharray="3 3" />
+        <text x={pad + 4} y={14} className="fill-ink-subtle" style={{ fontSize: 8 }}>Lower volume / slower</text>
+        <text x={W - 8} y={14} textAnchor="end" className="fill-ink-subtle" style={{ fontSize: 8 }}>Higher volume / slower</text>
+        <text x={pad + 4} y={H - pad - 4} className="fill-ink-subtle" style={{ fontSize: 8 }}>Lower volume / faster</text>
+        <text x={W - 8} y={H - pad - 4} textAnchor="end" className="fill-ink-subtle" style={{ fontSize: 8 }}>Higher volume / faster</text>
+
+        {/* Axes */}
         <line x1={pad} y1={H - pad} x2={W - 6} y2={H - pad} stroke="#cbd5e1" />
         <line x1={pad} y1={6} x2={pad} y2={H - pad} stroke="#cbd5e1" />
-        <text x={(W + pad) / 2} y={H - 6} textAnchor="middle" className="fill-ink-subtle" style={{ fontSize: 9 }}>Total cases →</text>
+        <text x={(W + pad) / 2} y={H - 6} textAnchor="middle" className="fill-ink-subtle" style={{ fontSize: 9 }}>Total cases (log scale) →</text>
         <text x={10} y={H / 2} textAnchor="middle" transform={`rotate(-90 10 ${H / 2})`} className="fill-ink-subtle" style={{ fontSize: 9 }}>Avg closure days →</text>
-        {points.map((p) => (
-          <circle key={p.complaint_type} cx={x(p.total_cases)} cy={y(p.avg_closure_days ?? 0)} r={4.5} fill="#2563eb" fillOpacity={0.65} className="cursor-pointer" onClick={() => onExplore({ complaintType: p.complaint_type })}>
-            <title>{`${p.complaint_type}\nCases: ${fmtInt(p.total_cases)}\nAvg closure: ${fmtDays(p.avg_closure_days)}`}</title>
-          </circle>
-        ))}
+
+        {points.map((p) => {
+          const px = x(p.total_cases)
+          const py = y(p.avg_closure_days ?? 0)
+          const dot = PRESSURE_META[closurePressure(p.p90_closure_days, p.avg_closure_days)].dot
+          const labelled = topLabels.has(p.complaint_type)
+          return (
+            <g key={p.complaint_type}>
+              <circle cx={px} cy={py} r={labelled ? 5.5 : 4.5} fill={dot} fillOpacity={0.7} className="cursor-pointer" onClick={() => onExplore({ complaintType: p.complaint_type })}>
+                <title>{`${p.complaint_type}\nCases: ${fmtInt(p.total_cases)}\nAvg closure: ${fmtDays(p.avg_closure_days)}\n90% closed within: ${fmtDays(p.p90_closure_days)}`}</title>
+              </circle>
+              {labelled && (
+                <text x={px} y={py - 8} textAnchor={px > W * 0.7 ? 'end' : 'middle'} className="pointer-events-none fill-navy-900" style={{ fontSize: 8, fontWeight: 600 }}>
+                  {p.complaint_type.length > 22 ? `${p.complaint_type.slice(0, 21)}…` : p.complaint_type}
+                </text>
+              )}
+            </g>
+          )
+        })}
       </svg>
-      <p className="mt-1 text-[11px] text-ink-subtle">Select a point to explore that complaint type’s cases.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-subtle">
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.normal.dot }} /> Normal</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.watch.dot }} /> Watch</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRESSURE_META.critical.dot }} /> Critical</span>
+        <span>Select a point to explore that complaint type’s cases.</span>
+      </div>
     </div>
   )
 }
@@ -821,28 +914,44 @@ const HIGH_VOLUME_MIN = 1000
 function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<ClosureBottleneck[]>(() => getInsightsClosureBottlenecks(40))
   const [highVolumeOnly, setHighVolumeOnly] = useState(true)
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   const rows = useMemo(() => {
     const all = data ?? []
     const filtered = highVolumeOnly ? all.filter((r) => r.total_cases >= HIGH_VOLUME_MIN) : all
     return filtered.slice(0, 12)
   }, [data, highVolumeOnly])
   return (
-    <SectionShell name="closure bottlenecks" title="Closure bottlenecks by complaint type" subtitle="Where closure is slowest. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}
+    <SectionShell name="the closure leaderboard" title="Where closure takes longest" subtitle="Complaint types with high volume and longer closure times. These are historical closure patterns, not predictions." loading={loading} error={error} empty={data?.length === 0}
       action={
-        <label className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-          <input type="checkbox" checked={highVolumeOnly} onChange={(e) => setHighVolumeOnly(e.target.checked)} />
-          High volume only (≥ {fmtInt(HIGH_VOLUME_MIN)})
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
+            <input type="checkbox" checked={highVolumeOnly} onChange={(e) => setHighVolumeOnly(e.target.checked)} />
+            High volume only (≥ {fmtInt(HIGH_VOLUME_MIN)})
+          </label>
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+            {(['leaderboard', 'table'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={`rounded-md px-2.5 py-1 capitalize transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+              >
+                {v === 'leaderboard' ? 'Leaderboard' : 'Table'}
+              </button>
+            ))}
+          </div>
+        </div>
       }
     >
-      {data && (
+      {data && view === 'leaderboard' && <ClosureLeaderboard rows={rows} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
-          head={['Complaint type', 'Total', 'Closed', 'Avg', 'Median', 'Slow case']}
-          align={['left', 'right', 'right', 'right', 'right', 'right']}
+          head={['Complaint type', 'Total', 'Avg', 'Median', '90% closed within', 'Pressure']}
+          align={['left', 'right', 'right', 'right', 'right', 'left']}
           rows={rows.map((row) => ({
             key: row.complaint_type,
             onClick: () => onExplore({ complaintType: row.complaint_type }),
-            cells: [row.complaint_type, fmtInt(row.total_cases), fmtInt(row.closed_cases), fmtDays(row.avg_closure_days), fmtDays(row.median_closure_days), fmtDays(row.p90_closure_days)],
+            cells: [row.complaint_type, fmtInt(row.total_cases), fmtDays(row.avg_closure_days), fmtDays(row.median_closure_days), fmtDays(row.p90_closure_days), PRESSURE_META[closurePressure(row.p90_closure_days, row.avg_closure_days)].label],
           }))}
         />
       )}
@@ -850,15 +959,81 @@ function ClosureBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters)
   )
 }
 
-// --- Area bottlenecks ------------------------------------------------------
+/** Visual leaderboard of the slowest-closing complaint types (default view). */
+function ClosureLeaderboard({ rows, onExplore }: { rows: ClosureBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  const maxDuration = Math.max(1, ...rows.map((r) => r.p90_closure_days ?? 0))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => {
+        const meta = PRESSURE_META[closurePressure(row.p90_closure_days, row.avg_closure_days)]
+        const volPct = Math.round((row.total_cases / maxVolume) * 100)
+        const durPct = Math.round(((row.p90_closure_days ?? 0) / maxDuration) * 100)
+        return (
+          <li key={row.complaint_type}>
+            <button
+              type="button"
+              onClick={() => onExplore({ complaintType: row.complaint_type })}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                  <span className="truncate text-sm font-medium text-navy-900">{row.complaint_type}</span>
+                  <span className={`badge ${meta.badge}`}>{meta.label}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-4 text-[11px] tabular-nums text-ink-subtle">
+                  <span><span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases</span>
+                  <span>Median <span className="font-semibold text-ink">{fmtDays(row.median_closure_days)}</span></span>
+                  <span>90% within <span className="font-semibold text-ink">{fmtDays(row.p90_closure_days)}</span></span>
+                </div>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                <MetricBar label="Volume" pct={volPct} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+                <MetricBar label="90% closed within" pct={durPct} barClass={meta.bar} valueText={fmtDays(row.p90_closure_days)} />
+              </div>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+// --- Leaderboard / Table view toggle (shared) ------------------------------
+
+/** Small segmented control to switch a section between the visual leaderboard
+ *  (default) and the raw table — same control used on "Where closure takes longest". */
+function ViewToggle({ view, onChange }: { view: 'leaderboard' | 'table'; onChange: (v: 'leaderboard' | 'table') => void }) {
+  return (
+    <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+      {(['leaderboard', 'table'] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          className={`rounded-md px-2.5 py-1 transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+        >
+          {v === 'leaderboard' ? 'Leaderboard' : 'Table'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// --- District workload pressure --------------------------------------------
 
 function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<AreaBottleneck[]>(() => getInsightsAreaBottlenecks(12))
+  const [view, setView] = useState<'leaderboard' | 'table'>('leaderboard')
   return (
-    <SectionShell name="area bottlenecks" title="Area bottlenecks by council district" subtitle="Workload and closure pressure by the ward-like unit. “Slow case” = days most similar cases closed within." loading={loading} error={error} empty={data?.length === 0}>
-      {data && (
+    <SectionShell name="district workload pressure" title="District workload pressure" subtitle="Districts with the highest workload. Longer bars mean more cases; closure timing is shown as supporting context." loading={loading} error={error} empty={data?.length === 0}
+      action={data && data.length > 0 ? <ViewToggle view={view} onChange={setView} /> : undefined}
+    >
+      {data && view === 'leaderboard' && <DistrictLeaderboard rows={data} onExplore={onExplore} />}
+      {data && view === 'table' && (
         <Table
-          head={['Council district', 'Total', 'Avg', 'Slow case', 'Top complaint type']}
+          head={['Council district', 'Total', 'Avg', '90% closed within', 'Top complaint type']}
           align={['left', 'right', 'right', 'right', 'left']}
           rows={data.map((row) => ({
             key: row.council_district,
@@ -871,13 +1046,96 @@ function AreaBottlenecks({ onExplore }: { onExplore: (f: CaseExplorerFilters) =>
   )
 }
 
-// --- Department workload ---------------------------------------------------
+/** Visual leaderboard of districts by workload (default view). */
+function DistrictLeaderboard({ rows, onExplore }: { rows: AreaBottleneck[]; onExplore: (f: CaseExplorerFilters) => void }) {
+  const maxVolume = Math.max(1, ...rows.map((r) => r.total_cases))
+  return (
+    <ul className="space-y-2">
+      {rows.map((row, i) => (
+        <li key={row.council_district}>
+          <button
+            type="button"
+            onClick={() => onExplore({ councilDistrict: row.council_district })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-5 shrink-0 text-[11px] tabular-nums text-ink-subtle">{i + 1}.</span>
+                <span className="truncate text-sm font-medium text-navy-900">District {row.council_district}</span>
+              </div>
+              <span className="shrink-0 text-[11px] tabular-nums text-ink-subtle">
+                <span className="font-semibold text-ink">{fmtInt(row.total_cases)}</span> cases
+              </span>
+            </div>
+            <div className="mt-1 text-[11px] text-ink-subtle">
+              Top issue: <span className="text-ink-muted">{row.top_complaint_type ?? '—'}</span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-subtle">
+              <span>Avg closure: <span className="font-medium text-ink">{fmtDays(row.avg_closure_days)}</span></span>
+              <span aria-hidden>·</span>
+              <span>90% closed within: <span className="font-medium text-ink">{fmtDays(row.p90_closure_days)}</span></span>
+            </div>
+            <div className="mt-2">
+              <MetricBar label="Volume" pct={Math.round((row.total_cases / maxVolume) * 100)} barClass="bg-sky-300" valueText={fmtInt(row.total_cases)} />
+            </div>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// --- Department / agency workload ------------------------------------------
+
+// Department workload is a part-to-whole composition: which department owns what
+// share of the total service request workload. A donut reads that share directly,
+// where a leaderboard only ranks. Up to 12 departments, so an extended palette
+// keeps neighbouring slices visually distinct.
+const DEPARTMENT_PALETTE = [
+  '#2563eb', '#0ea5e9', '#7c3aed', '#f59e0b', '#10b981', '#ef4444',
+  '#6366f1', '#14b8a6', '#db2777', '#84cc16', '#f97316', '#64748b',
+]
 
 function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters) => void }) {
   const { data, loading, error } = useLive<InsightsDepartmentWorkload[]>(() => getInsightsDepartmentWorkload(12))
+  const [view, setView] = useState<'donut' | 'table'>('donut')
+  const slices = useMemo<Slice[]>(
+    () =>
+      (data ?? []).map((row, i) => ({
+        label: row.department,
+        value: row.total_cases,
+        color: DEPARTMENT_PALETTE[i % DEPARTMENT_PALETTE.length],
+        onClick: () => onExplore({ agency: row.department }),
+      })),
+    [data, onExplore],
+  )
   return (
-    <SectionShell name="department workload" title="Department workload" subtitle="Caseload by agency / assigned department." loading={loading} error={error} empty={data?.length === 0}>
-      {data && (
+    <SectionShell
+      name="department workload share"
+      title="Department workload share"
+      subtitle="Share of total service request workload by department or agency. Select a slice to review matching cases."
+      loading={loading}
+      error={error}
+      empty={data?.length === 0}
+      action={
+        data && data.length > 0 ? (
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+            {(['donut', 'table'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={`rounded-md px-2.5 py-1 capitalize transition ${view === v ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'}`}
+              >
+                {v === 'donut' ? 'Donut' : 'Table'}
+              </button>
+            ))}
+          </div>
+        ) : undefined
+      }
+    >
+      {data && view === 'donut' && <Donut slices={slices} showCounts />}
+      {data && view === 'table' && (
         <Table
           head={['Department / agency', 'Total', 'Open', 'Closed', 'Avg closure']}
           align={['left', 'right', 'right', 'right', 'right']}
@@ -893,10 +1151,301 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 }
 
 // ---------------------------------------------------------------------------
+// Simulations tab — capacity and backlog stress test
+// ---------------------------------------------------------------------------
+
+type Scenario = 'current' | 'reduced' | 'surge'
+
+const SCENARIO_LABEL: Record<Scenario, string> = {
+  current: 'Current capacity',
+  reduced: 'Reduced capacity',
+  surge: 'Surge week',
+}
+
+const SCENARIO_NOTE: Record<Scenario, string> = {
+  current: 'Baseline staffing assumption.',
+  reduced: 'Shows impact if fewer staff are available.',
+  surge: 'Shows effect of increased incoming workload. Uses a simple 1.25× multiplier on open cases.',
+}
+
+const SURGE_MULTIPLIER = 1.25
+
+/** True when a tier string is the High review-priority tier. */
+const isHighTier = (tier: string | null) => (tier ?? '').trim().toLowerCase() === 'high'
+
+/**
+ * SimulationLab — an operations-style capacity stress test over the live open
+ * review queue summary plus user-controlled planning assumptions. This is
+ * scenario math, not a forecast: it helps staff reason about capacity, backlog,
+ * and review sequencing. It never predicts enforcement outcomes.
+ */
+function SimulationLab() {
+  const summary = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
+  const aging = useLive<OpenAgingBucket[]>(getNycOpenAgingBuckets)
+  // A bounded, diversified sample — used as an honest fallback for the open/high
+  // counts if the summary aggregate is unavailable, and for the main pressure type.
+  const sample = useLive<OpenReviewRow[]>(() => getNycOpenQueueDiversified({}, 60))
+
+  const [staff, setStaff] = useState(3)
+  const [perStaff, setPerStaff] = useState(25)
+  const [highFocus, setHighFocus] = useState(100)
+  const [scenario, setScenario] = useState<Scenario>('current')
+
+  const sampleRows = sample.data ?? []
+  const summaryOk = !!summary.data
+  // Prefer the precomputed summary; fall back to the loaded sample (labeled).
+  const baseOpen = summary.data?.total ?? (sample.data ? sampleRows.length : null)
+  const baseHigh =
+    summary.data?.highPriority ?? (sample.data ? sampleRows.filter((r) => isHighTier(r.priority_tier)).length : null)
+  const sampled = !summaryOk && sample.data != null
+
+  const topPressure = useMemo(() => {
+    const rows = sample.data ?? []
+    if (!rows.length) return null
+    const counts = new Map<string, number>()
+    for (const r of rows) {
+      const k = r.complaint_type ?? 'Uncategorized'
+      counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
+    let top: string | null = null
+    let max = 0
+    for (const [k, v] of counts) if (v > max) { max = v; top = k }
+    return top
+  }, [sample.data])
+
+  const topAging = useMemo(() => {
+    const b = aging.data ?? []
+    if (!b.length) return null
+    return [...b].sort((x, y) => y.total_cases - x.total_cases)[0]
+  }, [aging.data])
+
+  // Scenario adjustments — deterministic planning assumptions, not predictions.
+  const effectiveStaff = scenario === 'reduced' ? Math.max(1, Math.ceil(staff * 0.66)) : staff
+  const openCases = baseOpen == null ? null : scenario === 'surge' ? Math.ceil(baseOpen * SURGE_MULTIPLIER) : baseOpen
+  const high = baseHigh
+
+  const dailyCapacity = Math.max(0, effectiveStaff) * Math.max(0, perStaff)
+  const highCapacity = dailyCapacity * (Math.max(0, Math.min(100, highFocus)) / 100)
+  const daysHigh = high != null && highCapacity > 0 ? Math.ceil(high / highCapacity) : null
+  const daysAll = openCases != null && dailyCapacity > 0 ? Math.ceil(openCases / dailyCapacity) : null
+  const capacityGap = openCases == null ? null : openCases - dailyCapacity
+
+  // Deterministic status colors for the result cards (green manageable, amber
+  // pressure, red critical). Thresholds are explicit and auditable.
+  const daysAllStatus: SimStatus =
+    daysAll == null ? 'neutral' : daysAll <= 14 ? 'good' : daysAll <= 60 ? 'watch' : 'critical'
+  const capacityGapStatus: SimStatus =
+    capacityGap == null || openCases == null
+      ? 'neutral'
+      : capacityGap <= 0
+        ? 'good'
+        : capacityGap >= openCases * 0.25
+          ? 'critical'
+          : 'watch'
+
+  const dataUnavailable = baseOpen == null && !summary.loading && !sample.loading
+  const loading = summary.loading && sample.loading
+
+  return (
+    <div className="mt-6 space-y-6">
+      <section className="card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-navy-900">Capacity Stress Testing</h2>
+            <p className="mt-0.5 text-xs text-ink-subtle">Backlog clearance under staffing assumptions — deterministic math, not a forecast.</p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+            Deterministic scenario
+          </span>
+        </div>
+
+        {/* Inputs */}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <NumberInput label="Staff available" value={staff} min={1} max={50} onChange={setStaff} />
+          <NumberInput label="Cases reviewed / staff / day" value={perStaff} min={1} max={200} onChange={setPerStaff} />
+          <NumberInput label="High priority focus (%)" value={highFocus} min={0} max={100} onChange={setHighFocus} />
+          <div>
+            <span className="text-[11px] font-medium text-ink-subtle">Scenario</span>
+            <div className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-1">
+              {(['current', 'reduced', 'surge'] as Scenario[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScenario(s)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                    scenario === s ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'
+                  }`}
+                >
+                  {SCENARIO_LABEL[s]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-xs text-ink-muted">
+          <span className="font-semibold text-ink">{SCENARIO_LABEL[scenario]}:</span> {SCENARIO_NOTE[scenario]}
+          {scenario === 'reduced' && (
+            <span className="text-ink-subtle"> Effective staff this scenario: {effectiveStaff}.</span>
+          )}
+        </div>
+
+        {dataUnavailable ? (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">Open queue data unavailable.</div>
+            <div className="mt-0.5">
+              The open review queue summary could not be loaded, so the scenario math has no live open-case counts to work
+              from. Capacity inputs above still apply once the open dataset is available.
+            </div>
+          </div>
+        ) : loading ? (
+          <div className="mt-4 animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
+        ) : (
+          <>
+            {sampled && (
+              <p className="mt-4 text-[11px] text-amber-800">
+                Open-case counts are sampled from the open review queue (the full-population summary is unavailable), so
+                these figures are a limited sample, not the full queue total.
+              </p>
+            )}
+            <p className="mt-4 text-[11px] leading-relaxed text-ink-muted">
+              This uses live open case counts and simple capacity math: staff available × cases per staff per day. It does
+              not predict enforcement outcomes.
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <SimCard label="Daily review capacity" value={fmtInt(dailyCapacity)} helper={`${effectiveStaff} staff × ${perStaff} cases/day`} />
+              <SimCard label="High priority cases" value={high == null ? '—' : fmtInt(high)} helper={high == null ? 'Tier breakdown unavailable' : `${highFocus}% of capacity directed here first`} />
+              <SimCard label="Days to clear high priority" value={daysHigh == null ? '—' : fmtInt(daysHigh)} helper="At current high-priority focus" />
+              <SimCard
+                label="Days to clear open queue"
+                value={daysAll == null ? '—' : fmtInt(daysAll)}
+                helper={openCases == null ? '—' : `${fmtInt(openCases)} open cases this scenario`}
+                status={daysAllStatus}
+              />
+              <SimCard
+                label="Capacity gap (day 1)"
+                value={capacityGap == null ? '—' : `${capacityGap > 0 ? '+' : ''}${fmtInt(capacityGap)}`}
+                helper={capacityGap == null ? '—' : capacityGap > 0 ? 'Open cases beyond one day of capacity' : 'Capacity covers the open queue in a day'}
+                status={capacityGapStatus}
+              />
+              <SimCard
+                label="Largest open case category"
+                value={topPressure ?? '—'}
+                helper={topPressure ? 'Most common type in the open sample' : 'Sample unavailable'}
+              />
+            </div>
+
+            {topAging && (
+              <p className="mt-3 text-[11px] text-ink-subtle">
+                Main aging bucket: <span className="font-medium text-ink-muted">{topAging.bucket}</span> ({fmtInt(topAging.total_cases)} open cases).
+              </p>
+            )}
+          </>
+        )}
+
+        <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
+          This is deterministic stress testing, not Monte Carlo simulation, not agent based modelling, and not a forecast.
+          It is intended to help supervisors test staffing and backlog assumptions.
+        </p>
+      </section>
+    </div>
+  )
+}
+
+function NumberInput({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="block">
+      <span className="text-[11px] font-medium text-ink-subtle">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          if (!Number.isFinite(n)) return
+          onChange(Math.max(min, Math.min(max, Math.round(n))))
+        }}
+        className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm tabular-nums focus:border-accent-500 focus:outline-none"
+      />
+    </label>
+  )
+}
+
+// Card status — deterministic green (manageable) / amber (pressure) / red
+// (critical), or neutral when no threshold applies.
+type SimStatus = 'neutral' | 'good' | 'watch' | 'critical'
+
+const SIM_CARD_STATUS: Record<SimStatus, { container: string; value: string }> = {
+  neutral: { container: 'border-slate-200 bg-white', value: 'text-navy-900' },
+  good: { container: 'border-emerald-200 bg-emerald-50/60', value: 'text-emerald-800' },
+  watch: { container: 'border-amber-200 bg-amber-50/60', value: 'text-amber-900' },
+  critical: { container: 'border-rose-200 bg-rose-50/60', value: 'text-rose-800' },
+}
+
+function SimCard({
+  label,
+  value,
+  helper,
+  status = 'neutral',
+}: {
+  label: string
+  value: string
+  helper: string
+  status?: SimStatus
+}) {
+  const s = SIM_CARD_STATUS[status]
+  return (
+    <div className={`rounded-xl border p-4 ${s.container}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className={`mt-1.5 truncate text-2xl font-bold tabular-nums ${s.value}`}>{value}</div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Case Explorer tab
 // ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 25
+
+/** A Postgres statement timeout (57014) — the Case Explorer's expected slow-query failure. */
+function isTimeoutError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null
+  const code = e?.code ?? ''
+  const msg = (e?.message ?? '').toLowerCase()
+  return code === '57014' || msg.includes('57014') || msg.includes('statement timeout') || msg.includes('canceling statement')
+}
+
+type ExplorerError = { message: string; timedOut: boolean }
+
+/** Calm, specific timeout state for the Case Explorer (does not imply Insights is down). */
+function CaseExplorerTimeout({ detail }: { detail: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-4 text-sm">
+      <div className="font-semibold text-navy-900">Case Explorer query timed out</div>
+      <p className="mt-1 text-ink-muted">Try a narrower filter, or search by exact case ID.</p>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[11px] text-ink-subtle">Technical detail</summary>
+        <p className="mt-1 font-mono text-[11px] text-ink-subtle">Postgres 57014 statement timeout</p>
+        {detail && <p className="mt-1 font-mono text-[11px] text-ink-subtle/80">{detail}</p>}
+      </details>
+    </div>
+  )
+}
 
 function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilters; onFiltersChange: (f: CaseExplorerFilters) => void }) {
   const navigate = useNavigate()
@@ -904,8 +1453,22 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ExplorerError | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [options, setOptions] = useState<CaseExplorerOptions | null>(null)
+
+  // True when no filter or search is set — the fast default view. A timeout here
+  // shows a friendly "add a filter" prompt rather than a scary error.
+  const hasAnyFilter = Boolean(
+    filters.search ||
+      filters.complaintType ||
+      filters.borough ||
+      filters.councilDistrict ||
+      filters.agency ||
+      filters.status ||
+      filters.dateFrom ||
+      filters.dateTo,
+  )
 
   // Last loaded page (zero-based) for "Load more", and a request token so a slow
   // response for stale filters can never overwrite the current results.
@@ -932,14 +1495,16 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           if (id !== reqRef.current) return
           setRows((prev) => (append ? [...prev, ...res.rows] : res.rows))
           setHasMore(res.hasMore)
+          setNotice(res.notice ?? null)
         })
         .catch((err: unknown) => {
           if (id !== reqRef.current) return
           console.error('Case Explorer load failed:', err)
-          setError(errorMessage(err))
+          setError({ message: errorMessage(err), timedOut: isTimeoutError(err) })
           if (!append) {
             setRows([])
             setHasMore(false)
+            setNotice(null)
           }
         })
         .finally(() => {
@@ -961,7 +1526,9 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
   // Count-free result label. We never claim an exact total over the 3.4M-row
   // table — just how many rows are loaded and whether more are available.
   const countLabel = error
-    ? 'Live data unavailable'
+    ? error.timedOut
+      ? 'Query timed out'
+      : 'Live data unavailable'
     : loading
       ? 'Loading…'
       : rows.length === 0
@@ -994,8 +1561,20 @@ function CaseExplorer({ filters, onFiltersChange }: { filters: CaseExplorerFilte
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider">Live data</span>
         </div>
 
+        {notice && !error && (
+          <div className="mb-3 rounded-md border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-900">{notice}</div>
+        )}
+
         {error ? (
-          <SectionError name="the case list" error={error} />
+          error.timedOut && !hasAnyFilter ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-ink-muted">
+              Select a complaint type, borough, district, or date range to search historical cases.
+            </div>
+          ) : error.timedOut ? (
+            <CaseExplorerTimeout detail={error.message} />
+          ) : (
+            <SectionError name="the case list" error={error.message} />
+          )
         ) : loading ? (
           <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
         ) : rows.length === 0 ? (
@@ -1084,6 +1663,30 @@ const AGING_BUCKETS: { label: string; test: (d: number) => boolean }[] = [
   { label: '8–14 days', test: (d) => d >= 8 && d <= 14 },
   { label: '15+ days', test: (d) => d >= 15 },
 ]
+
+// Plain-language status for an open-case aging bucket, classified by the bucket's
+// lower-bound day count. These are POC interpretation thresholds for demo reading,
+// NOT an official City service-level standard. Robust to 3- or 4-bucket views.
+type AgingStatus = 'current' | 'watch' | 'aging' | 'backlog'
+
+const AGING_STATUS_META: Record<AgingStatus, { label: string; pill: string; border: string }> = {
+  current: { label: 'Current', pill: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200', border: 'border-l-emerald-400' },
+  watch: { label: 'Watch', pill: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200', border: 'border-l-amber-400' },
+  aging: { label: 'Aging', pill: 'bg-orange-50 text-orange-800 ring-1 ring-inset ring-orange-200', border: 'border-l-orange-500' },
+  backlog: { label: 'Backlog', pill: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200', border: 'border-l-rose-500' },
+}
+
+function agingStatus(label: string): AgingStatus {
+  const lower = parseInt(label, 10) // leading day count: "8–14 days" → 8, "15+ days" → 15
+  if (!Number.isFinite(lower)) return 'current'
+  if (lower >= 15) return 'backlog'
+  if (lower >= 8) return 'aging'
+  if (lower >= 3) return 'watch'
+  return 'current'
+}
+
+const AGING_THRESHOLD_HELP =
+  'These colours show how long open benchmark cases have been waiting. Thresholds are for demo interpretation and can be replaced with City SLA rules.'
 
 const OPEN_PAGE_SIZE = 25
 const DIVERSIFIED_SIZE = 60
@@ -1185,13 +1788,26 @@ function OpenCasesQueue() {
         error={null}
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {agingCards.map((b) => (
-            <div key={b.label} className="rounded-lg border border-slate-200 bg-white p-3.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{b.label}</div>
-              <div className="mt-1 text-xl font-semibold tabular-nums text-navy-900">{fmtInt(b.count)}</div>
-            </div>
-          ))}
+          {agingCards.map((b) => {
+            const meta = AGING_STATUS_META[agingStatus(b.label)]
+            return (
+              <div
+                key={b.label}
+                title={AGING_THRESHOLD_HELP}
+                className={`rounded-lg border border-l-4 border-slate-200 bg-white p-3.5 ${meta.border}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{b.label}</div>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.pill}`}>{meta.label}</span>
+                </div>
+                <div className="mt-1 text-xl font-semibold tabular-nums text-navy-900">{fmtInt(b.count)}</div>
+              </div>
+            )
+          })}
         </div>
+        <p className="mt-3 text-[11px] text-ink-subtle" title={AGING_THRESHOLD_HELP}>
+          Compared against POC review-age thresholds, not an official City SLA.
+        </p>
       </SectionShell>
 
       <SectionShell

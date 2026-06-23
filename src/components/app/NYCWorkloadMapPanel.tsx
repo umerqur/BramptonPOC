@@ -1,32 +1,46 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
-  getNYCBoroughBoundaries,
-  getNYCWorkloadByBorough,
-  getNYCCouncilDistrictBoundaries,
-  getNYCWorkloadByCouncilDistrict,
+  getNYCBoroughBoundariesCached,
+  getNYCCouncilDistrictBoundariesCached,
+  getNYCMapMetricsByBoroughCached,
+  getNYCMapMetricsByCouncilDistrictCached,
 } from '../../services/municipalServiceRequests'
+import { calmWorkloadCss } from './workloadColor'
+import {
+  DEFAULT_METRIC,
+  MAP_METRICS,
+  formatMetric,
+  metricConfig,
+  metricRawValue,
+  type AreaMetricValue,
+  type MapMetric,
+} from './mapMetrics'
+import { NYC_BOROUGH_BOUNDARIES } from '../../data/nycBoroughBoundaries'
+
+// The deck.gl 3D workload view is heavy, so it is code-split and only loaded when
+// the user opens the 3D tab. The default 2D operational map never pulls deck.gl.
+const NYCWorkload3DDeck = lazy(() => import('./NYCWorkload3DDeck'))
 
 // NYC 311 workload heat map. Two geographic modes share one choropleth:
-//   * Council district workload (default) — real NYC City Council district
-//     polygons, the finer, ward-like operational unit.
-//   * Borough overview — real NYC borough polygons, the broad executive overview.
-// Both are shaded by live New York City 311 public service request volume read
-// from Supabase. This is decision support only — never a risk prediction and
-// never Toronto geometry. NYC has no wards: boroughs are too broad to stand in
-// for a Brampton/Toronto ward, so council districts are the ward-like view.
-// There is no hardcoded fallback: if the workload aggregate cannot be loaded the
-// map shades nothing and shows a clear "Live data unavailable" notice. Each mode
-// is shaded relative to its own geography level, so the two tabs are not directly
+//   * Council district (default) — real NYC City Council district polygons, the
+//     finer, ward-like operational unit.
+//   * Borough — real NYC borough polygons, the broad executive overview.
+// Both can be shaded/extruded by a SELECTED metric (total complaints, open
+// backlog, average / P90 closure days, high-priority open cases) read live from
+// Supabase. This is decision support only — never a risk prediction and never
+// Toronto geometry. NYC has no wards: boroughs are too broad to stand in for a
+// Brampton/Toronto ward, so council districts are the ward-like view. There is no
+// hardcoded fallback: if the aggregate cannot be loaded the map shades nothing and
+// shows a clear "Live data unavailable" notice. Each mode is shaded relative to its
+// own geography level AND the selected metric, so the views are not directly
 // comparable — the UI states this.
 
 type MapMode = 'district' | 'borough'
 
 /** A geographic area to draw: a borough or a council district. */
-type AreaUnit = { id: string; key: string; label: string; short: string; geometry: unknown }
-/** NYC 311 workload for one area, joined to AreaUnit by `key`. */
-type AreaVolume = { key: string; label: string; volume: number }
+export type AreaUnit = { id: string; key: string; label: string; short: string; geometry: unknown }
 
-/** Case-insensitive borough key for joining workload counts to geometry. */
+/** Case-insensitive borough key for joining metrics to geometry. */
 const boroughKey = (name: string) => name.trim().toLowerCase()
 
 type ModeAdapter = {
@@ -36,28 +50,49 @@ type ModeAdapter = {
   unitLabel: string
   /** Short helper under the title. */
   helper: string
-  /** Short blue banner copy. */
-  banner: string
   /** Side-card heading for the highest area in this mode. */
   cardLabel: string
   loadUnits: () => Promise<AreaUnit[]>
-  loadVolumes: () => Promise<AreaVolume[]>
+  loadMetrics: () => Promise<AreaMetricValue[]>
 }
 
-// Each mode is shaded RELATIVE to its own geography level — district red means
-// "highest district", borough red means "highest borough". The two tabs are not
-// directly comparable, and the UI says so.
+// Each mode is shaded RELATIVE to its own geography level and the selected metric
+// — district red means "highest district for this metric", borough red means
+// "highest borough for this metric". The views are not directly comparable.
 const SCALE_NOTE = 'Each map uses its own scale because districts and boroughs are different geographic levels.'
+
+/** Map a normalized metric row from the service into an AreaMetricValue. */
+function toAreaMetric(
+  key: string,
+  label: string,
+  r: {
+    total_requests: number
+    open_backlog: number
+    avg_closure_days: number | null
+    p90_closure_days: number | null
+    high_priority_open: number
+  },
+): AreaMetricValue {
+  return {
+    key,
+    label,
+    value: r.total_requests,
+    total_requests: r.total_requests,
+    open_backlog: r.open_backlog,
+    avg_closure_days: r.avg_closure_days,
+    p90_closure_days: r.p90_closure_days,
+    high_priority_open: r.high_priority_open,
+  }
+}
 
 const ADAPTERS: Record<MapMode, ModeAdapter> = {
   district: {
     toggleLabel: 'Council districts',
     unitLabel: 'council district',
     helper: 'Operational view by NYC council district.',
-    banner: 'Operational view. Shows live complaint volume by NYC council district.',
     cardLabel: 'Highest council district',
     async loadUnits() {
-      const districts = await getNYCCouncilDistrictBoundaries()
+      const districts = await getNYCCouncilDistrictBoundariesCached()
       return districts.map((d) => ({
         id: String(d.id),
         key: String(d.council_district),
@@ -66,19 +101,18 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
         geometry: d.geojson_geometry,
       }))
     },
-    async loadVolumes() {
-      const rows = await getNYCWorkloadByCouncilDistrict()
-      return rows.map((r) => ({ key: r.area, label: `District ${r.area}`, volume: r.complaint_volume }))
+    async loadMetrics() {
+      const rows = await getNYCMapMetricsByCouncilDistrictCached()
+      return rows.map((r) => toAreaMetric(r.area, `District ${r.area}`, r))
     },
   },
   borough: {
     toggleLabel: 'Boroughs',
     unitLabel: 'borough',
     helper: 'Executive overview by NYC borough.',
-    banner: 'Executive view. Shows live complaint volume by NYC borough.',
     cardLabel: 'Highest borough',
     async loadUnits() {
-      const boroughs = await getNYCBoroughBoundaries()
+      const boroughs = await getNYCBoroughBoundariesCached()
       return boroughs.map((b, idx) => ({
         id: String(b.id ?? idx),
         key: boroughKey(b.borough_name),
@@ -87,18 +121,19 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
         geometry: b.geojson_geometry,
       }))
     },
-    async loadVolumes() {
-      const rows = await getNYCWorkloadByBorough()
-      return rows.map((r) => ({ key: boroughKey(r.borough), label: r.borough, volume: r.complaint_volume }))
+    async loadMetrics() {
+      const rows = await getNYCMapMetricsByBoroughCached()
+      return rows.map((r) => toAreaMetric(boroughKey(r.area), r.area, r))
     },
   },
 }
 
 /**
  * The NYC 311 workload heat map. Defaults to the ward-like council district view
- * and offers a toggle to the broad borough executive overview. Loads the bundled
- * geometry for the active mode plus the per-area NYC 311 workload counts, then
- * renders an interactive choropleth shaded by workload intensity.
+ * and the Total complaints metric. Offers a geography toggle (district/borough)
+ * and a metric toggle. Loads the bundled geometry for the active mode plus the
+ * per-area metric aggregates, then renders an interactive choropleth shaded by the
+ * selected metric.
  */
 export default function NYCWorkloadMapPanel({
   onSelectArea,
@@ -108,43 +143,50 @@ export default function NYCWorkloadMapPanel({
   onSelectArea?: (mode: MapMode, value: string) => void
 } = {}) {
   const [mode, setMode] = useState<MapMode>('district')
+  // Selected metric persists across geography toggles. Total complaints default.
+  const [metric, setMetric] = useState<MapMetric>(DEFAULT_METRIC)
+  // Guard: a metric whose backing view is not populated yet ("Coming soon") can
+  // never become the selected metric, even if a stale call slips through.
+  const selectMetric = (next: MapMetric) => {
+    if (metricConfig(next).available) setMetric(next)
+  }
   const [units, setUnits] = useState<AreaUnit[]>([])
-  const [volumes, setVolumes] = useState<AreaVolume[]>([])
-  // Set when the live workload aggregate cannot be loaded from Supabase. No
-  // hardcoded sample is ever substituted — the map shows a clear notice instead.
+  const [rows, setRows] = useState<AreaMetricValue[]>([])
+  // Set when the live aggregate cannot be loaded from Supabase. No hardcoded
+  // sample is ever substituted — the map shows a clear notice instead.
   const [unavailable, setUnavailable] = useState(false)
 
   useEffect(() => {
     let active = true
     const adapter = ADAPTERS[mode]
     setUnits([])
-    setVolumes([])
+    setRows([])
     setUnavailable(false)
 
-    adapter
-      .loadUnits()
-      .then((data) => active && setUnits(data))
-      .catch((err: unknown) => {
-        // The geometry is bundled, so this should not fail; log and continue.
+    // Load geometry + metric aggregates together so a mode switch is one combined
+    // load instead of two separate chains. Both are cached for the session, so
+    // repeat visits resolve instantly. The geometry loader catches its own error
+    // (bundled data — should not fail) so a metrics failure never blanks the map
+    // geometry, and a metrics failure still surfaces the unavailable state. No fake
+    // fallback is ever substituted.
+    Promise.all([
+      adapter.loadUnits().catch((err: unknown) => {
         console.error('Failed to load NYC area boundaries:', err)
-        if (active) setUnits([])
-      })
-
-    adapter
-      .loadVolumes()
-      .then((data) => {
-        if (!active) return
-        setVolumes(data)
-        setUnavailable(data.length === 0)
-      })
-      .catch((err: unknown) => {
-        // No fake fallback — surface the unavailable state instead.
-        console.error('Failed to load NYC workload from Supabase:', err)
-        if (active) {
-          setVolumes([])
-          setUnavailable(true)
-        }
-      })
+        return [] as AreaUnit[]
+      }),
+      adapter.loadMetrics().then(
+        (data) => ({ ok: true as const, data }),
+        (err: unknown) => {
+          console.error('Failed to load NYC map metrics from Supabase:', err)
+          return { ok: false as const, data: [] as AreaMetricValue[] }
+        },
+      ),
+    ]).then(([unitData, metrics]) => {
+      if (!active) return
+      setUnits(unitData)
+      setRows(metrics.data)
+      setUnavailable(!metrics.ok || metrics.data.length === 0)
+    })
 
     return () => {
       active = false
@@ -156,8 +198,10 @@ export default function NYCWorkloadMapPanel({
       key={mode}
       mode={mode}
       onModeChange={setMode}
+      metric={metric}
+      onMetricChange={selectMetric}
       units={units}
-      volumes={volumes}
+      rows={rows}
       unavailable={unavailable}
       onSelectArea={onSelectArea}
     />
@@ -168,92 +212,185 @@ export default function NYCWorkloadMapPanel({
 // Heat map
 // ---------------------------------------------------------------------------
 
-/** Workload-intensity color from lower (green) → higher (red) for t in [0,1]. */
+/** Intensity color from lower (green) → higher (red) for t in [0,1]. */
 function heatColor(t: number): string {
   const clamped = Math.max(0, Math.min(1, t))
   const hue = 140 - clamped * 128 // 140 green → 12 red, through amber
   return `hsl(${hue.toFixed(0)}, 78%, 52%)`
 }
 
-/** Darker shade of {@link heatColor}, used for the extruded side walls in the
- *  3D view so blocks read with depth while keeping the same hue. */
-function heatSideColor(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t))
-  const hue = 140 - clamped * 128
-  return `hsl(${hue.toFixed(0)}, 64%, 33%)`
+/** Intensity tier label for a normalized value t in [0,1]. */
+function intensityTier(t: number): string {
+  if (t < 1 / 3) return 'Low'
+  if (t < 2 / 3) return 'Medium'
+  return 'High'
 }
 
-/** Workload-intensity tier label for a normalized value t in [0,1]. */
-function workloadTier(t: number): string {
-  if (t < 1 / 3) return 'Low workload'
-  if (t < 2 / 3) return 'Medium workload'
-  return 'High workload'
+/** No-data grey for areas with no value for the selected metric. */
+const NO_DATA_FILL = '#e2e8f0'
+
+/** Supporting-context lines for a row, excluding the selected metric. */
+function supportingContext(row: AreaMetricValue | undefined, metric: MapMetric): string[] {
+  if (!row) return []
+  const lines: string[] = []
+  if (metric !== 'total_requests' && row.total_requests != null) {
+    lines.push(`Total requests: ${row.total_requests.toLocaleString()}`)
+  }
+  if (metric !== 'open_backlog' && row.open_backlog != null) {
+    lines.push(`Open backlog: ${row.open_backlog.toLocaleString()}`)
+  }
+  return lines
+}
+
+// A small segmented toggle: visible cards (not a native select), full label text
+// kept on one line and wrapping to a new row on mobile rather than truncating.
+// Options can be `disabled` — rendered non-interactive with a small "Coming soon"
+// note — for metrics whose backing view is not populated yet.
+function SegmentedControl<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: Array<{ value: T; label: string; disabled?: boolean }>
+  onChange: (value: T) => void
+}) {
+  const hasComingSoon = options.some((o) => o.disabled)
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</span>
+      <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const selected = o.value === value
+          if (o.disabled) {
+            return (
+              <span
+                key={o.value}
+                aria-disabled
+                title="Coming soon"
+                className="inline-flex cursor-not-allowed items-center gap-1.5 whitespace-nowrap rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-400"
+              >
+                {o.label}
+                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  Soon
+                </span>
+              </span>
+            )
+          }
+          return (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange(o.value)}
+              className={`whitespace-nowrap rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+                selected
+                  ? 'border-teal-500 bg-teal-50 text-navy-900 ring-1 ring-teal-500'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-navy-900'
+              }`}
+            >
+              {o.label}
+            </button>
+          )
+        })}
+      </div>
+      {hasComingSoon && (
+        <span className="text-[10px] text-ink-subtle">
+          Coming soon — total complaints is live now. Backlog and closure metrics require the next aggregate refresh.
+        </span>
+      )}
+    </div>
+  )
 }
 
 function NYCWorkloadHeatMap({
   mode,
   onModeChange,
+  metric,
+  onMetricChange,
   units,
-  volumes,
+  rows,
   unavailable,
   onSelectArea,
 }: {
   mode: MapMode
   onModeChange: (mode: MapMode) => void
+  metric: MapMetric
+  onMetricChange: (metric: MapMetric) => void
   units: AreaUnit[]
-  volumes: AreaVolume[]
+  rows: AreaMetricValue[]
   unavailable: boolean
   onSelectArea?: (mode: MapMode, value: string) => void
 }) {
   const adapter = ADAPTERS[mode]
-  const map = useMemo(() => buildAreaMap(units), [units])
+  const cfg = metricConfig(metric)
+  const map = useMemo(() => buildAreaMap(units, mode === 'district'), [units, mode])
 
-  // Index workload counts by area key.
+  // Index metric rows by area key.
   const byArea = useMemo(() => {
-    const m = new Map<string, AreaVolume>()
-    for (const w of volumes) m.set(w.key, w)
+    const m = new Map<string, AreaMetricValue>()
+    for (const r of rows) m.set(r.key, r)
     return m
-  }, [volumes])
+  }, [rows])
 
+  const rowForKey = (key: string | null): AreaMetricValue | undefined =>
+    key == null ? undefined : byArea.get(key)
+  const valueForKey = (key: string | null): number | null => metricRawValue(rowForKey(key), metric)
+
+  // Min/max over the selected metric's non-null values, for relative shading.
   const { min, max } = useMemo(() => {
-    if (volumes.length === 0) return { min: 0, max: 0 }
-    const vols = volumes.map((w) => w.volume)
-    return { min: Math.min(...vols), max: Math.max(...vols) }
-  }, [volumes])
+    const vals = rows.map((r) => metricRawValue(r, metric)).filter((v): v is number => v != null)
+    if (vals.length === 0) return { min: 0, max: 0 }
+    return { min: Math.min(...vals), max: Math.max(...vals) }
+  }, [rows, metric])
 
   const norm = (v: number) => (max > min ? (v - min) / (max - min) : 0.5)
-  const num = (v: number) => v.toLocaleString()
-  const volumeForKey = (key: string | null): AreaVolume | undefined =>
-    key == null ? undefined : byArea.get(key)
   const colorForKey = (key: string | null): string => {
-    const w = volumeForKey(key)
-    return w ? heatColor(norm(w.volume)) : '#e2e8f0'
+    const v = valueForKey(key)
+    return v == null ? NO_DATA_FILL : heatColor(norm(v))
   }
 
   // Area selected by click; area currently hovered. The detail panel shows the
-  // hovered area first, then the clicked area, then the busiest.
+  // hovered area first, then the clicked area, then the highest.
   const [selected, setSelected] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
-  // Visual mode: the 2D choropleth is the default operational view; the 3D
-  // workload view is a secondary, exploratory extrusion. The geography toggle
-  // (district vs borough) is independent of this.
+  // Visual mode: the 2D choropleth is the default operational view; the 3D view
+  // is a secondary, exploratory extrusion. Independent of geography + metric.
   const [view, setView] = useState<'2d' | '3d'>('2d')
 
-  const sortedVolumes = useMemo(() => [...volumes].sort((a, b) => b.volume - a.volume), [volumes])
+  // Highest area for the selected metric (nulls last) — the default focus.
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const av = metricRawValue(a, metric)
+      const bv = metricRawValue(b, metric)
+      if (av == null) return bv == null ? 0 : 1
+      if (bv == null) return -1
+      return bv - av
+    })
+  }, [rows, metric])
 
-  const busiestKey = sortedVolumes[0]?.key ?? null
+  const busiestKey = sortedRows.find((r) => metricRawValue(r, metric) != null)?.key ?? null
   const activeKey = hovered ?? selected ?? busiestKey
-  const activeVolume = volumeForKey(activeKey)
+  const activeRow = rowForKey(activeKey)
+  const activeValue = valueForKey(activeKey)
   const activeShape = map?.shapes.find((s) => s.key === activeKey) ?? null
-  const activeLabel = activeShape?.label ?? activeVolume?.label ?? null
+  const activeLabel = activeShape?.label ?? activeRow?.label ?? null
 
-  const hasWorkload = volumes.length > 0
+  const hasRows = rows.length > 0
+  const hasMetricValues = max > 0 || min > 0 || rows.some((r) => metricRawValue(r, metric) != null)
+  const banner =
+    mode === 'district'
+      ? `Operational view. Shows live ${cfg.title.toLowerCase()} by NYC council district.`
+      : `Executive view. Shows live ${cfg.title.toLowerCase()} by NYC borough.`
 
   return (
-    <section aria-label="NYC 311 workload heat map" className="mt-6 card overflow-hidden">
+    <section aria-label="NYC 311 workload map" className="mt-6 card overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-sm font-semibold text-navy-900">Service request workload intensity</div>
+          <div className="text-sm font-semibold text-navy-900">Service request workload map</div>
           <div className="text-xs text-ink-subtle">{adapter.helper}</div>
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-sky-800 sm:self-auto">
@@ -262,79 +399,117 @@ function NYCWorkloadHeatMap({
         </span>
       </div>
 
-      {/* Toggles: geography level (district vs borough) and visual mode (2D vs 3D). */}
-      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-3.5">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Geography level</span>
-            <div
-              role="tablist"
-              aria-label="Geography level"
-              className="inline-flex items-center gap-1 self-start rounded-2xl bg-slate-100 p-1.5 shadow-inner ring-1 ring-slate-200"
-            >
-              <ModeTab label={ADAPTERS.district.toggleLabel} active={mode === 'district'} onClick={() => onModeChange('district')} />
-              <ModeTab label={ADAPTERS.borough.toggleLabel} active={mode === 'borough'} onClick={() => onModeChange('borough')} />
-            </div>
+      {/* Controls: visible segmented cards for Geography + Metric, plus the 2D/3D
+          switch. Stacks on mobile with full labels kept readable. */}
+      <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-3.5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:gap-6">
+            <SegmentedControl
+              label="Geography"
+              value={mode}
+              onChange={onModeChange}
+              options={[
+                { value: 'district', label: 'Council districts' },
+                { value: 'borough', label: 'Boroughs' },
+              ]}
+            />
+            <SegmentedControl
+              label="Metric"
+              value={metric}
+              onChange={onMetricChange}
+              options={MAP_METRICS.map((m) => ({ value: m.key, label: m.label, disabled: !m.available }))}
+            />
           </div>
-          <div className="flex flex-col gap-1">
+
+          <div className="flex flex-col gap-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">View</span>
-            <div
-              role="tablist"
-              aria-label="Visual mode"
-              className="inline-flex items-center gap-1 self-start rounded-2xl bg-slate-100 p-1.5 shadow-inner ring-1 ring-slate-200"
-            >
-              <ModeTab label="2D operational map" active={view === '2d'} onClick={() => setView('2d')} />
-              <ModeTab label="3D workload view" active={view === '3d'} onClick={() => setView('3d')} />
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
+              <button
+                type="button"
+                onClick={() => setView('2d')}
+                className={view === '2d' ? 'text-navy-900' : 'text-slate-500'}
+              >
+                2D map
+              </button>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={view === '3d'}
+                aria-label="Toggle 3D workload view"
+                onClick={() => setView(view === '2d' ? '3d' : '2d')}
+                className={`relative h-6 w-11 rounded-full transition ${
+                  view === '3d' ? 'bg-teal-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                    view === '3d' ? 'left-5' : 'left-0.5'
+                  }`}
+                />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setView('3d')}
+                className={view === '3d' ? 'text-navy-900' : 'text-slate-500'}
+              >
+                3D
+              </button>
             </div>
           </div>
         </div>
-        <span className="text-[11px] text-ink-subtle">{SCALE_NOTE}</span>
+        <span className="text-[11px] leading-relaxed text-ink-subtle">{SCALE_NOTE}</span>
       </div>
 
       {/* Short mode banner */}
       <div className="flex items-center gap-2 border-b border-sky-100 bg-sky-50/50 px-5 py-2.5 text-xs text-sky-900">
         <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500" />
-        {adapter.banner}
+        {banner}
       </div>
 
       {unavailable && (
         <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-5 py-2 text-[11px] text-amber-900">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-          Live data unavailable. Unable to load the {adapter.unitLabel} workload aggregate.
+          Live data unavailable. Unable to load the {adapter.unitLabel} metric aggregate.
         </div>
       )}
 
       <div className="grid gap-6 p-5 lg:grid-cols-5">
-        {/* Map: real NYC polygons shaded by NYC 311 volume */}
+        {/* Map: real NYC polygons shaded by the selected metric */}
         <div className="lg:col-span-3">
           {map ? (
             <figure className="relative rounded-lg bg-gradient-to-br from-slate-50 to-sky-50 p-4">
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-0 rounded-lg opacity-[0.35]"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(to right, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.06) 1px, transparent 1px)',
-                  backgroundSize: '28px 28px',
-                }}
-              />
+              {view === '2d' && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 rounded-lg opacity-[0.35]"
+                  style={{
+                    backgroundImage:
+                      'linear-gradient(to right, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.06) 1px, transparent 1px)',
+                    backgroundSize: '28px 28px',
+                  }}
+                />
+              )}
 
               {view === '2d' ? (
                 <svg
                   role="img"
-                  aria-label={`NYC ${adapter.unitLabel} boundaries shaded by NYC 311 complaint volume`}
+                  aria-label={`NYC ${adapter.unitLabel} boundaries shaded by ${cfg.title}`}
                   viewBox={`0 0 ${map.width} ${map.height}`}
                   className="relative mx-auto block h-auto w-full"
                 >
                   {map.shapes.map((shape) => {
-                    const w = volumeForKey(shape.key)
+                    const v = valueForKey(shape.key)
+                    const row = rowForKey(shape.key)
                     const isActive = activeKey != null && shape.key === activeKey
+                    const context = supportingContext(row, metric)
                     return (
                       <path
                         key={shape.id}
                         d={shape.d}
                         fill={colorForKey(shape.key)}
-                        fillOpacity={hasWorkload ? (isActive ? 0.92 : 0.72) : 0.4}
+                        fillOpacity={hasRows ? (isActive ? 0.92 : 0.72) : 0.4}
                         stroke={isActive ? '#0f172a' : '#1e3a5f'}
                         strokeWidth={isActive ? 2.25 : map.shapes.length > 20 ? 0.6 : 1}
                         strokeLinejoin="round"
@@ -349,15 +524,31 @@ function NYCWorkloadHeatMap({
                         }}
                       >
                         <title>
-                          {shape.label} — New York City 311 public workload (not a risk prediction)
-                          {w
-                            ? `\nWorkload intensity: ${workloadTier(norm(w.volume))}` +
-                              `\nComplaint volume: ${num(w.volume)}`
-                            : '\nNo NYC 311 workload data'}
+                          {shape.label} — New York City 311 public benchmark (not a risk prediction)
+                          {row
+                            ? `\n${cfg.title}: ${formatMetric(v, metric)}` +
+                              (v != null ? `\nIntensity: ${intensityTier(norm(v))}` : '') +
+                              (context.length ? `\n${context.join('\n')}` : '')
+                            : '\nNo NYC 311 data for this area'}
                         </title>
                       </path>
                     )
                   })}
+                  {/* Borough outline overlay (district mode) — drawn above the
+                      district polygons for geographic context. Non-interactive so
+                      it never blocks district hover/click. */}
+                  {map.boroughPaths.map((d, i) => (
+                    <path
+                      key={`borough-${i}`}
+                      d={d}
+                      fill="none"
+                      stroke="#0f172a"
+                      strokeOpacity={0.55}
+                      strokeWidth={1.4}
+                      strokeLinejoin="round"
+                      pointerEvents="none"
+                    />
+                  ))}
                   {/* Area labels */}
                   {map.shapes.map((shape) => (
                     <text
@@ -376,47 +567,64 @@ function NYCWorkloadHeatMap({
                   ))}
                 </svg>
               ) : (
-                <NYCWorkload3DScene
-                  map={map}
-                  unitLabel={adapter.unitLabel}
-                  volumes={volumes}
-                  min={min}
-                  max={max}
-                  activeKey={activeKey}
-                  hasWorkload={hasWorkload}
-                  num={num}
-                  onHover={setHovered}
-                  onSelect={(key, label) => {
-                    setSelected(key)
-                    onSelectArea?.(mode, mode === 'district' ? key : label)
-                  }}
-                />
+                <Suspense
+                  fallback={
+                    <div className="relative flex h-[320px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 text-sm text-ink-subtle sm:h-[440px]">
+                      Loading 3D workload view…
+                    </div>
+                  }
+                >
+                  <NYCWorkload3DDeck
+                    units={units}
+                    values={rows}
+                    metric={metric}
+                    min={min}
+                    max={max}
+                    unitLabel={adapter.unitLabel}
+                    activeKey={activeKey}
+                    mode={mode}
+                    onHover={setHovered}
+                    onSelect={(key, label) => {
+                      setSelected(key)
+                      onSelectArea?.(mode, mode === 'district' ? key : label)
+                    }}
+                  />
+                </Suspense>
               )}
 
-              {/* Legend — shared by both views, relative to the selected geography level */}
+              {/* Legend — shared by both views, relative to the geography level and metric */}
               <figcaption className="relative mt-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Workload intensity</span>
-                  <span className="text-[10px] text-ink-subtle">Scale: relative to selected geography level</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                    {cfg.title}
+                  </span>
+                  <span className="text-[10px] text-ink-subtle">Low to High for the selected metric</span>
                 </div>
                 <div
                   className="mt-1 h-2 rounded-full"
-                  style={{ background: `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})` }}
+                  style={{
+                    background:
+                      view === '3d'
+                        ? `linear-gradient(to right, ${calmWorkloadCss(0)}, ${calmWorkloadCss(0.4)}, ${calmWorkloadCss(0.72)}, ${calmWorkloadCss(1)})`
+                        : `linear-gradient(to right, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})`,
+                  }}
                 />
                 <div className="mt-1 flex justify-between text-[11px] text-ink-subtle">
                   <span>Low</span>
                   <span>Medium</span>
                   <span>High</span>
+                  {view === '3d' && <span>Highest</span>}
                 </div>
-                {hasWorkload && (
+                {hasMetricValues && (
                   <div className="mt-0.5 text-center text-[10px] text-ink-subtle tabular-nums">
-                    {num(min)} to {num(max)} complaints
+                    {cfg.format(min)} to {cfg.format(max)} {cfg.unit}
                   </div>
                 )}
                 <div className="mt-2 text-[11px] text-ink-subtle">
+                  Height and color are relative to the selected geography and selected metric.
                   {view === '3d'
-                    ? `Height represents complaint volume. Scale remains relative to the selected geography level. Hover or select a ${adapter.unitLabel} for detail.`
-                    : `Hover or select a ${adapter.unitLabel} to see its workload detail.`}
+                    ? ' Heights are scaled for readability and are not physical measurements.'
+                    : ` Hover or select a ${adapter.unitLabel} to see its detail.`}
                 </div>
               </figcaption>
             </figure>
@@ -432,50 +640,24 @@ function NYCWorkloadHeatMap({
           <SelectedAreaPanel
             unitLabel={adapter.unitLabel}
             cardLabel={adapter.cardLabel}
-            volume={activeVolume}
+            metric={metric}
+            row={activeRow}
+            value={activeValue}
             areaLabel={activeLabel}
-            tier={activeVolume ? workloadTier(norm(activeVolume.volume)) : null}
-            color={activeVolume ? heatColor(norm(activeVolume.volume)) : '#e2e8f0'}
+            tier={activeValue != null ? intensityTier(norm(activeValue)) : null}
+            color={activeValue != null ? heatColor(norm(activeValue)) : NO_DATA_FILL}
             interactive={selected != null || hovered != null}
-            hasWorkload={hasWorkload}
+            hasRows={hasRows}
           />
         </div>
       </div>
 
       <div className="border-t border-slate-100 px-5 py-3 text-[11px] text-ink-subtle">
-        <span className="font-semibold text-ink-muted">Supervisor decision support.</span> Where complaint volume is
-        concentrated by {adapter.unitLabel} — input for staffing and routing review. Not a risk prediction.
+        <span className="font-semibold text-ink-muted">Supervisor decision support.</span> Where{' '}
+        {cfg.title.toLowerCase()} is concentrated by {adapter.unitLabel} — input for staffing and routing review. Not a
+        risk prediction.
       </div>
     </section>
-  )
-}
-
-function ModeTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-100 ${
-        active
-          ? 'bg-white text-navy-900 shadow-md ring-1 ring-slate-200'
-          : 'text-ink-muted hover:bg-white/70 hover:text-navy-900'
-      }`}
-    >
-      {/* Selected indicator — a small checkmark dot inside the active tab. */}
-      <span
-        aria-hidden
-        className={`flex h-4 w-4 items-center justify-center rounded-full transition-all duration-200 ${
-          active ? 'scale-100 bg-accent-500 text-white' : 'scale-0 opacity-0'
-        }`}
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
-      </span>
-      {label}
-    </button>
   )
 }
 
@@ -483,39 +665,45 @@ function ModeTab({ label, active, onClick }: { label: string; active: boolean; o
 function SelectedAreaPanel({
   unitLabel,
   cardLabel,
-  volume,
+  metric,
+  row,
+  value,
   areaLabel,
   tier,
   color,
   interactive,
-  hasWorkload,
+  hasRows,
 }: {
   unitLabel: string
   cardLabel: string
-  volume: AreaVolume | undefined
+  metric: MapMetric
+  row: AreaMetricValue | undefined
+  value: number | null
   areaLabel: string | null
   tier: string | null
   color: string
   interactive: boolean
-  hasWorkload: boolean
+  hasRows: boolean
 }) {
-  const num = (v: number) => v.toLocaleString()
+  const cfg = metricConfig(metric)
 
-  if (!hasWorkload) {
+  if (!hasRows) {
     return (
       <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
-        Workload data is not available.
+        Metric data is not available.
       </div>
     )
   }
 
-  if (!volume) {
+  if (!row) {
     return (
       <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-ink-subtle">
-        Hover or select a {unitLabel} on the map to see its workload.
+        Hover or select a {unitLabel} on the map to see its {cfg.title.toLowerCase()}.
       </div>
     )
   }
+
+  const context = supportingContext(row, metric)
 
   return (
     <div className="h-full rounded-lg border border-slate-200 p-4">
@@ -524,301 +712,34 @@ function SelectedAreaPanel({
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
             {interactive ? `Selected ${unitLabel}` : cardLabel}
           </div>
-          <div className="text-2xl font-semibold text-navy-900">{areaLabel || volume.label}</div>
+          <div className="text-2xl font-semibold text-navy-900">{areaLabel || row.label}</div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-ink-muted">
-          <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-          {tier}
-        </span>
+        {tier && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-ink-muted">
+            <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+            {tier}
+          </span>
+        )}
       </div>
 
-      <div className="mt-3 text-base font-semibold text-navy-900 tabular-nums">{num(volume.volume)} complaints</div>
+      <div className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{cfg.title}</div>
+      <div className="text-base font-semibold text-navy-900 tabular-nums">{formatMetric(value, metric)}</div>
+
+      {context.length > 0 && (
+        <dl className="mt-3 space-y-1 text-[11px] text-ink-subtle">
+          {context.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+        </dl>
+      )}
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Live data — relative to the selected geography level.
+        Live NYC 311 benchmark data — relative to the selected geography level and metric.
       </p>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// 3D workload view
-// ---------------------------------------------------------------------------
-
-// Pseudo-3D extrusion of the same choropleth, rendered in plain SVG — no 3D
-// library. Each area is projected onto a tilted ground plane (an oblique /
-// axonometric view) and extruded straight up in screen space by its complaint
-// volume, so busier areas stand taller. The low/medium/high heat colors are
-// reused, the side walls a darker shade for depth. There is no auto-spin: the
-// view opens at a fixed gentle tilt and the user may drag to rotate/tilt within
-// bounds. Like the 2D map, height and color are RELATIVE to the selected
-// geography level — districts vs boroughs each have their own scale.
-
-const TILT_MIN = 0.32
-const TILT_MAX = 0.82
-const YAW_LIMIT = (48 * Math.PI) / 180
-const DEFAULT_YAW = -0.22
-const DEFAULT_TILT = 0.6
-
-function NYCWorkload3DScene({
-  map,
-  unitLabel,
-  volumes,
-  min,
-  max,
-  activeKey,
-  hasWorkload,
-  num,
-  onHover,
-  onSelect,
-}: {
-  map: AreaMap
-  unitLabel: string
-  volumes: AreaVolume[]
-  min: number
-  max: number
-  activeKey: string | null
-  hasWorkload: boolean
-  num: (v: number) => string
-  onHover: (key: string | null) => void
-  onSelect: (key: string, label: string) => void
-}) {
-  const [yaw, setYaw] = useState(DEFAULT_YAW)
-  const [tilt, setTilt] = useState(DEFAULT_TILT)
-  const drag = useRef<{ x: number; y: number; yaw: number; tilt: number } | null>(null)
-
-  const byKey = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const v of volumes) m.set(v.key, v.volume)
-    return m
-  }, [volumes])
-
-  // Taller maps get a slightly taller extrusion budget; capped so blocks never
-  // dwarf the footprint.
-  const maxExtrude = Math.min(map.width, map.height) * 0.34
-
-  // Project + extrude every area for the current yaw/tilt, then frame the scene.
-  // Depends only on geometry + camera (not hover), so dragging is the only thing
-  // that triggers a rebuild.
-  const scene = useMemo(() => {
-    const norm = (v: number) => (max > min ? (v - min) / (max - min) : 0.5)
-    const cx0 = map.width / 2
-    const cy0 = map.height / 2
-    const cosY = Math.cos(yaw)
-    const sinY = Math.sin(yaw)
-    // Map (x,y) → tilted ground-plane screen coords (before height extrusion).
-    const ground = (x: number, y: number): [number, number] => {
-      const dx = x - cx0
-      const dy = y - cy0
-      const rx = dx * cosY - dy * sinY
-      const ry = dx * sinY + dy * cosY
-      return [rx, ry * tilt]
-    }
-
-    type Built = {
-      shape: AreaShape
-      base: [number, number][]
-      top: [number, number][]
-      /** Average screen-y of the base — painter's-order depth (back to front). */
-      depth: number
-      /** Top-face centroid for the label. */
-      lx: number
-      ly: number
-      t: number
-      volume: number | undefined
-    }
-
-    let minX = Infinity
-    let maxX = -Infinity
-    let minY = Infinity
-    let maxY = -Infinity
-
-    const built: Built[] = map.shapes.map((shape) => {
-      const volume = byKey.get(shape.key)
-      const t = volume != null ? norm(volume) : 0
-      // Even zero-volume areas get a thin slab so they read as a ground tile.
-      const height = volume != null ? 5 + t * maxExtrude : 2
-      const base = shape.ring.map(([x, y]) => ground(x, y))
-      const top = base.map(([x, y]) => [x, y - height] as [number, number])
-
-      let depth = 0
-      let lx = 0
-      let ly = 0
-      for (const [, y] of base) depth += y
-      depth /= base.length || 1
-      for (const [x, y] of top) {
-        lx += x
-        ly += y
-      }
-      lx /= top.length || 1
-      ly /= top.length || 1
-
-      for (const [x, y] of base) {
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-      }
-      for (const [, y] of top) {
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-      }
-
-      return { shape, base, top, depth, lx, ly, t, volume }
-    })
-
-    // Paint far areas first so nearer (taller) blocks overlap them.
-    built.sort((a, b) => a.depth - b.depth)
-
-    const pad = 26
-    const offX = pad - minX
-    const offY = pad - minY
-    const width = maxX - minX + pad * 2
-    const height = maxY - minY + pad * 2
-    return { built, offX, offY, width, height }
-  }, [map, byKey, yaw, tilt, maxExtrude, min, max])
-
-  const { built, offX, offY, width, height } = scene
-
-  const px = (x: number) => (x + offX).toFixed(1)
-  const py = (y: number) => (y + offY).toFixed(1)
-  const ringPath = (pts: [number, number][]) =>
-    pts.map(([x, y], i) => `${i ? 'L' : 'M'}${px(x)} ${py(y)}`).join(' ') + ' Z'
-
-  // Only the walls facing the viewer (outward normal pointing down-screen) are
-  // drawn, so blocks look solid instead of showing a skirt on the far side.
-  const wallPath = (base: [number, number][], top: [number, number][]) => {
-    const n = base.length
-    let cx = 0
-    let cy = 0
-    for (const [x, y] of base) {
-      cx += x
-      cy += y
-    }
-    cx /= n || 1
-    cy /= n || 1
-    let d = ''
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n
-      const [x1, y1] = base[i]
-      const [x2, y2] = base[j]
-      // Outward normal of this edge, flipped to point away from the centroid.
-      let nx = y2 - y1
-      let ny = -(x2 - x1)
-      const mx = (x1 + x2) / 2 - cx
-      const my = (y1 + y2) / 2 - cy
-      if (nx * mx + ny * my < 0) {
-        nx = -nx
-        ny = -ny
-      }
-      // Visible when the wall faces toward the viewer (down the screen).
-      if (ny <= 0) continue
-      const [tx1, ty1] = top[i]
-      const [tx2, ty2] = top[j]
-      d += `M${px(x1)} ${py(y1)} L${px(x2)} ${py(y2)} L${px(tx2)} ${py(ty2)} L${px(tx1)} ${py(ty1)} Z `
-    }
-    return d
-  }
-
-  const endDrag = () => {
-    drag.current = null
-  }
-
-  const labelSize = Math.max(8, map.labelSize * 1.05)
-
-  return (
-    <div className="relative">
-      <svg
-        role="img"
-        aria-label={`3D workload view: NYC ${unitLabel} extruded by NYC 311 complaint volume`}
-        viewBox={`0 0 ${width.toFixed(1)} ${height.toFixed(1)}`}
-        className="relative mx-auto block h-auto w-full touch-none select-none"
-        style={{ cursor: drag.current ? 'grabbing' : 'grab' }}
-        onPointerDown={(e) => {
-          ;(e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId)
-          drag.current = { x: e.clientX, y: e.clientY, yaw, tilt }
-        }}
-        onPointerMove={(e) => {
-          const d = drag.current
-          if (!d) return
-          const nextYaw = d.yaw + (e.clientX - d.x) * 0.005
-          const nextTilt = d.tilt - (e.clientY - d.y) * 0.0018
-          setYaw(Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, nextYaw)))
-          setTilt(Math.max(TILT_MIN, Math.min(TILT_MAX, nextTilt)))
-        }}
-        onPointerUp={endDrag}
-        onPointerLeave={endDrag}
-        onPointerCancel={endDrag}
-      >
-        {built.map(({ shape, base, top, t, volume }) => {
-          const isActive = activeKey != null && shape.key === activeKey
-          const topFill = hasWorkload && volume != null ? heatColor(t) : '#e2e8f0'
-          const sideFill = hasWorkload && volume != null ? heatSideColor(t) : '#cbd5e1'
-          const walls = wallPath(base, top)
-          return (
-            <g key={shape.id}>
-              {walls && (
-                <path d={walls} fill={sideFill} fillOpacity={0.95} stroke={sideFill} strokeWidth={0.4} pointerEvents="none" />
-              )}
-              <path
-                d={ringPath(top)}
-                fill={topFill}
-                fillOpacity={hasWorkload ? (isActive ? 0.96 : 0.82) : 0.5}
-                stroke={isActive ? '#0f172a' : '#1e3a5f'}
-                strokeWidth={isActive ? 1.8 : map.shapes.length > 20 ? 0.5 : 0.9}
-                strokeLinejoin="round"
-                className="cursor-pointer transition-[fill-opacity]"
-                onMouseEnter={() => onHover(shape.key)}
-                onMouseLeave={() => onHover(null)}
-                onClick={() => onSelect(shape.key, shape.label)}
-              >
-                <title>
-                  {shape.label} — New York City 311 public workload (not a risk prediction)
-                  {volume != null
-                    ? `\nWorkload intensity: ${workloadTier(t)}` + `\nComplaint volume: ${num(volume)}`
-                    : '\nNo NYC 311 workload data'}
-                </title>
-              </path>
-            </g>
-          )
-        })}
-        {/* Labels on the top faces, painted last so they stay readable. */}
-        {built.map(({ shape, lx, ly }) => (
-          <text
-            key={`label-${shape.id}`}
-            x={px(lx)}
-            y={py(ly)}
-            textAnchor="middle"
-            dominantBaseline="central"
-            className="pointer-events-none fill-navy-900"
-            style={{ fontSize: labelSize, fontWeight: 700, paintOrder: 'stroke' }}
-            stroke="#ffffff"
-            strokeWidth={labelSize / 3.5}
-          >
-            {shape.short}
-          </text>
-        ))}
-      </svg>
-
-      {/* Lightweight view controls — drag hint + reset. No auto-spin. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-1 flex items-center justify-between px-1">
-        <span className="pointer-events-none rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-medium text-ink-subtle ring-1 ring-slate-200">
-          Drag to rotate / tilt
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            setYaw(DEFAULT_YAW)
-            setTilt(DEFAULT_TILT)
-          }}
-          className="pointer-events-auto rounded-full bg-white/80 px-2.5 py-0.5 text-[10px] font-semibold text-ink-muted ring-1 ring-slate-200 transition-colors hover:bg-white hover:text-navy-900"
-        >
-          Reset view
-        </button>
-      </div>
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // GeoJSON → SVG helpers
@@ -830,14 +751,11 @@ type AreaShape = {
   id: string
   label: string
   short: string
-  /** Area key used to join NYC 311 workload counts. */
+  /** Area key used to join the metric rows. */
   key: string
   d: string
   cx: number
   cy: number
-  /** Projected points of the largest ring (SVG space) — used by the 3D view to
-   *  extrude each area. Decimated so the pseudo-3D render stays performant. */
-  ring: [number, number][]
 }
 
 type AreaMap = {
@@ -845,6 +763,8 @@ type AreaMap = {
   height: number
   labelSize: number
   shapes: AreaShape[]
+  /** Borough outline paths, projected in the same space — overlaid in district mode. */
+  boroughPaths: string[]
 }
 
 type MapEntry = {
@@ -900,8 +820,10 @@ function extractRings(geometry: unknown): LngLat[][] {
   return rings
 }
 
-/** Projects geometry-bearing entries into a shared SVG coordinate space. */
-function buildMap(entries: MapEntry[]): AreaMap | null {
+/** Projects geometry-bearing entries into a shared SVG coordinate space. The
+ *  optional overlay rings (e.g. borough boundaries) are projected with the SAME
+ *  transform so they align exactly on top of the primary shapes. */
+function buildMap(entries: MapEntry[], overlayRings: LngLat[][][] = []): AreaMap | null {
   const usable = entries.filter((e) => e.rings.length > 0)
   if (usable.length === 0) return null
 
@@ -950,34 +872,46 @@ function buildMap(entries: MapEntry[]): AreaMap | null {
       })
       .join(' ')
 
-    // Project the largest ring once, reused for both the label centroid and the
-    // 3D extrusion. Decimate dense rings so the pseudo-3D render stays light.
+    // Label centroid from the largest ring (mean of its projected vertices).
     const largest = entry.rings.reduce((a, b) => (b.length > a.length ? b : a), entry.rings[0])
-    const step = largest.length > 120 ? Math.ceil(largest.length / 120) : 1
-    const ring: [number, number][] = []
     let sx = 0
     let sy = 0
-    for (let i = 0; i < largest.length; i++) {
-      const [lng, lat] = largest[i]
+    for (const [lng, lat] of largest) {
       const [x, y] = project(lng, lat)
       sx += x
       sy += y
-      if (i % step === 0) ring.push([fmt(x), fmt(y)])
     }
     const cx = sx / largest.length
     const cy = sy / largest.length
 
-    return { id: entry.id, label: entry.label, short: entry.short, key: entry.key, d, cx: fmt(cx), cy: fmt(cy), ring }
+    return { id: entry.id, label: entry.label, short: entry.short, key: entry.key, d, cx: fmt(cx), cy: fmt(cy) }
   })
+
+  // Borough overlay paths, projected with the same transform as the shapes above.
+  const boroughPaths = overlayRings
+    .map((rings) =>
+      rings
+        .map((ring) => {
+          const segs = ring.map(([lng, lat], i) => {
+            const [x, y] = project(lng, lat)
+            return `${i === 0 ? 'M' : 'L'}${fmt(x)} ${fmt(y)}`
+          })
+          return `${segs.join(' ')} Z`
+        })
+        .join(' '),
+    )
+    .filter((d) => d.length > 0)
 
   // Smaller labels when there are many areas (e.g. 51 council districts).
   const baseLabel = Math.max(9, Math.min(16, width / 48))
   const labelSize = shapes.length > 20 ? Math.max(6.5, baseLabel * 0.62) : baseLabel
-  return { width: fmt(width), height: fmt(height), labelSize, shapes }
+  return { width: fmt(width), height: fmt(height), labelSize, shapes, boroughPaths }
 }
 
-/** Projects the real NYC area polygons into the shared SVG space. */
-function buildAreaMap(units: AreaUnit[]): AreaMap | null {
+/** Projects the real NYC area polygons into the shared SVG space. When
+ *  `boroughOverlay` is set (district mode), borough outlines are projected with
+ *  the same transform so they can be drawn on top for geographic context. */
+function buildAreaMap(units: AreaUnit[], boroughOverlay = false): AreaMap | null {
   const entries: MapEntry[] = units.map((u, idx) => ({
     id: u.id || String(idx),
     label: u.label,
@@ -985,5 +919,8 @@ function buildAreaMap(units: AreaUnit[]): AreaMap | null {
     key: u.key,
     rings: extractRings(u.geometry),
   }))
-  return buildMap(entries)
+  const overlayRings = boroughOverlay
+    ? NYC_BOROUGH_BOUNDARIES.map((b) => extractRings(b.geojson_geometry))
+    : []
+  return buildMap(entries, overlayRings)
 }

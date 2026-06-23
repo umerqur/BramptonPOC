@@ -23,6 +23,18 @@ const INSIGHTS_AREA_BOTTLENECKS_VIEW = 'v_insights_area_bottlenecks'
 const INSIGHTS_DEPARTMENT_WORKLOAD_VIEW = 'v_insights_department_workload'
 const INSIGHTS_MONTHLY_TREND_VIEW = 'v_insights_monthly_trend'
 const INSIGHTS_CHANNEL_MIX_VIEW = 'v_insights_channel_mix'
+const INSIGHTS_CLOSURE_DURATION_DISTRIBUTION_VIEW = 'v_insights_closure_duration_distribution'
+
+// Synthetic field activity simulation — generated operational activity derived
+// from the NYC 311 benchmark timing and status patterns (not Brampton
+// operational patrol data). These four precomputed aggregate views demonstrate
+// how patrol logs, officer activity, and closure bottlenecks could be visualized
+// once real Brampton operational data is connected. The React app reads only the
+// small aggregates here, never the underlying synthetic rows.
+const SYNTHETIC_FIELD_ACTIVITY_SUMMARY_VIEW = 'v_synthetic_field_activity_summary'
+const SYNTHETIC_FIELD_ACTIVITY_BY_BOROUGH_VIEW = 'v_synthetic_field_activity_by_borough'
+const SYNTHETIC_FIELD_ACTIVITY_BY_CLOSURE_BUCKET_VIEW = 'v_synthetic_field_activity_by_closure_bucket'
+const SYNTHETIC_FIELD_ACTIVITY_BY_COMPLAINT_TYPE_VIEW = 'v_synthetic_field_activity_by_complaint_type'
 
 function requireClient() {
   if (!isSupabaseConfigured || !supabase) {
@@ -291,6 +303,36 @@ export async function getInsightsStatusMix(): Promise<StatusMixRow[]> {
   }))
 }
 
+// ---------------------------------------------------------------------------
+// 9. Closure time distribution
+// ---------------------------------------------------------------------------
+
+export type ClosureDurationBucket = {
+  closure_bucket: string
+  bucket_order: number
+  total_cases: number
+}
+
+/**
+ * Closure time distribution — closed historical requests bucketed by how long
+ * they took to close, ordered fastest → slowest (bucket_order). This is
+ * descriptive historical context that shows the long tail of slower cases, not
+ * a prediction. Reads the precomputed aggregate view, never raw case rows.
+ */
+export async function getInsightsClosureDurationDistribution(): Promise<ClosureDurationBucket[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(INSIGHTS_CLOSURE_DURATION_DISTRIBUTION_VIEW)
+    .select('closure_bucket, bucket_order, total_cases')
+    .order('bucket_order', { ascending: true })
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    closure_bucket: (r.closure_bucket as string) || '—',
+    bucket_order: num(r.bucket_order),
+    total_cases: num(r.total_cases),
+  }))
+}
+
 /**
  * Whether a channel mix is meaningful enough to chart. NYC 311 records often
  * lack a usable channel value; if the dataset is empty or overwhelmingly
@@ -302,4 +344,109 @@ export function isChannelMixMeaningful(rows: ChannelMixRow[]): boolean {
   if (total === 0) return false
   const unknown = rows.find((r) => r.channel === 'Unknown')?.total_cases ?? 0
   return unknown / total < 0.95
+}
+
+// ---------------------------------------------------------------------------
+// 10. Synthetic field activity simulation
+// ---------------------------------------------------------------------------
+//
+// Generated operational activity from NYC 311 benchmark timing and status
+// patterns — NOT Brampton operational patrol data. This demonstrates how patrol
+// logs, officer activity, and closure bottlenecks could be visualized once real
+// Brampton operational data is connected. Each function reads a small precomputed
+// aggregate view, never the underlying synthetic rows.
+
+export type SyntheticFieldActivitySummary = {
+  sampled_cases: number
+  planned_field_activities: number
+  active_style_cases: number
+  avg_activity_intensity: number
+  latest_source_closed_at: string | null
+}
+
+export async function getSyntheticFieldActivitySummary(): Promise<SyntheticFieldActivitySummary> {
+  const client = requireClient()
+  const { data, error } = await client.from(SYNTHETIC_FIELD_ACTIVITY_SUMMARY_VIEW).select('*').single()
+  if (error) throw error
+  const r = data as Record<string, unknown>
+  return {
+    sampled_cases: num(r.sampled_cases),
+    planned_field_activities: num(r.planned_field_activities),
+    active_style_cases: num(r.active_style_cases),
+    avg_activity_intensity: num(r.avg_activity_intensity),
+    latest_source_closed_at: (r.latest_source_closed_at as string | null) ?? null,
+  }
+}
+
+export type SyntheticFieldActivityByBorough = {
+  borough: string
+  sampled_cases: number
+  planned_field_activities: number
+  active_style_cases: number
+  avg_activity_intensity: number
+}
+
+export async function getSyntheticFieldActivityByBorough(): Promise<SyntheticFieldActivityByBorough[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(SYNTHETIC_FIELD_ACTIVITY_BY_BOROUGH_VIEW)
+    .select('borough, sampled_cases, planned_field_activities, active_style_cases, avg_activity_intensity')
+    .order('planned_field_activities', { ascending: false })
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    borough: (r.borough as string) || 'Unknown',
+    sampled_cases: num(r.sampled_cases),
+    planned_field_activities: num(r.planned_field_activities),
+    active_style_cases: num(r.active_style_cases),
+    avg_activity_intensity: num(r.avg_activity_intensity),
+  }))
+}
+
+export type SyntheticFieldActivityByClosureBucket = {
+  closure_bucket: string
+  bucket_order: number
+  sampled_cases: number
+  planned_field_activities: number
+  avg_activity_intensity: number
+}
+
+export async function getSyntheticFieldActivityByClosureBucket(): Promise<SyntheticFieldActivityByClosureBucket[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(SYNTHETIC_FIELD_ACTIVITY_BY_CLOSURE_BUCKET_VIEW)
+    .select('closure_bucket, bucket_order, sampled_cases, planned_field_activities, avg_activity_intensity')
+    .order('bucket_order', { ascending: true })
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    closure_bucket: (r.closure_bucket as string) || '—',
+    bucket_order: num(r.bucket_order),
+    sampled_cases: num(r.sampled_cases),
+    planned_field_activities: num(r.planned_field_activities),
+    avg_activity_intensity: num(r.avg_activity_intensity),
+  }))
+}
+
+export type SyntheticFieldActivityByComplaintType = {
+  complaint_type: string
+  sampled_cases: number
+  planned_field_activities: number
+  active_style_cases: number
+  avg_activity_intensity: number
+}
+
+export async function getSyntheticFieldActivityByComplaintType(limit = 12): Promise<SyntheticFieldActivityByComplaintType[]> {
+  const client = requireClient()
+  const { data, error } = await client
+    .from(SYNTHETIC_FIELD_ACTIVITY_BY_COMPLAINT_TYPE_VIEW)
+    .select('complaint_type, sampled_cases, planned_field_activities, active_style_cases, avg_activity_intensity')
+    .order('planned_field_activities', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    complaint_type: (r.complaint_type as string) || 'Uncategorized',
+    sampled_cases: num(r.sampled_cases),
+    planned_field_activities: num(r.planned_field_activities),
+    active_style_cases: num(r.active_style_cases),
+    avg_activity_intensity: num(r.avg_activity_intensity),
+  }))
 }

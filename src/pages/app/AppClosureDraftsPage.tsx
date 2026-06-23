@@ -3,7 +3,7 @@ import { Link, Navigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
 import { isSupabaseConfigured } from '../../lib/supabase'
-import { FIELD_OUTCOME_LABELS, formatDateTime } from '../../services/demoWorkflowService'
+import { FIELD_OUTCOME_LABELS, fieldOutcomeNeedsStructuredAction, formatDateTime } from '../../services/demoWorkflowService'
 import {
   isSendableEmail,
   markResidentRequestClosedFromClosureReview,
@@ -17,6 +17,7 @@ import {
   NoCaseState,
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
+import { ProvenanceStrip } from '../../components/app/ProvenanceLabels'
 import type { DemoCase } from '../../data/demoWorkflowTypes'
 
 // Closure Drafts — the staff review page. The system assembled a policy-aligned
@@ -113,6 +114,8 @@ export default function AppClosureDraftsPage() {
 
       {c.stage === 'closed' ? (
         <ResidentUpdateView c={c} sendResult={sendResult} statusWarning={statusWarning} />
+      ) : fieldOutcomeNeedsStructuredAction(c.fieldAction) ? (
+        <IncompleteOutcomeView c={c} />
       ) : c.draft ? (
         <ReviewView c={c} sending={sending} onApprove={(body) => handleApprove(c, body)} />
       ) : (
@@ -151,6 +154,16 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
         </span>
       </div>
 
+      <div className="mt-4">
+        <ProvenanceStrip />
+      </div>
+
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-700">
+        <span className="font-semibold">Semantic retrieval is reference only.</span> Similar case retrieval (Cohere
+        embeddings + Qdrant + Cohere rerank) may support staff review, but the resident closure message remains rules
+        based and supervisor approved.
+      </div>
+
       {c.source.kind === 'nyc_open' && (
         <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-2.5 text-xs text-teal-900">
           <span className="font-semibold">NYC open benchmark closure.</span> Source record remains unchanged. This
@@ -175,7 +188,7 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
       )}
 
       <div className="mt-4 grid gap-6 lg:grid-cols-3">
-        {/* AI summary recap */}
+        {/* Case summary recap */}
         <div className="space-y-6">
           <Panel title="Case summary">
             <p className="text-sm leading-relaxed text-ink">{c.summary.plainLanguage}</p>
@@ -267,6 +280,27 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
         </div>
       </div>
     </>
+  )
+}
+
+// A field visit was recorded before structured enforcement actions existed, so
+// the disposition is unknown. Block closure approval until a structured action is
+// set — never infer a ticket/notice/warning from legacy free text.
+function IncompleteOutcomeView({ c }: { c: DemoCase }) {
+  return (
+    <div className="mt-6 card p-8 text-center">
+      <span className="badge bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200">Field outcome incomplete</span>
+      <h2 className="mt-3 text-base font-semibold text-navy-900">Structured enforcement action required</h2>
+      <p className="mx-auto mt-2 max-w-md text-sm text-ink-muted">
+        This field outcome was recorded before structured enforcement actions were available. Select the recorded
+        enforcement action before preparing a closure draft.
+      </p>
+      <div className="mt-5 flex flex-wrap justify-center gap-3">
+        <Link to={`/app/workbench?case=${c.id}`} className="btn-secondary">
+          Open case workbench
+        </Link>
+      </div>
+    </div>
   )
 }
 

@@ -81,6 +81,18 @@ export type CaseExplorerPage = {
   hasMore: boolean
   /** Next zero-based page index, or null when there are no more rows. */
   nextPage: number | null
+  /** Optional UI guidance (e.g. the free-text search was narrowed for speed). */
+  notice?: string
+}
+
+/** Minimum free-text length before a (non-exact-ID) wildcard search runs. */
+const MIN_SEARCH_LENGTH = 3
+
+/** Whether any equality/range filter is set that narrows the candidate set. */
+function hasNarrowingFilter(f: CaseExplorerFilters): boolean {
+  return Boolean(
+    f.complaintType || f.borough || f.councilDistrict || f.agency || f.status || f.dateFrom || f.dateTo,
+  )
 }
 
 /** Closure duration in whole days, or null when the case is not closed cleanly. */
@@ -135,20 +147,43 @@ export async function getNycCaseExplorerPage(
     }
   }
 
-  let query = client.from(COMPLAINTS_TABLE).select(EXPLORER_COLUMNS).eq('source_city', 'NYC')
+  // Match the partial-index predicate (submitted_at IS NOT NULL) explicitly so
+  // Postgres uses the fast Case Explorer plan consistently on the 3.4M-row table.
+  let query = client
+    .from(COMPLAINTS_TABLE)
+    .select(EXPLORER_COLUMNS)
+    .eq('source_city', 'NYC')
+    .not('submitted_at', 'is', null)
+
+  let notice: string | undefined
 
   if (term) {
+    // The exact-ID short circuit above already handled a full case ID. A very
+    // short term would force a wildcard scan over 3.4M rows, so require a
+    // minimum length and guide the user instead.
+    if (term.length < MIN_SEARCH_LENGTH) {
+      return {
+        rows: [],
+        hasMore: false,
+        nextPage: null,
+        notice: 'Enter at least 3 characters, or search by an exact case ID.',
+      }
+    }
     const safeTerm = term.replace(/[,()*%]/g, ' ').trim()
     if (safeTerm) {
-      query = query.or(
-        [
-          `case_id.ilike.%${safeTerm}%`,
-          `source_dataset_id.ilike.%${safeTerm}%`,
-          `complaint_type.ilike.%${safeTerm}%`,
-          `address_or_location.ilike.%${safeTerm}%`,
-          `request_detail.ilike.%${safeTerm}%`,
-        ].join(','),
-      )
+      // A broad OR ILIKE across complaint_type / address / request_detail is only
+      // affordable once a filter has narrowed the candidate set. With no filter,
+      // restrict free text to the (trigram-indexed) ID columns so the default
+      // search can never trip the 57014 statement timeout on the full table.
+      const narrowed = hasNarrowingFilter(filters)
+      const cols = narrowed
+        ? ['case_id', 'source_dataset_id', 'complaint_type', 'address_or_location', 'request_detail']
+        : ['case_id', 'source_dataset_id']
+      query = query.or(cols.map((col) => `${col}.ilike.%${safeTerm}%`).join(','))
+      if (!narrowed) {
+        notice =
+          'Searched by case ID only. Use a case ID or add a filter (complaint type, borough, district, status, or date range) for faster free-text search.'
+      }
     }
   }
 
@@ -190,6 +225,7 @@ export async function getNycCaseExplorerPage(
     rows: rows.slice(0, pageSize),
     hasMore,
     nextPage: hasMore ? page + 1 : null,
+    notice,
   }
 }
 

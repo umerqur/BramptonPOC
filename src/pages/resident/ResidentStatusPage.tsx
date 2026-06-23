@@ -128,7 +128,7 @@ function StatusBody({ request }: { request: ResidentRequestStatus }) {
                     )}
                   </span>
                   <span
-                    className={`mt-2 w-20 text-[11px] leading-tight ${
+                    className={`mt-2 w-12 text-[10px] leading-tight sm:w-20 sm:text-[11px] ${
                       current ? 'font-semibold text-navy-900' : 'text-ink-subtle'
                     }`}
                   >
@@ -169,7 +169,7 @@ function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs uppercase tracking-wide text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-ink">{value}</dd>
+      <dd className="mt-0.5 break-words text-ink">{value}</dd>
     </div>
   )
 }

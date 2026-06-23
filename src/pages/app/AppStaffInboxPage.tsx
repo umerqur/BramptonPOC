@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
-import { can, DEMO_OFFICER } from '../../lib/roles'
+import { can, officerProfiles, officerDisplayName, type StaffProfile } from '../../lib/roles'
 import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
-import { formatDate, formatDateTime } from '../../services/demoWorkflowService'
+import { formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import {
   STATUS_LABELS,
@@ -14,34 +14,37 @@ import {
   type ResidentRequestRow,
 } from '../../services/residentRequests'
 import {
-  loadOpenBenchmarkWorkRows,
   mapResidentToWorkRow,
   sortByReviewPriority,
   isActiveResident,
+  needsOfficerAssignment,
   REVIEW_PRIORITY_EXPLAINER,
   REVIEW_PRIORITY_FACTORS,
   type WorkQueueRow,
   type ReviewPriorityTier,
 } from '../../services/workQueue'
-import type { OpenReviewRow } from '../../services/caseExplorer'
+import { sanitizeResidentDescription } from '../../lib/residentDescription'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import { DecisionLogicDisclosure, decisionLogicFromWorkRow } from '../../components/app/DecisionLogicPanel'
 
-// Work Queue — the unified, active review surface staff land on first. It brings
-// together two LIVE sources of active work, with clear source labels on every row:
+// Priority Queue — the active review surface staff land on first. Live resident
+// service requests (public.resident_service_requests) that need staff action,
+// grouped by where they sit in the workflow:
+//   New      → intakes that still need an officer assignment
+//   Active   → assigned / in progress
+//   Closure  → field outcome recorded, ready for supervisor closure approval
 //
-//   * Resident intake — public.resident_service_requests (the app's intake form).
-//   * NYC open benchmark — public.v_nyc_open_review_queue (the active open queue).
-//
-// Historical CLOSED NYC cases are NOT here — they live in the Insights Case
-// Explorer. Insights Open Cases stays as analytics/drilldown; this is where the
-// active review work happens.
-//
-// Review priority is deterministic decision support (age, due-date pressure, and
-// historical workload/closure pressure) — never an automated enforcement
-// decision, an AI decision, or a risk score. A human reviews and decides.
+// Closed historical cases and NYC open benchmark cases live in Intelligence
+// Command (Case Explorer / Open Cases), not here. Review priority is
+// deterministic decision support — the detail sits behind "How priority works".
 
-// The five Work Queue views.
-type WorkTab = 'all' | 'resident' | 'open' | 'assigned' | 'closure'
+type WorkTab = 'new' | 'active' | 'closure'
+
+const WORK_TAB_LABELS: Record<WorkTab, string> = {
+  new: 'New',
+  active: 'Active',
+  closure: 'Closure',
+}
 
 const STATUS_STYLES: Record<string, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
@@ -58,12 +61,7 @@ const PRIORITY_STYLES: Record<string, string> = {
   P4: 'bg-slate-100 text-slate-700',
 }
 
-// Source + review-priority-tier badge styles for the normalized rows.
-const SOURCE_STYLES: Record<WorkQueueRow['source_type'], string> = {
-  resident: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200',
-  nyc_open: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200',
-}
-
+// Review-priority-tier badge styles (only High / Medium are shown on cards).
 const TIER_STYLES: Record<ReviewPriorityTier, string> = {
   High: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200',
   Medium: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
@@ -72,23 +70,18 @@ const TIER_STYLES: Record<ReviewPriorityTier, string> = {
 }
 
 type ResidentState = { rows: ResidentRequestRow[]; loading: boolean; error: string | null }
-type OpenState = { rows: WorkQueueRow[]; hasMore: boolean; loading: boolean; error: string | null }
-
-const OPEN_BENCHMARK_LIMIT = 50
 
 export default function AppStaffInboxPage() {
-  const { ingestResidentCase, ingestOpenCase, role } = useWorkflow()
+  const { ingestResidentCase, role } = useWorkflow()
   const navigate = useNavigate()
 
   const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
-  const [open, setOpen] = useState<OpenState>({ rows: [], hasMore: false, loading: true, error: null })
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
-  const [tab, setTab] = useState<WorkTab>('all')
+  const [tab, setTab] = useState<WorkTab>('new')
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const canAssign = can(role, 'assignOfficer')
 
   const load = useCallback(() => {
-    // Resident intake requests + their attachment counts.
     setResident((s) => ({ ...s, loading: true, error: null }))
     setAttachmentsByCase({})
     getResidentRequests(100)
@@ -109,34 +102,27 @@ export default function AppStaffInboxPage() {
         console.error('Failed to load resident requests:', err)
         setResident({ rows: [], loading: false, error: sectionError(err) })
       })
-
-    // NYC open benchmark cases — graceful "not loaded" if the open view is absent.
-    setOpen((s) => ({ ...s, loading: true, error: null }))
-    loadOpenBenchmarkWorkRows(OPEN_BENCHMARK_LIMIT)
-      .then(({ rows, hasMore }) => setOpen({ rows, hasMore, loading: false, error: null }))
-      .catch((err: unknown) => {
-        console.error('Failed to load NYC open benchmark cases:', err)
-        setOpen({ rows: [], hasMore: false, loading: false, error: sectionError(err) })
-      })
   }, [])
 
   useEffect(() => {
     load()
   }, [load])
 
-  // Active resident requests only — closed cases belong in Case Explorer, not the
-  // active Work Queue.
+  // Active resident requests only — closed cases belong in Case Explorer.
   const residentActive = useMemo(() => resident.rows.filter(isActiveResident), [resident.rows])
+
+  // New = intakes that still need an officer assignment.
+  const residentNeedsAssignment = useMemo(
+    () => residentActive.filter(needsOfficerAssignment),
+    [residentActive],
+  )
 
   const residentWorkRows = useMemo(
     () => residentActive.map((r) => mapResidentToWorkRow(r, attachmentsByCase[r.case_id]?.length ?? 0)),
     [residentActive, attachmentsByCase],
   )
 
-  const allActive = useMemo(
-    () => sortByReviewPriority([...residentWorkRows, ...open.rows]),
-    [residentWorkRows, open.rows],
-  )
+  // Active = assigned / in progress. Closure = ready for closure review.
   const assignedInProgress = useMemo(
     () => sortByReviewPriority(residentWorkRows.filter((r) => r.in_progress)),
     [residentWorkRows],
@@ -145,6 +131,30 @@ export default function AppStaffInboxPage() {
     () => sortByReviewPriority(residentWorkRows.filter((r) => r.ready_for_closure)),
     [residentWorkRows],
   )
+
+  const counts: Record<WorkTab, number> = useMemo(
+    () => ({
+      new: residentNeedsAssignment.length,
+      active: assignedInProgress.length,
+      closure: readyForClosure.length,
+    }),
+    [residentNeedsAssignment.length, assignedInProgress.length, readyForClosure.length],
+  )
+
+  const TAB_ORDER: WorkTab[] = ['new', 'active', 'closure']
+
+  // Once loaded, land on the first tab that has items. Runs once; never overrides
+  // a manual tab choice.
+  const didInitTab = useRef(false)
+  useEffect(() => {
+    if (didInitTab.current) return
+    if (resident.loading) return
+    didInitTab.current = true
+    const firstWithItems = TAB_ORDER.find((t) => counts[t] > 0)
+    if (firstWithItems) setTab(firstWithItems)
+    // TAB_ORDER is a stable module-level constant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resident.loading, counts])
 
   function openResidentCase(row: ResidentRequestRow) {
     ingestResidentCase(row)
@@ -156,20 +166,16 @@ export default function AppStaffInboxPage() {
     navigate(`/app/closure?case=${encodeURIComponent(row.case_id)}`)
   }
 
-  // NYC open benchmark cases enter the SAME workbench lifecycle as resident
-  // intake — no dead-end side panel. We bridge the public 311 source record into
-  // a workbench case, then open the Case Workbench route.
-  function openBenchmarkCase(row: OpenReviewRow) {
-    ingestOpenCase(row)
-    navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
-  }
-
-  // Supervisor/coordinator action: explicit human assignment to the By-law
-  // Officer (never automated).
-  async function assignToOfficer(row: ResidentRequestRow) {
+  // Supervisor/CSR action: explicit human assignment to a chosen By-law Officer
+  // profile (never automated). Stores the officer display name + login email, so
+  // only that signed-in officer can record the field outcome (assigned_officer_email).
+  async function assignToOfficer(row: ResidentRequestRow, officer: StaffProfile) {
     setAssigningId(row.case_id)
     try {
-      await assignResidentRequestToOfficer(row.case_id, { name: DEMO_OFFICER.name, email: DEMO_OFFICER.email })
+      await assignResidentRequestToOfficer(row.case_id, {
+        name: officerDisplayName(officer),
+        email: officer.email,
+      })
       load()
     } catch (err) {
       console.error('Failed to assign case to officer:', err)
@@ -179,61 +185,41 @@ export default function AppStaffInboxPage() {
     }
   }
 
-  // Open a normalized row into the unified workbench — resident intake and NYC
-  // open benchmark cases both enter the same Case Workbench lifecycle.
   function openWorkRow(row: WorkQueueRow) {
-    if (row.source_type === 'resident' && row.resident) openResidentCase(row.resident)
-    else if (row.source_type === 'nyc_open' && row.open) openBenchmarkCase(row.open)
+    if (row.resident) openResidentCase(row.resident)
   }
 
   // By-law Officers do not see the citywide Work Queue — send them to their console.
   if (role === 'officer') return <Navigate to="/app/field" replace />
 
-  const loading = resident.loading || open.loading
-  const counts: Record<WorkTab, number> = {
-    all: allActive.length,
-    resident: residentActive.length,
-    open: open.rows.length,
-    assigned: assignedInProgress.length,
-    closure: readyForClosure.length,
-  }
+  const loading = resident.loading
 
   return (
     <div className="container-page py-10">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="max-w-3xl">
+        <div className="max-w-2xl">
           <div className="section-eyebrow">Staff workbench</div>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Work Queue</h1>
-          <p className="mt-2 text-ink-muted">
-            Active work to review — resident intakes and NYC open benchmark cases in one place, ordered by review
-            priority. Closed historical cases live in Insights Case Explorer.
-          </p>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Priority Queue</h1>
+          <p className="mt-2 text-ink-muted">Cases that need staff review, assignment, or closure approval.</p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={loading}>
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
-      <ReviewPriorityNote />
-
-      <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
-        <TabButton label="All active work" count={counts.all} active={tab === 'all'} onClick={() => setTab('all')} />
-        <TabButton label="Resident intakes" count={counts.resident} active={tab === 'resident'} onClick={() => setTab('resident')} />
-        <TabButton
-          label="Open benchmark cases"
-          count={open.error ? null : counts.open}
-          active={tab === 'open'}
-          onClick={() => setTab('open')}
-        />
-        <TabButton label="Assigned / in progress" count={counts.assigned} active={tab === 'assigned'} onClick={() => setTab('assigned')} />
-        <TabButton label="Ready for closure review" count={counts.closure} active={tab === 'closure'} onClick={() => setTab('closure')} />
+      <div role="tablist" aria-label="Priority queue filters" className="mt-6 flex gap-8 border-b border-slate-200">
+        {TAB_ORDER.map((t) => (
+          <TabButton key={t} label={WORK_TAB_LABELS[t]} count={counts[t]} active={tab === t} onClick={() => setTab(t)} />
+        ))}
       </div>
 
+      <HowPriorityWorks />
+
       <div className="mt-6">
-        {tab === 'resident' ? (
+        {tab === 'new' ? (
           <ResidentIntakesView
             state={resident}
-            rows={residentActive}
+            rows={residentNeedsAssignment}
             attachmentsByCase={attachmentsByCase}
             canAssign={canAssign}
             assigningId={assigningId}
@@ -241,33 +227,16 @@ export default function AppStaffInboxPage() {
             onOpen={openResidentCase}
             onOpenClosureReview={openClosureReview}
           />
-        ) : tab === 'open' ? (
-          <OpenBenchmarkView state={open} onView={(row) => row.open && openBenchmarkCase(row.open)} />
         ) : (
           <NormalizedListView
-            header={
-              tab === 'all' ? (
-                <SourceMixSummary
-                  residentIntakes={counts.resident}
-                  openBenchmark={open.error ? null : counts.open}
-                  assignedInProgress={counts.assigned}
-                  readyForClosure={counts.closure}
-                />
-              ) : null
-            }
-            rows={tab === 'all' ? allActive : tab === 'assigned' ? assignedInProgress : readyForClosure}
+            rows={tab === 'active' ? assignedInProgress : readyForClosure}
             loading={loading}
             residentError={resident.error}
-            openError={tab === 'all' ? open.error : null}
             emptyLabel={
-              tab === 'all'
-                ? 'No active work in the queue right now.'
-                : tab === 'assigned'
-                  ? 'No cases are assigned or under review right now.'
-                  : 'No cases are ready for closure review right now.'
+              tab === 'active' ? 'No active cases right now.' : 'No cases awaiting closure approval right now.'
             }
             onOpen={openWorkRow}
-            onOpenClosureReview={(row) => row.resident && openClosureReview(row.resident)}
+            onReviewClosure={(row) => row.resident && openClosureReview(row.resident)}
           />
         )}
       </div>
@@ -281,30 +250,26 @@ export default function AppStaffInboxPage() {
 // Review-priority explainer
 // ---------------------------------------------------------------------------
 
-/** Collapsible note explaining review priority as decision support — not ML. */
-function ReviewPriorityNote() {
+/** A small, low-friction "How priority works" link near the tabs — the full
+ *  decision-support explanation lives behind it, not in a hero card. */
+function HowPriorityWorks() {
   return (
-    <details className="group mt-6 rounded-xl border border-slate-200 bg-slate-50/60">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3">
-        <span className="flex items-center gap-2">
-          <span className="badge bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200">Review priority</span>
-          <span className="text-sm text-ink-muted">How review priority works — decision support, not an automated decision.</span>
-        </span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180">
+    <details className="group mt-3 text-xs">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-ink-subtle hover:text-navy-900">
+        How priority works
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-3.5 w-3.5 transition-transform group-open:rotate-180">
           <path d="M6 9l6 6 6-6" />
         </svg>
       </summary>
-      <div className="border-t border-slate-200 px-4 py-3 text-sm text-ink">
+      <div className="mt-2 max-w-2xl rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-ink-muted">
         <p className="leading-relaxed">{REVIEW_PRIORITY_EXPLAINER}</p>
-        <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-subtle">Considered factors</div>
-        <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink-muted">
+        <ul className="mt-2 list-disc space-y-0.5 pl-5">
           {REVIEW_PRIORITY_FACTORS.map((f) => (
             <li key={f}>{f}</li>
           ))}
         </ul>
-        <p className="mt-3 text-[11px] text-ink-subtle">
-          Routing support for staffing and review order. Staff review and decide — this is not AI deciding, not automated
-          enforcement, and not a risk score.
+        <p className="mt-2 text-[11px] text-ink-subtle">
+          Decision support for review order — staff review and decide.
         </p>
       </div>
     </details>
@@ -319,37 +284,30 @@ function NormalizedListView({
   rows,
   loading,
   residentError,
-  openError,
   emptyLabel,
-  header,
   onOpen,
-  onOpenClosureReview,
+  onReviewClosure,
 }: {
   rows: WorkQueueRow[]
   loading: boolean
   residentError: string | null
-  openError: string | null
   emptyLabel: string
-  /** Optional summary rendered above the list (e.g. the All-active-work source mix). */
-  header?: ReactNode
   onOpen: (row: WorkQueueRow) => void
-  onOpenClosureReview: (row: WorkQueueRow) => void
+  onReviewClosure: (row: WorkQueueRow) => void
 }) {
   if (loading && rows.length === 0) {
-    return <div className="card p-8 text-center text-sm text-ink-subtle">Loading the Work Queue…</div>
+    return <div className="card p-8 text-center text-sm text-ink-subtle">Loading the queue…</div>
   }
   return (
     <div className="space-y-4">
-      {header}
-      {residentError && <SourceWarning label="resident intake requests" error={residentError} />}
-      {openError && <SourceWarning label="NYC open benchmark cases" error={openError} />}
+      {residentError && <SourceWarning label="resident requests" error={residentError} />}
       {rows.length === 0 ? (
         <div className="card p-8 text-center text-sm text-ink-subtle">{emptyLabel}</div>
       ) : (
         <ul className="space-y-3">
           {rows.map((row) => (
             <li key={row.key}>
-              <WorkRowCard row={row} onOpen={() => onOpen(row)} onOpenClosureReview={() => onOpenClosureReview(row)} />
+              <WorkRowCard row={row} onOpen={() => onOpen(row)} onReviewClosure={() => onReviewClosure(row)} />
             </li>
           ))}
         </ul>
@@ -358,146 +316,55 @@ function NormalizedListView({
   )
 }
 
-/**
- * A compact operational read of what is in the All-active-work queue: where the
- * work came from (resident intakes, NYC open benchmark) and where it sits in the
- * resident workflow (assigned / in progress, ready for closure review). Plain
- * counts, no scoring — just an at-a-glance sense of the queue. The open-benchmark
- * count is null when that source failed to load, so it reads "—" rather than 0.
- */
-function SourceMixSummary({
-  residentIntakes,
-  openBenchmark,
-  assignedInProgress,
-  readyForClosure,
-}: {
-  residentIntakes: number
-  openBenchmark: number | null
-  assignedInProgress: number
-  readyForClosure: number
-}) {
-  const items: { label: string; value: number | null }[] = [
-    { label: 'Resident intakes', value: residentIntakes },
-    { label: 'NYC open benchmark', value: openBenchmark },
-    { label: 'Assigned / in progress', value: assignedInProgress },
-    { label: 'Ready for closure review', value: readyForClosure },
-  ]
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">In the queue</div>
-      <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {items.map((item) => (
-          <div key={item.label}>
-            <dd className="text-xl font-semibold tabular-nums text-navy-900">{item.value == null ? '—' : item.value}</dd>
-            <dt className="mt-0.5 text-xs text-ink-muted">{item.label}</dt>
-          </div>
-        ))}
-      </dl>
-    </div>
-  )
+/** Single state label per row — New / Assigned / Closure ready (active rows only). */
+function workRowState(row: WorkQueueRow): { label: string; style: string } {
+  if (row.ready_for_closure) return { label: 'Closure ready', style: STATUS_STYLES.in_review }
+  if (row.in_progress) return { label: 'Assigned', style: STATUS_STYLES.assigned }
+  return { label: 'New', style: STATUS_STYLES.received }
 }
 
-/** A compact, source-agnostic Work Queue row. */
+/**
+ * A compact operational task card: case id + one state pill (+ a priority pill
+ * only when High/Medium), complaint type · location as plain text, a single
+ * primary action, and the rules-based "why" tucked behind a collapsed disclosure.
+ */
 function WorkRowCard({
   row,
   onOpen,
-  onOpenClosureReview,
+  onReviewClosure,
 }: {
   row: WorkQueueRow
   onOpen: () => void
-  onOpenClosureReview: () => void
+  onReviewClosure: () => void
 }) {
-  const isResident = row.source_type === 'resident'
+  const state = workRowState(row)
+  const showPriority = row.priority_tier === 'High' || row.priority_tier === 'Medium'
+  const isClosure = row.ready_for_closure
+  const meta = [row.complaint_type, row.location].filter(Boolean).join(' · ') || 'Location not provided'
   return (
     <div className="card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
+          {/* Max two pills on mobile: state, plus priority only if High/Medium. */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-navy-900">{row.case_id}</span>
-            <span className={`badge ${SOURCE_STYLES[row.source_type]}`}>{row.source_label}</span>
-            <span className="badge bg-slate-100 text-slate-700">{row.complaint_type ?? '—'}</span>
-            <span className="badge bg-slate-100 text-slate-600">{row.status_label}</span>
+            <span className={`badge ${state.style}`}>{state.label}</span>
+            {showPriority && <span className={`badge ${TIER_STYLES[row.priority_tier]}`}>{row.priority_tier} priority</span>}
           </div>
-          <div className="mt-1 truncate text-sm text-ink-muted">{row.location ?? 'Location not provided'}</div>
-        </div>
-        <div className="shrink-0 text-right">
-          <span className={`badge ${TIER_STYLES[row.priority_tier]}`}>
-            {row.priority_tier === 'Unscored' ? 'Unscored' : `${row.priority_tier} priority`}
-          </span>
-          <div className="mt-1 text-[11px] tabular-nums text-ink-subtle">
-            {row.priority_score == null ? '—' : `Score ${row.priority_score}`}
-            {row.submitted_at ? ` · ${formatDate(row.submitted_at)}` : ''}
-          </div>
-        </div>
-      </div>
-
-      {row.priority_reason && (
-        <p className="mt-2 text-xs text-ink-muted">
-          <span className="font-medium text-ink">Why review:</span> {row.priority_reason}
-        </p>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[11px] text-ink-subtle">
-          {row.workflow_stage}
-          {row.assigned_to ? ` · ${row.assigned_to}` : ''}
-        </div>
-        <div className="flex gap-2">
-          {isResident && row.ready_for_closure && (
-            <button onClick={onOpenClosureReview} className="btn-secondary text-sm py-1.5 px-3">
-              Closure review →
-            </button>
+          <div className="mt-1 truncate text-sm text-ink-muted">{meta}</div>
+          {row.in_progress && row.assigned_to && (
+            <div className="mt-0.5 text-xs text-ink-subtle">Officer: {row.assigned_to}</div>
           )}
-          <button onClick={onOpen} className="btn-primary text-sm py-1.5 px-3">
-            Open case →
-          </button>
         </div>
+        <button
+          onClick={isClosure ? onReviewClosure : onOpen}
+          className="btn-primary shrink-0 text-sm py-1.5 px-3"
+        >
+          {isClosure ? 'Review closure' : 'Open case'}
+        </button>
       </div>
-    </div>
-  )
-}
 
-// ---------------------------------------------------------------------------
-// Open benchmark view (normalized list, read-only review)
-// ---------------------------------------------------------------------------
-
-function OpenBenchmarkView({ state, onView }: { state: OpenState; onView: (row: WorkQueueRow) => void }) {
-  if (state.loading && state.rows.length === 0) {
-    return <div className="card p-8 text-center text-sm text-ink-subtle">Loading open benchmark cases…</div>
-  }
-  if (state.error) {
-    return (
-      <div className="card p-6">
-        <h3 className="text-sm font-semibold text-navy-900">Open benchmark queue not loaded</h3>
-        <p className="mt-1 text-sm text-ink-muted">
-          The active NYC open benchmark queue (review priority) is not available right now. Load the open dataset to
-          review benchmark cases here.
-        </p>
-        <p className="mt-2 font-mono text-[11px] text-ink-subtle">{state.error}</p>
-      </div>
-    )
-  }
-  if (state.rows.length === 0) {
-    return <div className="card p-8 text-center text-sm text-ink-subtle">No open benchmark cases available.</div>
-  }
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-subtle">
-        <span>
-          Showing the top {state.rows.length}
-          {state.hasMore ? '+' : ''} open benchmark cases by review priority.
-        </span>
-        <Link to="/app/insights" className="font-medium text-accent-700 hover:text-accent-900">
-          Open in Insights · Open Cases →
-        </Link>
-      </div>
-      <ul className="space-y-3">
-        {state.rows.map((row) => (
-          <li key={row.key}>
-            <WorkRowCard row={row} onOpen={() => onView(row)} onOpenClosureReview={() => {}} />
-          </li>
-        ))}
-      </ul>
+      <DecisionLogicDisclosure data={decisionLogicFromWorkRow(row)} />
     </div>
   )
 }
@@ -521,7 +388,7 @@ function ResidentIntakesView({
   attachmentsByCase: Record<string, ResidentRequestAttachment[]>
   canAssign: boolean
   assigningId: string | null
-  onAssign: (row: ResidentRequestRow) => void
+  onAssign: (row: ResidentRequestRow, officer: StaffProfile) => void
   onOpen: (row: ResidentRequestRow) => void
   onOpenClosureReview: (row: ResidentRequestRow) => void
 }) {
@@ -548,7 +415,7 @@ function ResidentIntakesView({
             attachments={attachmentsByCase[row.case_id] ?? []}
             canAssign={canAssign}
             assigning={assigningId === row.case_id}
-            onAssign={() => onAssign(row)}
+            onAssign={(officer) => onAssign(row, officer)}
             onOpen={() => onOpen(row)}
             onOpenClosureReview={() => onOpenClosureReview(row)}
           />
@@ -580,21 +447,17 @@ function TabButton({
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
-        active ? 'border-accent-600 text-navy-900' : 'border-transparent text-ink-subtle hover:text-navy-900'
+      className={`relative shrink-0 pb-3 text-sm font-semibold transition ${
+        active
+          ? 'text-navy-900 after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-teal-600'
+          : 'text-slate-500 hover:text-navy-900'
       }`}
     >
       {label}
-      {count != null && (
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${
-            active ? 'bg-accent-100 text-accent-800' : 'bg-slate-100 text-slate-600'
-          }`}
-        >
-          {count}
-        </span>
-      )}
+      {count != null && <span className="ml-1 text-xs font-semibold text-teal-700">{count}</span>}
     </button>
   )
 }
@@ -612,7 +475,7 @@ function InboxCard({
   attachments: ResidentRequestAttachment[]
   canAssign: boolean
   assigning: boolean
-  onAssign: () => void
+  onAssign: (officer: StaffProfile) => void
   onOpen: () => void
   onOpenClosureReview: () => void
 }) {
@@ -625,7 +488,7 @@ function InboxCard({
   const { triage, summary } = triageCase
   const priority = triage.recommendedPriority
   const missingInformation = triage.missingInformation
-  const residentComplaint = row.description?.trim()
+  const residentComplaint = sanitizeResidentDescription(row.description)
 
   return (
     <div className="card p-5">
@@ -633,12 +496,10 @@ function InboxCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-navy-900">{row.case_id}</span>
-            <span className="badge bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200">Resident intake</span>
             <span className={`badge ${STATUS_STYLES[row.status]}`}>{STATUS_LABELS[row.status]}</span>
-            <span className="badge bg-slate-100 text-slate-700">{row.request_type}</span>
           </div>
           <div className="mt-1 text-sm text-ink-muted">
-            {row.resident_name} · {[row.location, row.city].filter(Boolean).join(', ')}
+            {row.request_type} · {[row.location, row.city].filter(Boolean).join(', ')}
           </div>
         </div>
         <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDateTime(row.created_at)}</span>
@@ -666,7 +527,7 @@ function InboxCard({
               </span>
             </div>
             <p className="mt-1 text-sm text-ink">
-              Field outcome recorded by {row.assigned_officer_name ?? 'Officer Oakley'}.
+              Field outcome recorded by {row.assigned_officer_name ?? 'the assigned officer'}.
             </p>
           </div>
           <button onClick={onOpenClosureReview} className="btn-primary text-sm py-2 px-4">
@@ -693,10 +554,7 @@ function InboxCard({
       {/* Decision support summary — generated from intake details, below the
           resident's complaint. Staff review required. */}
       <div className="mt-4 rounded-lg border border-accent-200 bg-accent-50/50 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">Decision support summary</span>
-          <span className="text-[11px] text-accent-700">Generated from intake details · Staff review required</span>
-        </div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-accent-800">Decision support summary</div>
         <p className="mt-2 text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
 
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
@@ -733,10 +591,6 @@ function InboxCard({
           <div className="text-xs uppercase tracking-wide text-ink-subtle">Recommended next action</div>
           <p className="mt-0.5 text-sm text-navy-900">{summary.recommendedNextStep}</p>
         </div>
-
-        <p className="mt-3 text-[11px] text-accent-700">
-          Suggestions only — a human coordinator or supervisor reviews and approves the assignment.
-        </p>
       </div>
 
       <div className="mt-4 flex items-center justify-end">
@@ -763,12 +617,21 @@ function AssignmentPanel({
   row: ResidentRequestRow
   canAssign: boolean
   assigning: boolean
-  onAssign: () => void
+  onAssign: (officer: StaffProfile) => void
   routingRecommendation: string
 }) {
-  const assigned = Boolean(row.assigned_officer_name)
+  // Only a recorded officer name means the assignment actually completed. A row
+  // can carry status 'assigned' with NO officer on file (an incomplete or stale
+  // assignment) — that is not "assigned", it needs the supervisor to finish it.
+  const assignedComplete = Boolean(row.assigned_officer_name)
+  const assignmentIncomplete = !assignedComplete && row.status === 'assigned'
+  // The assignable By-law Officers (Officer Qureshi, Officer Mann, Officer Ahmed,
+  // Officer Oakley). Assignment stores the chosen officer's login email.
+  const officers = officerProfiles()
+  const [selectedEmail, setSelectedEmail] = useState(officers[0]?.email ?? '')
+  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? officers[0] ?? null
 
-  if (assigned) {
+  if (assignedComplete) {
     return (
       <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
         <div className="flex items-center gap-2">
@@ -776,7 +639,7 @@ function AssignmentPanel({
           <span className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Assignment</span>
         </div>
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'Officer Oakley'} />
+          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'the assigned officer'} />
           <Detail label="Role" value="Bylaw Officer" />
           <Detail label="Status" value="Assigned for field review" />
           <Detail label="Next step" value="Officer records field outcome" />
@@ -786,25 +649,59 @@ function AssignmentPanel({
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+    <div
+      className={`mt-4 rounded-xl border p-4 ${
+        assignmentIncomplete ? 'border-rose-200 bg-rose-50/60' : 'border-amber-200 bg-amber-50/60'
+      }`}
+    >
       <div className="flex items-center gap-2">
-        <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-        <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">Assignment</span>
+        <span
+          aria-hidden
+          className={`inline-block h-2 w-2 rounded-full ${assignmentIncomplete ? 'bg-rose-500' : 'bg-amber-500'}`}
+        />
+        <span
+          className={`text-xs font-semibold uppercase tracking-wide ${
+            assignmentIncomplete ? 'text-rose-800' : 'text-amber-800'
+          }`}
+        >
+          Assignment
+        </span>
       </div>
       <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs uppercase tracking-wide text-ink-subtle">Status</dt>
-          <dd className="mt-0.5 font-medium text-amber-700">Human assignment required</dd>
+          <dd className={`mt-0.5 font-medium ${assignmentIncomplete ? 'text-rose-700' : 'text-amber-700'}`}>
+            {assignmentIncomplete ? 'Assignment incomplete — select an officer again' : 'Human assignment required'}
+          </dd>
         </div>
         <Detail label="Routing recommendation" value={routingRecommendation} />
       </dl>
-      <p className="mt-2 text-[11px] text-ink-subtle">
-        Routing recommendation does not dispatch an officer automatically.
-      </p>
+      {assignmentIncomplete && (
+        <p className="mt-2 text-[11px] text-rose-700">
+          This case shows as assigned but has no officer on file. Select an officer to complete the assignment.
+        </p>
+      )}
       {canAssign && row.status !== 'closed' && (
-        <div className="mt-3">
-          <button onClick={onAssign} disabled={assigning} className="btn-primary text-sm py-2 px-4 disabled:opacity-60">
-            {assigning ? 'Assigning…' : 'Assign to Bylaw Officer'}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <select
+            value={selectedEmail}
+            onChange={(e) => setSelectedEmail(e.target.value)}
+            disabled={assigning}
+            aria-label="Select By-law Officer"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+          >
+            {officers.map((o) => (
+              <option key={o.email} value={o.email}>
+                {officerDisplayName(o)}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => selectedOfficer && onAssign(selectedOfficer)}
+            disabled={assigning || !selectedOfficer}
+            className="btn-primary text-sm py-2 px-4 disabled:opacity-60"
+          >
+            {assigning ? 'Assigning…' : `Assign to ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
           </button>
         </div>
       )}
@@ -816,7 +713,7 @@ function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs uppercase tracking-wide text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 text-ink">{value}</dd>
+      <dd className="mt-0.5 break-words text-ink">{value}</dd>
     </div>
   )
 }

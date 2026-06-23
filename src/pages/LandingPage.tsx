@@ -23,18 +23,24 @@ export default function LandingPage() {
         />
         <div className="container-page py-24 lg:py-32">
           <div className="max-w-2xl">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-white">
+            {/* The official Brampton use-case name stays visible as an eyebrow,
+                while the hero title reads as a plain-language description. */}
+            <p className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-white/70">
               Proactive Enforcement Response
+            </p>
+            <h1 className="mt-3 text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight text-white">
+              AI Assisted Municipal Enforcement Intake &amp; Closure POC
             </h1>
             <p className="mt-6 max-w-xl text-lg text-white/85">
-              A proof of concept showing how a resident complaint moves from intake to staff review and closure update.
+              A Brampton POC showing how AI assisted intake and staff review can turn resident complaints into structured
+              cases, faster triage, and clearer closure responses.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Link
                 to="/resident/new-request"
                 className="btn bg-white text-navy-900 hover:bg-white/90 focus:ring-offset-navy-900"
               >
-                File a complaint
+                Create demo request
               </Link>
               <Link
                 to="/login"
@@ -73,7 +79,7 @@ export default function LandingPage() {
           <div className="card card-hover flex flex-col p-7">
             <h2 className="text-xl font-semibold text-navy-900">City staff</h2>
             <p className="mt-2 flex-1 text-ink-muted">
-              Review submitted requests and prepare staff approved closure responses.
+              Review submitted requests, use decision support, assign officers, and approve closure responses.
             </p>
             <div className="mt-6">
               <Link to="/login" className="btn-primary">

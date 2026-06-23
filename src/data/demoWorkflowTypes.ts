@@ -1,12 +1,14 @@
-// Type model for the end-to-end AI-assisted closure-response demo workflow.
+// Type model for the end-to-end decision-support closure-response demo workflow.
 //
 // This is the heart of the redesigned Proactive Enforcement Response POC. The
 // flow mirrors the use-case concept diagram: a resident complaint is captured,
-// the AI workflow system classifies it, extracts facts, checks for missing
-// information, gathers enforcement context, builds a case summary, checks
-// confidence, and prepares a closure-response draft. By-law staff only review
-// exceptions, edit the draft, and approve the final response — every approval is
-// an explicit human action.
+// deterministic workflow helpers classify it, extract facts, check for missing
+// information, assemble enforcement context, build a case summary, check file
+// readiness, and prepare a rules-based closure-response draft. By-law staff only
+// review exceptions, edit the draft, and approve the final response — every
+// approval is an explicit human action. (The genuine AI layer — Cohere
+// embeddings + Qdrant + Cohere rerank for semantic benchmark retrieval — is
+// separate from these deterministic helpers.)
 //
 // All data backed by these types is SYNTHETIC / benchmark demo data. Nothing
 // here represents Brampton operational complaint data, and nothing is ever sent
@@ -57,7 +59,11 @@ export type ResidentComplaintInput = {
   residentEmail: string
 }
 
-/** What the AI system produced automatically from the raw intake. */
+/**
+ * What the decision-support layer produced from the raw intake.
+ * Legacy type name `AiTriageResult` retained for compatibility; this is
+ * deterministic decision support, not LLM output.
+ */
 export type AiTriageResult = {
   category: DemoCategory
   categoryConfidence: number // 0..1
@@ -74,7 +80,7 @@ export type AiTriageResult = {
   reasoning: string[]
 }
 
-/** Context the AI gathered so staff don't have to research manually. */
+/** Context assembled for staff review so staff don't have to research manually. */
 export type EnforcementContext = {
   complaintHistory: { caseId: string; date: string; summary: string; status: string }[]
   patrolLogs: string[]
@@ -86,7 +92,7 @@ export type EnforcementContext = {
   repeatLocationSignal: 'None' | 'Emerging' | 'High'
 }
 
-/** The assembled, staff-readable case the AI built from intake + context. */
+/** The staff-readable case summary assembled from intake and context. */
 export type CaseSummary = {
   plainLanguage: string
   structuredFacts: { label: string; value: string }[]
@@ -105,6 +111,32 @@ export type CaseSummary = {
 export type FieldVisitOutcome = 'no_violation' | 'notice_issued' | 'ticket_issued' | 'resolved' | 'warning_education'
 
 /**
+ * The structured enforcement action an officer selects on the field-outcome
+ * form. This is what the officer actually DID — the closure disposition is
+ * derived from it (a "yes" violation alone never implies a ticket). "Action
+ * taken" free text is only optional supporting detail.
+ */
+export type EnforcementAction =
+  | 'warning_education' // Education / warning provided
+  | 'notice_issued' // Notice issued
+  | 'ticket_issued' // Ticket / penalty notice issued (general by-law ticket / penalty / offence notice — any violation type)
+  | 'no_action' // No action taken
+  | 'other' // Other
+
+/**
+ * How a by-law ticket / penalty notice was served. Only recorded when the
+ * enforcement action is ticket_issued. This is general across violation types
+ * (not parking-specific) and records what the officer did — it is not a payment
+ * or ticket-issuance system. Stored enum values are kept stable for existing DB
+ * rows; display labels are generalized in SERVICE_METHOD_LABELS.
+ */
+export type ServiceMethod =
+  | 'placed_on_vehicle' // Posted at location / placed on vehicle
+  | 'handed_to_driver' // Served in person
+  | 'sent_by_mail' // Sent by mail
+  | 'other' // Other
+
+/**
  * A recorded officer field visit. Created only when a By-law Officer (role)
  * attends the location and records what they found. Drives the truthful closure
  * language — without this, the closure response must not claim an officer
@@ -120,19 +152,24 @@ export type OfficerFieldAction = {
   visitedAt: string // ISO timestamp
   outcome: FieldVisitOutcome
   observations: string
-  /** Notice / ticket reference number, when the outcome issued one. */
+  /** Ticket / penalty notice number, when a ticket was issued. */
   referenceNumber: string | null
   followUpRequired: boolean
   recordedAt: string // ISO timestamp
   // Verbatim fields the officer recorded on the field form, so the closure draft
   // reflects the real action taken rather than collapsing to a single template.
   violationObserved: 'yes' | 'no' | 'unclear' | null
+  /** Structured enforcement action the officer selected — drives the outcome. */
+  enforcementAction: EnforcementAction | null
+  /** How the ticket / penalty notice was served (ticket_issued only). */
+  serviceMethod: ServiceMethod | null
+  /** Optional supporting "action taken" notes — never the sole disposition. */
   actionTaken: string | null
   observedCondition: string | null
   officerNotes: string | null
 }
 
-/** The AI-drafted closure response staff review, edit, and approve. */
+/** The rules-based closure draft staff review, edit, and approve. */
 export type ClosureDraft = {
   subject: string
   body: string
@@ -176,8 +213,14 @@ export type DemoCase = {
   summary: CaseSummary
   draft: ClosureDraft | null
   priorityOverride: Priority | null
-  /** Officer assigned to investigate (set by a supervisor/CSR), or null. */
+  /** Display name of the officer assigned to investigate (set by a supervisor/CSR), or null. */
   assignedOfficer: string | null
+  /**
+   * Login email of the assigned officer — the real identity the Officer Field
+   * Console filters on. A case only appears for the officer whose signed-in
+   * email matches this. Null when unassigned.
+   */
+  assignedOfficerEmail: string | null
   /** Recorded officer field investigation outcome, or null if none yet. */
   fieldAction: OfficerFieldAction | null
   decisions: StaffDecision[]

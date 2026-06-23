@@ -165,7 +165,7 @@ function sanitizeRequest(raw: unknown): EmailRequest | null {
 
 // Branded, image-free text header shown at the top of every resident email.
 const EMAIL_HEADER_TITLE = 'Proactive Enforcement Response'
-const EMAIL_HEADER_SUBTITLE = 'Resident service request demo'
+const EMAIL_HEADER_SUBTITLE = 'Resident service request'
 
 // Footer disclaimer on every email — this is a demo, not an official service.
 const DEMO_FOOTER_TEXT = 'This is a proof of concept demo and is not an official City of Brampton service.'
@@ -265,11 +265,11 @@ function buildConfirmationContent(input: EmailRequest): EmailContent {
   const location = input.location ? escapeHtml(input.location) : '—'
   const statusUrl = statusUrlForCase(input.caseId)
 
-  const subject = `Proactive Enforcement Demo: Request received ${input.caseId}`
+  const subject = `Your Brampton service request has been received (${input.caseId})`
 
   const inner = `
     <p style="margin:0 0 14px;">Hi ${safeName},</p>
-    <p style="margin:0;font-size:16px;font-weight:600;">Your enforcement complaint request has been received.</p>
+    <p style="margin:0;font-size:16px;font-weight:600;">Your service request has been received.</p>
     ${detailTable([
       ['Reference number', caseId],
       ['Request type', requestType],
@@ -291,7 +291,7 @@ function buildConfirmationContent(input: EmailRequest): EmailContent {
   const text = [
     `Hi ${name},`,
     '',
-    'Your enforcement complaint request has been received.',
+    'Your service request has been received.',
     '',
     `Reference number: ${input.caseId}`,
     `Request type: ${input.requestType || '—'}`,
@@ -324,7 +324,7 @@ function buildStatusUpdateContent(input: EmailRequest): EmailContent {
   const safeNext = escapeHtml(next)
   const statusUrl = statusUrlForCase(input.caseId)
 
-  const subject = `Proactive Enforcement Demo: Status update for ${input.caseId}`
+  const subject = `City of Brampton: Service request status update (${input.caseId})`
 
   const inner = `
     <p style="margin:0 0 14px;">Hi ${safeName},</p>
@@ -373,7 +373,7 @@ function buildClosureContent(input: EmailRequest): EmailContent {
   const statusUrl = statusUrlForCase(input.caseId)
 
   // Use the staff-approved subject when present; otherwise a safe default.
-  const subject = input.subject?.trim() || `Proactive Enforcement Demo: Closure update for ${input.caseId}`
+  const subject = input.subject?.trim() || `City of Brampton: Service request closure update (${input.caseId})`
 
   const inner = `
     <p style="margin:0 0 14px;">Hi ${safeName},</p>
@@ -422,7 +422,7 @@ function buildFieldUpdateContent(input: EmailRequest): EmailContent {
   const message = input.message ?? ''
   const statusUrl = statusUrlForCase(input.caseId)
 
-  const subject = input.subject?.trim() || `Proactive Enforcement Demo: An officer has investigated your request ${input.caseId}`
+  const subject = input.subject?.trim() || `City of Brampton: Service request update (${input.caseId})`
 
   const inner = `
     <p style="margin:0 0 14px;">Hi ${safeName},</p>

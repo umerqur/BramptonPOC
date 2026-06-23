@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
-import { DEMO_OFFICER, roleForEmail } from '../../lib/roles'
 import { formatDateTime } from '../../services/demoWorkflowService'
 import {
   STATUS_LABELS,
@@ -11,13 +10,13 @@ import {
 import type { DemoCase } from '../../data/demoWorkflowTypes'
 
 // Officer Field Console — the By-law Officer's only landing surface. It shows
-// ONLY cases a supervisor has assigned to this officer (never the citywide Work
+// ONLY cases assigned to the SIGNED-IN officer's email (never the citywide Work
 // Queue and never supervisor Insights). It draws from BOTH:
-//   a. Supabase resident_service_requests assigned to DEMO_OFFICER.email
-//      (resident intake — the existing flow, unchanged), and
-//   b. Local workflow DemoCase records assigned to DEMO_OFFICER.name, which is
-//      how NYC open benchmark cases assigned in the Workbench reach the officer
-//      (they live only in the local workflow store, not in Supabase).
+//   a. Supabase resident_service_requests where assigned_officer_email matches
+//      the signed-in officer (resident intake — the existing flow, unchanged), and
+//   b. Local workflow DemoCase records where assignedOfficerEmail matches the
+//      signed-in officer, which is how NYC open benchmark cases assigned in the
+//      Workbench reach the officer (they live only in the local workflow store).
 
 // One normalized officer work item, regardless of which source it came from.
 type OfficerItem = {
@@ -67,34 +66,23 @@ function localCaseToItem(c: DemoCase): OfficerItem {
   }
 }
 
-type OfficerTab = 'assigned' | 'due_today' | 'in_review' | 'follow_up' | 'completed'
+type OfficerTab = 'active' | 'closed'
 
 const TABS: { key: OfficerTab; label: string }[] = [
-  { key: 'assigned', label: 'My assigned cases' },
-  { key: 'due_today', label: 'Due today' },
-  { key: 'in_review', label: 'In field review' },
-  { key: 'follow_up', label: 'Follow up required' },
-  { key: 'completed', label: 'Completed field outcomes' },
+  { key: 'active', label: 'Active' },
+  { key: 'closed', label: 'Closed' },
 ]
-
-function isToday(iso: string | null): boolean {
-  if (!iso) return false
-  const d = new Date(iso)
-  const now = new Date()
-  return (
-    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-  )
-}
 
 export default function AppOfficerConsolePage() {
   const { role, userEmail, cases } = useWorkflow()
   const [rows, setRows] = useState<ResidentRequestRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<OfficerTab>('assigned')
+  const [tab, setTab] = useState<OfficerTab>('active')
 
-  // The officer whose cases this console shows: the signed-in officer, or the
-  // demo officer when a supervisor is previewing the officer view.
-  const officerEmail = (roleForEmail(userEmail) === 'officer' ? userEmail : DEMO_OFFICER.email)?.toLowerCase() ?? ''
+  // The officer whose cases this console shows is always the signed-in officer.
+  // Only officer-role accounts reach this page (non-officers are redirected
+  // below), so there is no supervisor "preview" of someone else's queue.
+  const officerEmail = (userEmail ?? '').trim().toLowerCase()
 
   const load = useCallback(() => {
     setError(null)
@@ -112,26 +100,27 @@ export default function AppOfficerConsolePage() {
     load()
   }, [load])
 
-  // NYC open benchmark cases assigned to Officer Oakley live only in the local
-  // workflow store — surface them alongside the Supabase resident cases.
+  // NYC open benchmark cases assigned to this officer live only in the local
+  // workflow store — surface them alongside the Supabase resident cases. Match on
+  // the assigned officer EMAIL, so the console only shows this officer's cases.
   const localItems = useMemo(
     () =>
       cases
-        .filter((c) => c.source.kind === 'nyc_open' && c.assignedOfficer === DEMO_OFFICER.name)
+        .filter(
+          (c) =>
+            c.source.kind === 'nyc_open' &&
+            (c.assignedOfficerEmail ?? '').toLowerCase() === officerEmail,
+        )
         .map(localCaseToItem),
-    [cases],
+    [cases, officerEmail],
   )
 
   const items = useMemo(() => [...(rows ?? []).map(residentToItem), ...localItems], [rows, localItems])
 
   const groups = useMemo(() => {
-    const open = items.filter((i) => !i.isClosed)
     return {
-      assigned: open.filter((i) => !i.fieldVisitCompleted),
-      due_today: open.filter((i) => !i.fieldVisitCompleted && isToday(i.assignedAt)),
-      in_review: items.filter((i) => i.inReview),
-      follow_up: items.filter((i) => i.followUpRequired),
-      completed: items.filter((i) => i.fieldVisitCompleted),
+      active: items.filter((i) => !i.isClosed),
+      closed: items.filter((i) => i.isClosed),
     } satisfies Record<OfficerTab, OfficerItem[]>
   }, [items])
 
@@ -147,8 +136,7 @@ export default function AppOfficerConsolePage() {
           <div className="section-eyebrow">By-law Officer</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Officer Field Console</h1>
           <p className="mt-2 text-ink-muted">
-            Cases a supervisor has assigned to you for a field investigation. Open a case to review the details and
-            record your field outcome — your outcome feeds closure review, and a supervisor approves the final closure.
+            Cases assigned to you for field investigation — open one to record your field outcome.
           </p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={rows === null}>
@@ -188,7 +176,9 @@ export default function AppOfficerConsolePage() {
         ) : items.length === 0 ? (
           <EmptyState />
         ) : visible.length === 0 ? (
-          <div className="card p-8 text-center text-sm text-ink-subtle">No cases in this list right now.</div>
+          <div className="card p-8 text-center text-sm text-ink-subtle">
+            {tab === 'active' ? 'No active assigned cases right now.' : 'No closed cases yet.'}
+          </div>
         ) : (
           <ul className="space-y-4">
             {visible.map((item) => (

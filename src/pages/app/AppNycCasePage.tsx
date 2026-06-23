@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getUnifiedNycCaseDetail, type UnifiedNycCaseDetail } from '../../services/caseExplorer'
 import { buildCasePriorityContext } from '../../services/benchmarks'
+import { getSyntheticPatrolLogs, type SyntheticPatrolLog } from '../../services/syntheticPatrol'
 
 // Full NYC 311 case page (replaces the old side drawer). Reads one case by id
 // from the unified detail reader, which resolves it from EITHER the historical
@@ -221,6 +222,10 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
                 </p>
               </Card>
             ))}
+
+          {/* Synthetic patrol activity — simulated field timeline, clearly
+              labelled as NOT Brampton patrol history. */}
+          <SyntheticPatrolTimeline caseId={detail.case_id} />
         </div>
 
         {/* Right column */}
@@ -281,21 +286,216 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
 }
 
 // ---------------------------------------------------------------------------
+// Synthetic patrol activity timeline
+// ---------------------------------------------------------------------------
+
+type PatrolState = { logs: SyntheticPatrolLog[] | null; loading: boolean; error: string | null }
+
+/** Load synthetic patrol logs for a case. Distinguishes loading / loaded / error. */
+function useSyntheticPatrolLogs(caseId: string): PatrolState {
+  const [state, setState] = useState<PatrolState>({ logs: null, loading: true, error: null })
+  useEffect(() => {
+    let active = true
+    setState({ logs: null, loading: true, error: null })
+    getSyntheticPatrolLogs(caseId)
+      .then((logs) => active && setState({ logs, loading: false, error: null }))
+      .catch((err: unknown) => {
+        console.error('Failed to load synthetic patrol logs:', err)
+        if (active) setState({ logs: null, loading: false, error: errorMessage(err) })
+      })
+    return () => {
+      active = false
+    }
+  }, [caseId])
+  return state
+}
+
+/**
+ * A simulated patrol-activity timeline for a case. The data is generated from NYC
+ * 311 benchmark timing and status patterns — it is explicitly NOT Brampton patrol
+ * history and NOT an automated enforcement record. The section is always rendered
+ * (with a clear disclaimer) and degrades calmly when there is no activity or the
+ * data can't be loaded, rather than showing an alarming error.
+ */
+function SyntheticPatrolTimeline({ caseId }: { caseId: string }) {
+  const { logs, loading, error } = useSyntheticPatrolLogs(caseId)
+  const hasLogs = !!logs && logs.length > 0
+
+  return (
+    <div className="card overflow-hidden p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-navy-900">Synthetic patrol activity</h3>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-violet-700">
+          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-violet-500" />
+          Simulated
+        </span>
+      </div>
+
+      {/* Always-visible provenance: simulated, not Brampton patrol history. */}
+      <p className="mt-3 rounded-lg border border-violet-200 bg-violet-50/60 px-3.5 py-2.5 text-[11px] leading-relaxed text-violet-900">
+        This patrol timeline is <span className="font-semibold">synthetic activity generated from NYC 311 benchmark
+        patterns</span> to illustrate how officer field activity could appear once Brampton operational data is
+        connected. It is not Brampton patrol history and not an automated enforcement record.
+      </p>
+
+      <div className="mt-4">
+        {loading ? (
+          <div className="animate-pulse space-y-3" aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex gap-3">
+                <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-slate-200" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 w-1/3 rounded bg-slate-200" />
+                  <div className="h-3 w-2/3 rounded bg-slate-100" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-ink-subtle">
+            Synthetic patrol activity could not be loaded for this case.
+          </p>
+        ) : !hasLogs ? (
+          <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-ink-subtle">
+            No synthetic patrol activity has been generated for this case.
+          </p>
+        ) : (
+          <PatrolTimelineList logs={logs!} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PatrolTimelineList({ logs }: { logs: SyntheticPatrolLog[] }) {
+  return (
+    <ol className="space-y-0">
+      {logs.map((log, i) => (
+        <li key={log.log_sequence ?? i} className="relative flex gap-3.5 pb-5 last:pb-0">
+          {/* Rail: dot + connecting line (line omitted on the final entry). */}
+          <div className="flex flex-col items-center" aria-hidden>
+            <span className="mt-1 inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-violet-500 ring-4 ring-violet-100" />
+            {i < logs.length - 1 && <span className="mt-1 w-px flex-1 bg-slate-200" />}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-xs font-medium tabular-nums text-ink-muted">
+                {fmtDateTime(log.activity_at) ?? 'Time not recorded'}
+              </span>
+              {log.patrol_status && <PatrolStatusBadge status={log.patrol_status} />}
+            </div>
+
+            <div className="mt-1 text-sm font-semibold text-navy-900">
+              {log.patrol_activity_type ?? 'Patrol activity'}
+            </div>
+
+            {log.officer_unit && (
+              <div className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-subtle">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-3.5 w-3.5">
+                  <path d="M12 3l7 3v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6l7-3Z" />
+                </svg>
+                {log.officer_unit}
+              </div>
+            )}
+
+            {log.outcome_summary && (
+              <p className="mt-1.5 text-sm leading-relaxed text-ink">{log.outcome_summary}</p>
+            )}
+
+            {log.recommended_next_step && (
+              <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                  Recommended next step
+                </div>
+                <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{log.recommended_next_step}</p>
+              </div>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+// Calm, keyword-based tone for a patrol status — no alarming colors, just a
+// readable badge. Unknown statuses fall back to a neutral slate badge.
+function PatrolStatusBadge({ status }: { status: string }) {
+  const s = status.toLowerCase()
+  let tone = 'bg-slate-100 text-ink-muted ring-slate-200'
+  if (/(complete|closed|done|resolved)/.test(s)) tone = 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+  else if (/(progress|active|en route|enroute|dispatch|ongoing)/.test(s)) tone = 'bg-sky-50 text-sky-800 ring-sky-200'
+  else if (/(plan|schedul|pending|queued)/.test(s)) tone = 'bg-amber-50 text-amber-800 ring-amber-200'
+  else if (/(escalat|follow|flag)/.test(s)) tone = 'bg-rose-50 text-rose-800 ring-rose-200'
+  else if (/(cancel|no action|cleared)/.test(s)) tone = 'bg-slate-100 text-ink-subtle ring-slate-200'
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${tone}`}>
+      {status}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Raw source record (collapsible, for transparency / debugging)
 // ---------------------------------------------------------------------------
 
+// Human-readable labels for the stored benchmark source fields. The raw record
+// holds snake_case / UPPERCASE database column names; staff should never see
+// those directly. Note that the ai_* fields are STORED enrichment columns from
+// the offline benchmark dataset — not the product of a live LLM call. The only
+// live AI request is the explicit, click-triggered "Generate AI review".
+const RAW_FIELD_LABELS: Record<string, string> = {
+  ai_category: 'Suggested service category',
+  ai_priority: 'Suggested review priority',
+  ai_recommended_action: 'Recommended staff action',
+  ai_summary: 'Decision support summary',
+  assigned_department: 'Assigned department',
+  borough: 'Borough',
+  case_id: 'Case ID',
+  channel: 'Source channel',
+  closed_at: 'Closed date',
+  complaint_type: 'Complaint type',
+  council_district: 'Council district',
+  created_at: 'Created date',
+  description: 'Source description',
+  resolution_description: 'Source resolution text',
+  resolution_action_updated_at: 'Resolution update date',
+  source_channel: 'Source channel',
+  source_city: 'Source city',
+  source_dataset: 'Source dataset',
+  source_dataset_id: 'Source dataset ID',
+  status: 'Status',
+  submitted_at: 'Submitted date',
+  workflow_stage: 'Workflow stage',
+}
+
+/** Fallback label for unknown raw keys — never expose the raw DB key as the
+ * primary label. Drops the ai_ prefix, de-snakes, and Title Cases. */
+function toHumanLabel(key: string) {
+  return key
+    .replace(/^ai_/i, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 function RawSourceRecord({ raw }: { raw: Record<string, unknown> }) {
   const entries = Object.entries(raw)
-    .map(([key, value]) => ({ key, value: formatRawValue(value) }))
+    .map(([key, value]) => {
+      const normalizedKey = key.toLowerCase()
+      const label = RAW_FIELD_LABELS[normalizedKey] ?? toHumanLabel(key)
+      return { key, label, value: formatRawValue(value) }
+    })
     .filter((e) => e.value != null)
-    .sort((a, b) => a.key.localeCompare(b.key))
+    .sort((a, b) => a.label.localeCompare(b.label))
 
   return (
     <details className="group rounded-xl border border-slate-200 bg-slate-50/60">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-3.5">
         <span className="min-w-0">
-          <span className="block text-sm font-semibold text-navy-900">Raw source record details</span>
-          <span className="block text-[11px] text-ink-subtle">Every field as stored in the public 311 source data.</span>
+          <span className="block text-sm font-semibold text-navy-900">Source record details</span>
+          <span className="block text-[11px] text-ink-subtle">
+            Technical source fields from the public NYC 311 benchmark record. Shown for transparency.
+          </span>
         </span>
         <svg
           viewBox="0 0 24 24"
@@ -311,14 +511,18 @@ function RawSourceRecord({ raw }: { raw: Record<string, unknown> }) {
         </svg>
       </summary>
       <div className="border-t border-slate-200 px-5 py-4">
+        <p className="mb-4 rounded-lg bg-slate-100 px-3 py-2 text-[11px] leading-relaxed text-ink-subtle">
+          These fields are stored benchmark data. Opening this section does not trigger a live AI call.
+        </p>
         {entries.length === 0 ? (
           <p className="text-xs text-ink-subtle">No source fields available for this record.</p>
         ) : (
           <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {entries.map((e) => (
               <div key={e.key} className="min-w-0">
-                <dt className="font-mono text-[10px] uppercase tracking-wider text-ink-subtle">{e.key}</dt>
+                <dt className="text-xs font-semibold text-navy-900">{e.label}</dt>
                 <dd className="mt-0.5 break-words text-sm text-ink">{e.value}</dd>
+                <dd className="mt-0.5 font-mono text-[10px] lowercase tracking-wide text-ink-subtle/70">{e.key}</dd>
               </div>
             ))}
           </dl>

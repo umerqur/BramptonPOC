@@ -9,7 +9,9 @@ import { DEMO_DATA_NOTE } from '../../services/demoWorkflowService'
 import type { AutomationActor, DemoCase, WorkflowStage } from '../../data/demoWorkflowTypes'
 
 // The canonical end-to-end flow, in order. `lane` drives the swimlane styling
-// (who does the work): the AI workflow system vs. authorized by-law staff.
+// (who does the work): decision-support automation vs authorized by-law staff.
+// Internal lane key kept as `ai` for backward compatibility; user-facing copy
+// calls it decision support.
 export type FlowStep = {
   key: string
   label: string
@@ -18,14 +20,14 @@ export type FlowStep = {
 
 export const FLOW_STEPS: FlowStep[] = [
   { key: 'intake', label: 'Complaint intake', lane: 'resident' },
-  { key: 'classified', label: 'AI classification', lane: 'ai' },
-  { key: 'context', label: 'Enforcement context', lane: 'ai' },
-  { key: 'summary', label: 'Case summary', lane: 'ai' },
-  { key: 'confidence', label: 'Confidence check', lane: 'ai' },
+  { key: 'classified', label: 'Classification check', lane: 'ai' },
+  { key: 'context', label: 'Context assembled', lane: 'ai' },
+  { key: 'summary', label: 'Summary assembled', lane: 'ai' },
+  { key: 'confidence', label: 'File readiness', lane: 'ai' },
   { key: 'assigned', label: 'Assigned to officer', lane: 'staff' },
   { key: 'field-visit', label: 'Officer field visit', lane: 'officer' },
   { key: 'staff-review', label: 'Staff review', lane: 'staff' },
-  { key: 'closure-draft', label: 'Closure draft', lane: 'ai' },
+  { key: 'closure-draft', label: 'Rules-based draft', lane: 'ai' },
   { key: 'approval', label: 'Final approval', lane: 'staff' },
   { key: 'resident-update', label: 'Resident update', lane: 'resident' },
 ]
