@@ -128,7 +128,7 @@ function StatusBody({ request }: { request: ResidentRequestStatus }) {
                     )}
                   </span>
                   <span
-                    className={`mt-2 w-20 text-[11px] leading-tight ${
+                    className={`mt-2 w-12 text-[10px] leading-tight sm:w-20 sm:text-[11px] ${
                       current ? 'font-semibold text-navy-900' : 'text-ink-subtle'
                     }`}
                   >
