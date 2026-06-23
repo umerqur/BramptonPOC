@@ -119,18 +119,20 @@ export type FieldVisitOutcome = 'no_violation' | 'notice_issued' | 'ticket_issue
 export type EnforcementAction =
   | 'warning_education' // Education / warning provided
   | 'notice_issued' // Notice issued
-  | 'ticket_issued' // Parking ticket / penalty notice issued
+  | 'ticket_issued' // Ticket / penalty notice issued (general by-law ticket / penalty / offence notice — any violation type)
   | 'no_action' // No action taken
   | 'other' // Other
 
 /**
- * How a parking ticket / penalty notice was served. Only recorded when the
- * enforcement action is ticket_issued. This records what the officer did — it
- * is not a payment or ticket-issuance system.
+ * How a by-law ticket / penalty notice was served. Only recorded when the
+ * enforcement action is ticket_issued. This is general across violation types
+ * (not parking-specific) and records what the officer did — it is not a payment
+ * or ticket-issuance system. Stored enum values are kept stable for existing DB
+ * rows; display labels are generalized in SERVICE_METHOD_LABELS.
  */
 export type ServiceMethod =
-  | 'placed_on_vehicle' // Placed on vehicle
-  | 'handed_to_driver' // Handed to driver / owner
+  | 'placed_on_vehicle' // Posted at location / placed on vehicle
+  | 'handed_to_driver' // Served in person
   | 'sent_by_mail' // Sent by mail
   | 'other' // Other
 

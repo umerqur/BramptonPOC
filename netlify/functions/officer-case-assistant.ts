@@ -296,13 +296,14 @@ type FieldDraft = {
 const ENFORCEMENT_ACTION_LABELS: Record<string, string> = {
   warning_education: 'Education / warning provided',
   notice_issued: 'Notice issued',
-  ticket_issued: 'Parking ticket / penalty notice issued',
+  ticket_issued: 'Ticket / penalty notice issued',
   no_action: 'No action taken',
   other: 'Other',
 }
+// Generalized labels (not parking-specific); stored enum values are unchanged.
 const SERVICE_METHOD_LABELS: Record<string, string> = {
-  placed_on_vehicle: 'Placed on vehicle',
-  handed_to_driver: 'Handed to driver / owner',
+  placed_on_vehicle: 'Posted at location / placed on vehicle',
+  handed_to_driver: 'Served in person',
   sent_by_mail: 'Sent by mail',
   other: 'Other',
 }
