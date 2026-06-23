@@ -77,8 +77,8 @@ const ISSUE_HINTS: Record<string, string> = {
   'Other bylaw concern': 'Anything else for by-law enforcement to review',
 }
 
-// Deterministic, rules-based demo scenarios for the "Create a realistic demo
-// complaint" autofill button. No AI, no external service — just a small set of
+// Deterministic, rules-based demo scenarios for the "Autofill demo complaint"
+// button. No AI, no external service — just a small set of
 // plausible, self-contained cases. Note: email is intentionally NOT included so
 // the resident's own (or blank) email is preserved, and files are never set.
 const DEMO_COMPLAINTS: Array<Partial<FormState>> = [
@@ -349,15 +349,16 @@ export default function ResidentNewRequestPage() {
             <div>
               <div className="text-sm font-semibold text-navy-900">Need a quick demo case?</div>
               <p className="mt-0.5 text-xs text-ink-subtle">
-                Rules based autofill creates a realistic complaint. Enter your own email before submitting.
+                Click the button to autofill a realistic demo complaint. You only need to enter your email before
+                submitting.
               </p>
             </div>
             <button
               type="button"
               onClick={fillDemoComplaint}
-              className="inline-flex items-center justify-center rounded-md bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-navy-900 focus:ring-offset-2"
+              className="animate-demo-blink inline-flex items-center justify-center rounded-md bg-navy-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-navy-900 focus:ring-offset-2"
             >
-              Create a realistic demo complaint
+              Autofill demo complaint
             </button>
           </div>
         </div>

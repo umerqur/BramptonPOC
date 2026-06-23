@@ -187,9 +187,9 @@ function StaffLink({
         end={end}
         onClick={onClick}
         className={({ isActive }) =>
-          `block border-l-2 px-3 py-2 text-sm font-semibold transition-colors ${
+          `block rounded-r-md border-l-[3px] px-3 py-2 text-sm font-semibold transition-colors ${
             isActive
-              ? 'border-navy-900 bg-slate-50 text-navy-900'
+              ? 'border-accent-500 bg-accent-50 text-navy-900'
               : 'border-transparent text-ink-muted hover:bg-slate-50 hover:text-navy-900'
           }`
         }
@@ -204,10 +204,10 @@ function StaffLink({
       end={end}
       onClick={onClick}
       className={({ isActive }) =>
-        `inline-flex items-center border-b-2 px-0.5 pb-1.5 pt-2 text-sm font-semibold transition-colors ${
+        `inline-flex items-center rounded-md border-b-2 px-2.5 pb-1.5 pt-2 text-sm font-semibold transition-colors ${
           isActive
-            ? 'border-navy-900 text-navy-900'
-            : 'border-transparent text-ink-muted hover:border-slate-300 hover:text-navy-900'
+            ? 'border-accent-500 bg-accent-50 text-navy-900'
+            : 'border-transparent text-ink-muted hover:bg-slate-50 hover:text-navy-900'
         }`
       }
     >
