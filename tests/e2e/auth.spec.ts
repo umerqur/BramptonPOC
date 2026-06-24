@@ -58,7 +58,9 @@ test('allowed email passes the client allowlist (no restricted message)', async 
   await page.getByRole('button', { name: /send sign-in link/i }).click()
 
   await expect(page.getByText('Check your email')).toBeVisible()
-  await expect(page.getByText(RESTRICTED_MESSAGE)).toHaveCount(0)
+  // The restricted banner must not appear. (exact: true avoids matching the
+  // always-present footer sentence that begins with the same text.)
+  await expect(page.getByText(RESTRICTED_MESSAGE, { exact: true })).toHaveCount(0)
   guards.assertNoErrors()
 })
 
@@ -74,7 +76,9 @@ test('disallowed email shows the restricted message and does not attempt sign in
   await page.getByLabel('Email').fill(DISALLOWED_EMAIL)
   await page.getByRole('button', { name: /send sign-in link/i }).click()
 
-  await expect(page.getByText(RESTRICTED_MESSAGE)).toBeVisible()
+  // exact: true targets the amber banner, not the footer sentence that starts
+  // with the same words.
+  await expect(page.getByText(RESTRICTED_MESSAGE, { exact: true })).toBeVisible()
   // Give any (incorrect) network call a moment to fire, then assert none did.
   await page.waitForTimeout(300)
   expect(signInAttempted, 'sign-in must not be attempted for a disallowed email').toBe(false)

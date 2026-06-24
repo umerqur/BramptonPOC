@@ -73,7 +73,7 @@ for (const path of ROUTES) {
   test(`app shell renders for ${path}`, async ({ page }) => {
     await signIn(page)
     const guards = attachGuards(page)
-    await page.goto(path)
+    await page.goto(path, { waitUntil: 'domcontentloaded' })
     await assertShell(page)
     guards.assertNoErrors()
   })
@@ -82,7 +82,7 @@ for (const path of ROUTES) {
 test('officer session renders the field console shell', async ({ page }) => {
   await signIn(page, OFFICER_EMAIL)
   const guards = attachGuards(page)
-  await page.goto('/app/field')
+  await page.goto('/app/field', { waitUntil: 'domcontentloaded' })
   await expectMounted(page)
   await expect(page.getByText('Proactive Enforcement Response').first()).toBeVisible()
   // Officer nav shows the Field Console entry.

@@ -30,7 +30,7 @@ async function signIn(page: Page) {
 test('officer field console loads with assigned cases', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto('/app/field')
+  await page.goto('/app/field', { waitUntil: 'domcontentloaded' })
   await expectMounted(page)
   await expect(page.getByRole('heading', { name: 'Officer Field Console' })).toBeVisible()
   // The assigned case row links into the case.
@@ -41,7 +41,7 @@ test('officer field console loads with assigned cases', async ({ page }) => {
 test('officer opens an assigned case and sees the field outcome controls', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto('/app/field')
+  await page.goto('/app/field', { waitUntil: 'domcontentloaded' })
   await page.getByRole('link', { name: /record field outcome|view field outcome/i }).first().click()
   await page.waitForURL('**/app/field/**')
   await expectMounted(page)
@@ -54,15 +54,16 @@ test('officer opens an assigned case and sees the field outcome controls', async
 test('officer can interact with the field outcome form without crashing', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto(`/app/field/${CASE_ID}`)
+  await page.goto(`/app/field/${CASE_ID}`, { waitUntil: 'domcontentloaded' })
   await expectMounted(page)
   await expect(page.getByText('Record field outcome')).toBeVisible()
 
   // Provide an observed condition and attempt to save. Whether validation gates
   // it or the mocked update succeeds, the page must not throw or blank out.
-  const textarea = page.locator('textarea').first()
-  await textarea.fill('Yard cleared on arrival; no active violation observed at the time of inspection.')
-  await page.getByRole('button', { name: /record field outcome|save/i }).first().click()
+  await page.getByPlaceholder('Describe what you observed on site…').fill(
+    'Yard cleared on arrival; no active violation observed at the time of inspection.',
+  )
+  await page.getByRole('button', { name: /field outcome complete|saving/i }).click()
 
   await expectMounted(page)
   guards.assertNoErrors()

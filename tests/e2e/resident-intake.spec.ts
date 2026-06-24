@@ -19,7 +19,9 @@ async function mockBackend(page: Page) {
 async function fillContact(page: Page, email = 'jordan.resident@example.com') {
   await page.getByLabel('First name').fill('Jordan')
   await page.getByLabel('Last name').fill('Resident')
-  await page.getByLabel('Email').fill(email)
+  // Target the email input by placeholder: getByLabel('Email') is ambiguous
+  // because the "Method of contact" <select> has an <option>Email</option>.
+  await page.getByPlaceholder('you@example.com').fill(email)
   await page.getByLabel('Method of contact').selectOption('Email')
 }
 

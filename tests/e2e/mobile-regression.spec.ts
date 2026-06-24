@@ -21,8 +21,10 @@ for (const path of MOBILE_ROUTES) {
 
 test('mobile landing exposes a primary CTA that is tappable', async ({ page }) => {
   const guards = await gotoAndCheck(page, '/')
-  // The public site routes residents to file a complaint and staff to sign in.
-  const cta = page.getByRole('link', { name: /file a complaint/i }).first()
+  // The landing body's primary CTA routes residents into the intake flow. (The
+  // header's "File a complaint" link collapses into the mobile menu, so assert
+  // the always-visible hero CTA instead.)
+  const cta = page.getByRole('link', { name: 'Start request' }).first()
   await expect(cta).toBeVisible()
   const box = await cta.boundingBox()
   expect(box, 'CTA has no layout box').not.toBeNull()

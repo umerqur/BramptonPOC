@@ -27,7 +27,7 @@ async function signIn(page: Page) {
 test('staff land on the Work Queue and see service request rows', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto('/app')
+  await page.goto('/app', { waitUntil: 'domcontentloaded' })
   await expectMounted(page)
   await expect(page.getByRole('heading', { name: 'Priority Queue' })).toBeVisible()
   // At least one resident service-request card with an "Open case" action.
@@ -38,7 +38,7 @@ test('staff land on the Work Queue and see service request rows', async ({ page 
 test('staff open a case into the Case Workbench', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto('/app')
+  await page.goto('/app', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: /open case/i }).first().click()
   await page.waitForURL('**/app/workbench**')
   await expectMounted(page)
@@ -50,7 +50,7 @@ test('staff open a case into the Case Workbench', async ({ page }) => {
 test('staff can open Closure Review and see the draft/review state', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto('/app/closure')
+  await page.goto('/app/closure', { waitUntil: 'domcontentloaded' })
   await expectMounted(page)
   await expect(page.getByRole('heading', { name: /closure review/i })).toBeVisible()
   guards.assertNoErrors()
@@ -59,7 +59,7 @@ test('staff can open Closure Review and see the draft/review state', async ({ pa
 test('staff can open Insights and the dashboard renders', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto('/app/insights')
+  await page.goto('/app/insights', { waitUntil: 'domcontentloaded' })
   await expectMounted(page)
   await expect(page.getByRole('heading', { name: 'Workload Intelligence' })).toBeVisible()
   guards.assertNoErrors()
@@ -79,7 +79,7 @@ for (const { from, to } of APP_REDIRECTS) {
   test(`legacy redirect ${from} -> ${to}`, async ({ page }) => {
     await signIn(page)
     const guards = attachGuards(page)
-    await page.goto(from)
+    await page.goto(from, { waitUntil: 'domcontentloaded' })
     await page.waitForURL((url) => url.pathname === to)
     await expectMounted(page)
     guards.assertNoErrors()
