@@ -1453,20 +1453,22 @@ function CapacityCalculator() {
   const highCapacity = dailyCapacity * (Math.max(0, Math.min(100, highFocus)) / 100)
   const daysHigh = high != null && highCapacity > 0 ? Math.ceil(high / highCapacity) : null
   const daysAll = openCases != null && dailyCapacity > 0 ? Math.ceil(openCases / dailyCapacity) : null
-  const capacityGap = openCases == null ? null : openCases - dailyCapacity
+  // Staff (at the current per-staff review rate) required to clear the open queue
+  // within 30 days — an intuitive headcount target instead of a raw case gap.
+  const staffNeededFor30Days = openCases == null || perStaff <= 0 ? null : Math.ceil(openCases / (30 * perStaff))
 
   // Deterministic status colors for the result cards (green manageable, amber
   // pressure, red critical). Thresholds are explicit and auditable.
   const daysAllStatus: SimStatus =
     daysAll == null ? 'neutral' : daysAll <= 14 ? 'good' : daysAll <= 60 ? 'watch' : 'critical'
-  const capacityGapStatus: SimStatus =
-    capacityGap == null || openCases == null
+  const staffNeededStatus: SimStatus =
+    staffNeededFor30Days == null
       ? 'neutral'
-      : capacityGap <= 0
+      : effectiveStaff >= staffNeededFor30Days
         ? 'good'
-        : capacityGap >= openCases * 0.25
-          ? 'critical'
-          : 'watch'
+        : effectiveStaff >= staffNeededFor30Days * 0.75
+          ? 'watch'
+          : 'critical'
 
   const dataUnavailable = baseOpen == null && !summary.loading && !sample.loading
   const loading = summary.loading && sample.loading
@@ -1569,16 +1571,16 @@ function CapacityCalculator() {
               <SimCard label="High priority cases" value={high == null ? '—' : fmtInt(high)} helper={high == null ? 'Tier breakdown unavailable' : `${highFocus}% of capacity directed here first`} />
               <SimCard label="Days to clear high priority" value={daysHigh == null ? '—' : fmtInt(daysHigh)} helper="At current high-priority focus" />
               <SimCard
-                label="Days to clear open queue"
+                label="Estimated clearance time"
                 value={daysAll == null ? '—' : fmtInt(daysAll)}
-                helper={openCases == null ? '—' : `${fmtInt(openCases)} open cases this scenario`}
+                helper="At the selected staffing capacity"
                 status={daysAllStatus}
               />
               <SimCard
-                label="Capacity gap (day 1)"
-                value={capacityGap == null ? '—' : `${capacityGap > 0 ? '+' : ''}${fmtInt(capacityGap)}`}
-                helper={capacityGap == null ? '—' : capacityGap > 0 ? 'Open cases beyond one day of capacity' : 'Capacity covers the open queue in a day'}
-                status={capacityGapStatus}
+                label="Staff needed for 30 day clearance"
+                value={staffNeededFor30Days == null ? '—' : fmtInt(staffNeededFor30Days)}
+                helper="Based on current cases reviewed per staff per day"
+                status={staffNeededStatus}
               />
               <SimCard
                 label="Largest open case category"
@@ -1625,8 +1627,9 @@ function NumberInput({
   helper?: string
 }) {
   // Local string draft so the field is comfortable to edit: users can fully
-  // delete and retype on desktop and mobile. We never parse, round, or clamp on
-  // every keystroke — only on blur or Enter — so a partially typed or blank value
+  // delete and retype on desktop and mobile. A valid number updates the result
+  // cards immediately while typing, but we never round or clamp on every
+  // keystroke — only on blur or Enter — so a partially typed or blank value
   // doesn't snap back mid-edit or break the calculation.
   const [draft, setDraft] = useState(String(value))
 
@@ -1658,9 +1661,17 @@ function NumberInput({
         pattern="[0-9]*"
         value={draft}
         onChange={(e) => {
-          // Allow blank or digits only while typing; defer all parsing to commit.
+          // Allow blank or digits only while typing. A valid number updates the
+          // result cards immediately; min/max clamping is deferred to commit
+          // (blur or Enter), and a blank value waits for commit to revert.
           const next = e.target.value
-          if (next === '' || /^[0-9]+$/.test(next)) setDraft(next)
+          if (next === '' || /^[0-9]+$/.test(next)) {
+            setDraft(next)
+            if (next !== '') {
+              const n = Number(next)
+              if (Number.isFinite(n) && n !== value) onChange(n)
+            }
+          }
         }}
         onBlur={commit}
         onKeyDown={(e) => {
