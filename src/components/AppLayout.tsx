@@ -17,9 +17,9 @@ import { getResidentRequests } from '../services/residentRequests'
 // across pages; the provider receives the signed-in email to set the role.
 
 // A top-nav entry. `match` decides the active state from the current location so
-// query-param routes (Stress-Testing → /app/insights?tab=simulations) highlight
-// distinctly from Intelligence Command (/app/insights). `showBadge` marks the
-// single Priority entry that carries the live active-item count badge.
+// query-param routes (Stress Testing → /app/insights?tab=simulations) highlight
+// distinctly from Insights (/app/insights). `showBadge` marks the single Priority
+// entry that carries the live active-item count badge.
 type NavItem = {
   to: string
   label: string
@@ -36,13 +36,13 @@ const SUPERVISOR_NAV: NavItem[] = [
   { to: '/app', label: 'Priority', icon: <PriorityIcon />, match: (p) => p === '/app', showBadge: true },
   {
     to: '/app/insights',
-    label: 'Intelligence Command',
+    label: 'Insights',
     icon: <IntelligenceIcon />,
     match: (p, s) => p === '/app/insights' && tabParam(s) !== 'simulations',
   },
   {
     to: '/app/insights?tab=simulations',
-    label: 'Stress-Testing',
+    label: 'Stress Testing',
     icon: <StressTestIcon />,
     match: (p, s) => p === '/app/insights' && tabParam(s) === 'simulations',
   },
@@ -149,7 +149,7 @@ function AppShell() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
+      <header className="sticky top-0 z-40 bg-white border-b-2 border-slate-300 shadow-sm">
         <div className="container-page flex h-16 items-center justify-between gap-4">
           <Link to={role === 'officer' ? '/app/field' : '/app'} className="flex items-center gap-2.5 shrink-0">
             <Logo className="h-7 w-7" />
@@ -161,8 +161,8 @@ function AppShell() {
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-5 xl:flex">
-            <div className="flex items-center gap-2">
+          <nav className="hidden items-center gap-8 xl:flex">
+            <div className="flex items-center gap-1.5">
               {nav.map((item) => (
                 <StaffLink
                   key={item.to}
@@ -176,7 +176,7 @@ function AppShell() {
                 </StaffLink>
               ))}
             </div>
-            <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
+            <div className="flex items-center gap-2 border-l border-slate-300 pl-6">
               {canSwitchRole && <RoleSwitcher />}
               <RoleBadge role={role} name={roleName} />
               <button onClick={handleSignOut} className="btn-secondary text-sm py-2 px-4">
@@ -296,9 +296,11 @@ function RoleSwitcher({ className = '' }: { className?: string }) {
 
 // Top-nav link — an operational command treatment: icon + label + optional count
 // badge, with a clear active accent state. Active state is computed by the caller
-// (so query-param routes like Stress-Testing highlight distinctly) rather than by
-// NavLink's pathname-only matching.
-//   * desktop — bottom accent rule + tinted background under the active item.
+// (so query-param routes like Stress Testing highlight distinctly) rather than by
+// NavLink's pathname-only matching. On the white municipal header the active tab
+// reads as a confident teal-tinted chip (light teal fill, teal border, navy text)
+// rather than a washed-out underline.
+//   * desktop — teal-bordered tinted chip under the active item.
 //   * mobile  — left accent rule beside the active row in the dropdown.
 function StaffLink({
   to,
@@ -324,8 +326,8 @@ function StaffLink({
         onClick={onClick}
         className={`flex items-center gap-2 rounded-r-md border-l-[3px] px-3 py-2 text-sm font-semibold transition-colors ${
           active
-            ? 'border-accent-500 bg-accent-50 text-navy-900'
-            : 'border-transparent text-ink-muted hover:bg-slate-50 hover:text-navy-900'
+            ? 'border-accent-600 bg-accent-50 text-navy-900'
+            : 'border-transparent text-navy-700 hover:bg-slate-100 hover:text-navy-900'
         }`}
       >
         {icon && <span className="shrink-0">{icon}</span>}
@@ -338,13 +340,13 @@ function StaffLink({
     <Link
       to={to}
       onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-md border-b-2 px-2.5 pb-1.5 pt-2 text-sm font-semibold transition-colors ${
+      className={`inline-flex items-center gap-2 rounded-t-md border border-b-[3px] px-3 pb-1.5 pt-2 text-sm font-semibold transition-colors ${
         active
-          ? 'border-accent-500 bg-accent-50 text-navy-900'
-          : 'border-transparent text-ink-muted hover:bg-slate-50 hover:text-navy-900'
+          ? 'border-accent-200 border-b-accent-600 bg-accent-50 text-navy-900 shadow-sm'
+          : 'border-transparent text-navy-700 hover:bg-slate-100 hover:text-navy-900'
       }`}
     >
-      {icon && <span className={`shrink-0 ${active ? 'text-accent-600' : 'opacity-70'}`}>{icon}</span>}
+      {icon && <span className={`shrink-0 ${active ? 'text-accent-600' : 'text-navy-500'}`}>{icon}</span>}
       <span>{children}</span>
       {badge}
     </Link>
