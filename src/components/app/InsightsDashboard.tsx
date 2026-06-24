@@ -1183,6 +1183,18 @@ const SURGE_MULTIPLIER = 1.25
 /** True when a tier string is the High review-priority tier. */
 const isHighTier = (tier: string | null) => (tier ?? '').trim().toLowerCase() === 'high'
 
+// Staffing scale presets for the capacity planning controls. Each sets the three
+// planning inputs to a coherent coverage scope: the system-wide public benchmark
+// queue (many departments / agencies), a single department team, or a small
+// enforcement team. These are starting assumptions, not predictions.
+type StaffingPreset = { id: string; label: string; staff: number; perStaff: number; highFocus: number }
+
+const STAFFING_PRESETS: StaffingPreset[] = [
+  { id: 'system', label: 'System wide benchmark', staff: 216, perStaff: 25, highFocus: 100 },
+  { id: 'department', label: 'Department team', staff: 25, perStaff: 25, highFocus: 100 },
+  { id: 'small', label: 'Small enforcement team', staff: 8, perStaff: 20, highFocus: 100 },
+]
+
 /**
  * SimulationLab — an operations-style capacity stress test over the live open
  * review queue summary plus user-controlled planning assumptions. This is
@@ -1262,6 +1274,10 @@ function SimulationLab() {
         </div>
       </section>
 
+      {/* Capacity planning controls — placed up top so supervisors can set
+          staffing assumptions before reading the workload pressure below. */}
+      <CapacityCalculator />
+
       {/* 1. Officer workload */}
       <WorkloadSection
         title="Officer workload"
@@ -1297,9 +1313,6 @@ function SimulationLab() {
         rows={complaintTypes.data ?? []}
         labelOf={(r) => r.complaint_type}
       />
-
-      {/* Secondary: the original deterministic backlog-clearance calculator. */}
-      <CapacityCalculator />
     </div>
   )
 }
@@ -1380,7 +1393,8 @@ function WorkloadSection<T extends WorkloadRow>({
 }
 
 // ---------------------------------------------------------------------------
-// Secondary: deterministic backlog-clearance calculator (open review queue)
+// Capacity planning controls — deterministic backlog-clearance math over the
+// open review queue, driven by user-set staffing assumptions.
 // ---------------------------------------------------------------------------
 
 function CapacityCalculator() {
@@ -1390,10 +1404,17 @@ function CapacityCalculator() {
   // counts if the summary aggregate is unavailable, and for the main pressure type.
   const sample = useLive<OpenReviewRow[]>(() => getNycOpenQueueDiversified({}, 60))
 
-  const [staff, setStaff] = useState(3)
+  const [staff, setStaff] = useState(216)
   const [perStaff, setPerStaff] = useState(25)
   const [highFocus, setHighFocus] = useState(100)
   const [scenario, setScenario] = useState<Scenario>('current')
+
+  // Apply a staffing-scale preset to all three planning inputs at once.
+  const applyPreset = (p: StaffingPreset) => {
+    setStaff(p.staff)
+    setPerStaff(p.perStaff)
+    setHighFocus(p.highFocus)
+  }
 
   const sampleRows = sample.data ?? []
   const summaryOk = !!summary.data
@@ -1455,17 +1476,48 @@ function CapacityCalculator() {
       <section className="card p-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-navy-900">Backlog clearance calculator</h3>
-            <p className="mt-0.5 text-xs text-ink-subtle">Secondary tool — deterministic open-queue clearance math under staffing assumptions, not a forecast.</p>
+            <h3 className="text-sm font-semibold text-navy-900">Capacity planning controls</h3>
+            <p className="mt-0.5 text-xs text-ink-subtle">Adjust staffing assumptions before reviewing workload pressure. Deterministic planning math only, not a forecast.</p>
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
-            Secondary · deterministic
+            Planning · deterministic
           </span>
+        </div>
+
+        {/* Staffing scale presets — pick a coverage scope, then fine-tune below. */}
+        <div className="mt-4">
+          <span className="text-[11px] font-medium text-ink-subtle">Staffing scale</span>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {STAFFING_PRESETS.map((p) => {
+              const active = staff === p.staff && perStaff === p.perStaff && highFocus === p.highFocus
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => applyPreset(p)}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset transition ${
+                    active
+                      ? 'bg-accent-50 text-navy-900 ring-accent-300'
+                      : 'bg-white text-ink-muted ring-slate-200 hover:bg-slate-50 hover:text-navy-900'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         {/* Inputs */}
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <NumberInput label="Staff available" value={staff} min={1} max={50} onChange={setStaff} />
+          <NumberInput
+            label="Staff available"
+            value={staff}
+            min={1}
+            max={1000}
+            onChange={setStaff}
+            helper="Default assumes system wide benchmark queue coverage, not one department."
+          />
           <NumberInput label="Cases reviewed / staff / day" value={perStaff} min={1} max={200} onChange={setPerStaff} />
           <NumberInput label="High priority focus (%)" value={highFocus} min={0} max={100} onChange={setHighFocus} />
           <div>
@@ -1512,11 +1564,7 @@ function CapacityCalculator() {
                 these figures are a limited sample, not the full queue total.
               </p>
             )}
-            <p className="mt-4 text-[11px] leading-relaxed text-ink-muted">
-              This uses live open case counts and simple capacity math: staff available × cases per staff per day. It does
-              not predict enforcement outcomes.
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <SimCard label="Daily review capacity" value={fmtInt(dailyCapacity)} helper={`${effectiveStaff} staff × ${perStaff} cases/day`} />
               <SimCard label="High priority cases" value={high == null ? '—' : fmtInt(high)} helper={high == null ? 'Tier breakdown unavailable' : `${highFocus}% of capacity directed here first`} />
               <SimCard label="Days to clear high priority" value={daysHigh == null ? '—' : fmtInt(daysHigh)} helper="At current high-priority focus" />
@@ -1544,6 +1592,11 @@ function CapacityCalculator() {
                 Main aging bucket: <span className="font-medium text-ink-muted">{topAging.bucket}</span> ({fmtInt(topAging.total_cases)} open cases).
               </p>
             )}
+
+            <p className="mt-4 text-[11px] leading-relaxed text-ink-muted">
+              This calculator uses open case counts from the selected benchmark scope. Staff assumptions should represent
+              the effective review capacity for that scope, not the number of employees in a single department.
+            </p>
           </>
         )}
 
@@ -1562,28 +1615,63 @@ function NumberInput({
   min,
   max,
   onChange,
+  helper,
 }: {
   label: string
   value: number
   min: number
   max: number
   onChange: (v: number) => void
+  helper?: string
 }) {
+  // Local string draft so the field is comfortable to edit: users can fully
+  // delete and retype on desktop and mobile. We never parse, round, or clamp on
+  // every keystroke — only on blur or Enter — so a partially typed or blank value
+  // doesn't snap back mid-edit or break the calculation.
+  const [draft, setDraft] = useState(String(value))
+
+  // Re-sync the draft when the value changes from outside (presets / scenario
+  // chips). This fires only on real value changes, never while the user types.
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+
+  // Parse, round, and clamp once editing finishes. Blank or invalid input reverts
+  // to the last valid value so the calculation always has a usable number.
+  const commit = () => {
+    const n = Number(draft)
+    if (draft.trim() === '' || !Number.isFinite(n)) {
+      setDraft(String(value))
+      return
+    }
+    const clamped = Math.max(min, Math.min(max, Math.round(n)))
+    setDraft(String(clamped))
+    if (clamped !== value) onChange(clamped)
+  }
+
   return (
     <label className="block">
       <span className="text-[11px] font-medium text-ink-subtle">{label}</span>
       <input
-        type="number"
-        min={min}
-        max={max}
-        value={value}
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        value={draft}
         onChange={(e) => {
-          const n = Number(e.target.value)
-          if (!Number.isFinite(n)) return
-          onChange(Math.max(min, Math.min(max, Math.round(n))))
+          // Allow blank or digits only while typing; defer all parsing to commit.
+          const next = e.target.value
+          if (next === '' || /^[0-9]+$/.test(next)) setDraft(next)
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            e.currentTarget.blur()
+          }
         }}
         className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm tabular-nums focus:border-accent-500 focus:outline-none"
       />
+      {helper && <span className="mt-1 block text-[10px] leading-snug text-ink-subtle">{helper}</span>}
     </label>
   )
 }
