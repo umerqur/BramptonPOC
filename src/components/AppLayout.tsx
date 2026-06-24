@@ -18,8 +18,8 @@ import { getResidentRequests } from '../services/residentRequests'
 
 // A top-nav entry. `match` decides the active state from the current location so
 // query-param routes (Stress Testing → /app/insights?tab=simulations) highlight
-// distinctly from Insights (/app/insights). `showBadge` marks the single Priority
-// entry that carries the live active-item count badge.
+// distinctly from Intelligence Command (/app/insights). `showBadge` marks the
+// single Priority entry that carries the live active-item count badge.
 type NavItem = {
   to: string
   label: string
@@ -36,7 +36,7 @@ const SUPERVISOR_NAV: NavItem[] = [
   { to: '/app', label: 'Priority', icon: <PriorityIcon />, match: (p) => p === '/app', showBadge: true },
   {
     to: '/app/insights',
-    label: 'Insights',
+    label: 'Intelligence Command',
     icon: <IntelligenceIcon />,
     match: (p, s) => p === '/app/insights' && tabParam(s) !== 'simulations',
   },
