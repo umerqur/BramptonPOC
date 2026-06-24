@@ -1571,14 +1571,14 @@ function CapacityCalculator() {
               <SimCard label="High priority cases" value={high == null ? '—' : fmtInt(high)} helper={high == null ? 'Tier breakdown unavailable' : `${highFocus}% of capacity directed here first`} />
               <SimCard label="Days to clear high priority" value={daysHigh == null ? '—' : fmtInt(daysHigh)} helper="At current high-priority focus" />
               <SimCard
-                label="Estimated clearance time"
-                value={daysAll == null ? '—' : fmtInt(daysAll)}
+                label="Estimated days to clear open queue"
+                value={daysAll == null ? '—' : `${fmtInt(daysAll)} days`}
                 helper="At the selected staffing capacity"
                 status={daysAllStatus}
               />
               <SimCard
-                label="Staff needed for 30 day clearance"
-                value={staffNeededFor30Days == null ? '—' : fmtInt(staffNeededFor30Days)}
+                label="Staff needed to clear queue in 30 days"
+                value={staffNeededFor30Days == null ? '—' : `${fmtInt(staffNeededFor30Days)} staff`}
                 helper="Based on current cases reviewed per staff per day"
                 status={staffNeededStatus}
               />
