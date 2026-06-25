@@ -1,15 +1,8 @@
 import { Link } from 'react-router-dom'
 
-// Short, two-path landing page for the Proactive Enforcement Response POC.
-// A premium image hero with a light, left-weighted navy overlay (the image
-// stays visible and the page feels bright and modern, while the left-aligned
-// text keeps enough contrast to read), followed by two large persona cards
-// (Resident / City staff). Kept deliberately minimal so the demo opens on a
-// clear choice rather than a long marketing read.
 export default function LandingPage() {
   return (
     <div>
-      {/* Hero — existing repo asset behind a navy gradient overlay */}
       <section className="relative isolate overflow-hidden bg-navy-950 text-white">
         <img
           src="/brampton-poc-hero.png"
@@ -23,8 +16,6 @@ export default function LandingPage() {
         />
         <div className="container-page py-24 lg:py-32">
           <div className="max-w-2xl">
-            {/* The official Brampton use-case name stays visible as an eyebrow,
-                while the hero title reads as a plain-language description. */}
             <p className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-white/70">
               Proactive Enforcement Response
             </p>
@@ -59,10 +50,8 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Two-path cards */}
       <section className="container-page py-14 lg:py-20">
         <div className="grid gap-6 md:grid-cols-2">
-          {/* Resident */}
           <div className="card card-hover flex flex-col p-7">
             <h2 className="text-xl font-semibold text-navy-900">Resident</h2>
             <p className="mt-2 flex-1 text-ink-muted">
@@ -75,7 +64,6 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* City staff */}
           <div className="card card-hover flex flex-col p-7">
             <h2 className="text-xl font-semibold text-navy-900">City staff</h2>
             <p className="mt-2 flex-1 text-ink-muted">
@@ -90,7 +78,7 @@ export default function LandingPage() {
         </div>
 
         <p className="mt-8 text-center text-xs text-ink-subtle">
-          Demo only. NYC 311 public benchmark data supports analytics. Resident submissions are demo data.
+          Demo only. Analytics use a 3.4M record NYC 311 public benchmark dataset. Resident submissions are demo data.
         </p>
       </section>
     </div>
