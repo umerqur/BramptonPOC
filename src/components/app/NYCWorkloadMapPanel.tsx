@@ -129,9 +129,10 @@ const ADAPTERS: Record<MapMode, ModeAdapter> = {
 }
 
 /**
- * The NYC 311 workload heat map. Defaults to the ward-like council district view
- * and the Total complaints metric. Offers a geography toggle (district/borough)
- * and a metric toggle. Loads the bundled geometry for the active mode plus the
+ * The NYC 311 workload heat map. Defaults to the ward-like council district view,
+ * the High-priority open cases metric, and the 3D extruded view for the demo.
+ * Offers a geography toggle (district/borough) and a metric toggle. Loads the
+ * bundled geometry for the active mode plus the
  * per-area metric aggregates, then renders an interactive choropleth shaded by the
  * selected metric.
  */
@@ -143,7 +144,8 @@ export default function NYCWorkloadMapPanel({
   onSelectArea?: (mode: MapMode, value: string) => void
 } = {}) {
   const [mode, setMode] = useState<MapMode>('district')
-  // Selected metric persists across geography toggles. Total complaints default.
+  // Selected metric persists across geography toggles. High-priority open cases
+  // is the default (see DEFAULT_METRIC) so the 3D demo opens on operational pressure.
   const [metric, setMetric] = useState<MapMetric>(DEFAULT_METRIC)
   // Guard: a metric whose backing view is not populated yet ("Coming soon") can
   // never become the selected metric, even if a stale call slips through.
@@ -357,9 +359,12 @@ function NYCWorkloadHeatMap({
   // hovered area first, then the clicked area, then the highest.
   const [selected, setSelected] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
-  // Visual mode: the 2D choropleth is the default operational view; the 3D view
-  // is a secondary, exploratory extrusion. Independent of geography + metric.
-  const [view, setView] = useState<'2d' | '3d'>('2d')
+  // Visual mode: the 3D extrusion is the default for the demo because the
+  // workload columns show operational pressure more vividly than the flat
+  // choropleth. The user can switch to the 2D map with the toggle at any time.
+  // This is component state with no persistence, so the demo always opens on 3D —
+  // an old session can never override it. Independent of geography + metric.
+  const [view, setView] = useState<'2d' | '3d'>('3d')
 
   // Highest area for the selected metric (nulls last) — the default focus.
   const sortedRows = useMemo(() => {

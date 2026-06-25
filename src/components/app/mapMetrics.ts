@@ -6,7 +6,7 @@
 // This is NYC 311 public benchmark data — decision support only, never a risk
 // prediction and never Brampton operational complaint data.
 
-/** The selectable map metrics. Total complaints is the default. */
+/** The selectable map metrics. High-priority open cases is the default. */
 export type MapMetric =
   | 'total_requests'
   | 'open_backlog'
@@ -56,7 +56,10 @@ export type MetricConfig = {
 const int = (v: number) => Math.round(v).toLocaleString()
 const days = (v: number) => `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })} days`
 
-export const DEFAULT_METRIC: MapMetric = 'total_requests'
+// High-priority open cases is the default: the demo opens on the 3D workload
+// view, where operational pressure (the red high-priority districts) is the most
+// useful headline. The user can switch to any other metric from the control.
+export const DEFAULT_METRIC: MapMetric = 'high_priority_open'
 
 export const MAP_METRICS: MetricConfig[] = [
   {
