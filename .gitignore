@@ -37,3 +37,9 @@ data/processed/**/*.csv
 # V2 full scored predictions (106MB; lives in Supabase, not git)
 reports/modeling/v2/workflow_ml_predictions_full.csv
 reports/modeling/**/_*_log.txt
+
+# CTGAN + ABM stress lab: generated data and model outputs are produced locally
+# and must not be committed. Code under scripts/ctgan_abm/ and docs stay tracked.
+outputs/
+data/ctgan_abm/*.csv
+data/processed/ctgan_abm_outputs/
