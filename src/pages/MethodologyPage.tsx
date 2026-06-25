@@ -24,21 +24,21 @@ const abmAgents = [
 ] as const
 
 const abmRules = [
-  'How many officer minutes are available',
-  'How long different case types take',
-  'Which districts receive demand',
-  'When supervisor queues grow',
-  'When backlog risk increases',
-  'When resident updates are delayed',
+  'How many officer minutes are available?',
+  'How long do different case types take?',
+  'Which districts receive demand?',
+  'When do supervisor queues grow?',
+  'When does backlog risk increase?',
+  'When are resident updates delayed?',
 ] as const
 
 const couplingFlow = [
   'Historical 311 records',
-  'CTGAN synthetic demand generator',
+  'Synthetic demand generator',
   'Synthetic complaint agents',
   'District and officer capacity model',
   'Supervisor queue',
-  'Outputs',
+  'Planning outputs',
 ] as const
 
 const simulationOutputs = [
@@ -46,7 +46,7 @@ const simulationOutputs = [
   'Stale case risk',
   'District overload',
   'Complaint type pressure',
-  'Staff capacity needed for 30 day clearance',
+  'Staff capacity needed',
   'Supervisor review pressure',
 ] as const
 
@@ -126,13 +126,12 @@ export default function MethodologyPage() {
         <section className="card overflow-hidden">
           <div className="border-b border-slate-200 bg-navy-900 px-6 py-7 sm:px-8">
             <div className="text-xs font-semibold uppercase tracking-wider text-accent-300">Stress testing</div>
-            <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">
-              CTGAN demand scenarios plus ABM operations simulation
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+              AI Simulation &amp; Risk Modelling
             </h2>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-navy-100">
-              The POC can move beyond dashboards into a simulation layer. A CTGAN model creates realistic synthetic
-              complaint demand scenarios from historical service request patterns. Those synthetic complaints are then
-              fed into an agent based model that simulates how municipal operations respond under pressure.
+              The POC can move beyond dashboards into a simulation layer. It uses AI generated demand scenarios and an
+              explainable operations model to test where service pressure could create bottlenecks before they happen.
             </p>
           </div>
 
@@ -160,11 +159,12 @@ export default function MethodologyPage() {
                   <span className="rounded-md bg-accent-100 px-2 py-0.5 text-xs font-semibold text-accent-800">
                     ABM
                   </span>
-                  <h3 className="text-sm font-semibold text-navy-900">Agent based operations model</h3>
+                  <h3 className="text-sm font-semibold text-navy-900">Explainable operations model</h3>
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-ink-muted">
                   An agent based model is a rules based simulation where each part of the operation is represented as an
-                  agent. Because the rules are visible, the model is explainable end to end.
+                  agent. The rules are visible, so staff can understand why backlog, supervisor pressure, or district
+                  overload appears.
                 </p>
                 <ul className="mt-4 space-y-1.5">
                   {abmAgents.map(([name, desc]) => (
@@ -179,17 +179,22 @@ export default function MethodologyPage() {
               </div>
             </div>
 
-            {/* What the rules make visible */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <h3 className="text-sm font-semibold text-navy-900">The rules are visible</h3>
-              <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {abmRules.map((rule) => (
+            {/* The rules are visible — core value proposition, large checklist cards */}
+            <div className="rounded-2xl border border-accent-100 bg-accent-50/40 p-6 sm:p-8">
+              <h3 className="text-2xl font-bold tracking-tight text-navy-900 sm:text-3xl">The rules are visible</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-muted">
+                The simulation answers plain questions that staff can read and challenge directly.
+              </p>
+              <ul className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {abmRules.map((rule, i) => (
                   <li
                     key={rule}
-                    className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-snug text-navy-800"
+                    className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm"
                   >
-                    <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500" />
-                    {rule}
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-100 text-sm font-bold text-accent-800">
+                      {i + 1}
+                    </span>
+                    <span className="text-lg font-semibold leading-snug text-navy-900 sm:text-xl">{rule}</span>
                   </li>
                 ))}
               </ul>
@@ -199,8 +204,8 @@ export default function MethodologyPage() {
             <div>
               <h3 className="text-sm font-semibold text-navy-900">The powerful part is the coupling</h3>
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-muted">
-                CTGAN creates plausible future complaint demand. The ABM tests what happens operationally when that
-                demand hits staff, officers, districts, and supervisor queues.
+                The AI demand generator creates plausible future complaint demand. The operations model then tests what
+                happens when that demand hits staff, officers, districts, and supervisor queues.
               </p>
               <ol className="mt-4 flex flex-col gap-2 lg:flex-row lg:items-stretch">
                 {couplingFlow.map((node, i) => (
@@ -237,11 +242,16 @@ export default function MethodologyPage() {
               </div>
             </div>
 
-            <p className="rounded-xl bg-accent-50 px-4 py-3 text-sm leading-relaxed text-accent-800 ring-1 ring-inset ring-accent-100">
-              This is a scenario planning tool, not a prediction of reality and not a replacement for staff judgement.
-              GPU accelerated scenario modelling produces planning signals that staff review — every result stays
-              advisory and human approval is always required before any action.
-            </p>
+            {/* Final summary banner */}
+            <div className="rounded-2xl bg-navy-900 px-6 py-8 sm:px-10 sm:py-10">
+              <p className="text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-3xl">
+                We run these simulations to find bottlenecks before residents and staff feel them.
+              </p>
+              <p className="mt-4 max-w-3xl text-sm leading-relaxed text-navy-100 sm:text-base">
+                The goal is not to automate enforcement. The goal is to show which conditions create operational
+                pressure, what to avoid, and where staffing, triage, or supervisor review capacity may need adjustment.
+              </p>
+            </div>
           </div>
         </section>
 
