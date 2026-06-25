@@ -15,7 +15,7 @@ export default function LandingPage() {
           src="/brampton-poc-hero.png"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 -z-10 h-full w-full object-cover"
+          className="absolute inset-0 -z-10 h-full w-full object-cover object-[64%_center] sm:object-center"
         />
         <div
           className="absolute inset-0 -z-10 bg-gradient-to-r from-navy-950/80 via-navy-900/45 to-navy-800/15"
