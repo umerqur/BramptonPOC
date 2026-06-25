@@ -54,13 +54,17 @@ test('officer opens an assigned case and sees the field outcome controls', async
 test('officer can interact with the field outcome form without crashing', async ({ page }) => {
   await signIn(page)
   const guards = attachGuards(page)
-  await page.goto(`/app/field/${CASE_ID}`, { waitUntil: 'domcontentloaded' })
-  await expectMounted(page)
+  // Reach the case the same way the previous test does (open it from the
+  // console) so the field-outcome form is rendered before we interact.
+  await page.goto('/app/field', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('link', { name: /record field outcome|view field outcome/i }).first().click()
+  await page.waitForURL('**/app/field/**')
   await expect(page.getByText('Record field outcome')).toBeVisible()
 
   // Provide an observed condition and attempt to save. Whether validation gates
   // it or the mocked update succeeds, the page must not throw or blank out.
-  await page.getByPlaceholder('Describe what you observed on site…').fill(
+  // (Regex placeholder avoids depending on the exact ellipsis character.)
+  await page.getByPlaceholder(/Describe what you observed on site/).fill(
     'Yard cleared on arrival; no active violation observed at the time of inspection.',
   )
   await page.getByRole('button', { name: /field outcome complete|saving/i }).click()

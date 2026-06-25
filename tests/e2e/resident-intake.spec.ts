@@ -46,7 +46,9 @@ test('resident can submit a request and see a confirmation with a reference numb
   await page.getByRole('button', { name: 'Submit request' }).click()
 
   await expect(page.getByText('Request submitted')).toBeVisible()
-  await expect(page.getByText('Reference number')).toBeVisible()
+  // exact: true targets the "Reference number" label, not the body sentence
+  // ("…save your reference number…") which also contains the phrase.
+  await expect(page.getByText('Reference number', { exact: true })).toBeVisible()
   // A generated demo case id like RSR-20260620-7K4Q is displayed.
   await expect(page.getByText(/RSR-\d{8}-[A-Z2-9]{4}/)).toBeVisible()
   guards.assertNoErrors()
@@ -71,7 +73,10 @@ test('invalid email blocks submit', async ({ page }) => {
   await page.goto('/resident/new-request')
 
   await page.getByRole('button', { name: 'Generate demo request' }).click()
-  await fillContact(page, 'not-an-email')
+  // 'jordan@nodot' passes the browser's native type=email check (so the form
+  // actually submits) but fails the app's stricter validator, which requires a
+  // dotted domain — exercising the app's own "invalid email" guard.
+  await fillContact(page, 'jordan@nodot')
   await page.getByRole('button', { name: 'Submit request' }).click()
 
   await expect(page.getByText('Please enter a valid email address.')).toBeVisible()
