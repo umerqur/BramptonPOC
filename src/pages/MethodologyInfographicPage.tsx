@@ -39,9 +39,9 @@ export default function MethodologyInfographicPage() {
           <SectionTitle eyebrow="Visual workflow" title="From a resident complaint to a workload signal" />
           <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <img
-              src="/methodology-infographic.svg"
+              src="/methodology-infographic.svg?v=2"
               alt="Infographic showing the workflow from resident intake through staff review, field follow up, supervisor approval, resident update, analytics, and stress testing."
-              className="w-full"
+              className="block h-auto w-full"
             />
           </div>
         </section>
