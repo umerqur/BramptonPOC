@@ -1232,6 +1232,84 @@ function SimulationLab() {
   const backlogBinding = finalBacklog > 0 && peakBacklog > 0
   const districtCount = districtRows.length
 
+  // --- Methodology answers from this run -------------------------------------
+  // Plain-English answers to the six methodology questions, derived strictly from
+  // the latest run's loaded data — no cross-run sums and no invented values.
+
+  // Q1 — Officer capacity. The per-officer daily minute budget (390) is currently
+  // a model-internal constant in the Python ABM; only {days, districts,
+  // supervisor_capacity} are persisted to ctgan_abm_scenario_runs.metadata. We read
+  // it defensively in case a future run exposes it, otherwise we say so plainly
+  // rather than inventing a number.
+  // TODO(officer-minutes): expose officer minute capacity from the simulation
+  // metadata. scripts/ctgan_abm/run_ctgan_abm_stress_lab.py defines
+  // DEFAULT_OFFICER_DAILY_MINUTES (390) and DEFAULT_OFFICER_UNITS_PER_DISTRICT (4)
+  // but only writes {days, districts, supervisor_capacity} into the run metadata.
+  // Add e.g. officer_daily_minutes (and officer_units_per_district) there so
+  // v_ctgan_abm_latest_run_summary.metadata carries the configured capacity and the
+  // Officer capacity card below can show the real value instead of this fallback.
+  const runMetadata = (latestRun.data?.metadata ?? null) as Record<string, unknown> | null
+  const officerMinuteCapacity = useMemo(() => {
+    const raw =
+      runMetadata?.officer_daily_minutes ??
+      runMetadata?.officer_minute_capacity ??
+      runMetadata?.officer_minutes ??
+      null
+    const n = Number(raw)
+    return raw != null && Number.isFinite(n) && n > 0 ? n : null
+  }, [runMetadata])
+
+  // Q2 — Case duration. Top complaint types by load, with an average
+  // minutes-per-case proxy (estimated_hours / total_cases × 60). If the run carries
+  // no usable workload hours we fall back to a description instead of a number.
+  const complaintHoursTotal = useMemo(
+    () => complaintRows.reduce((s, r) => s + r.estimated_hours, 0),
+    [complaintRows],
+  )
+  const hasComplaintHours = complaintHoursTotal > 0
+  const topComplaintDurations = useMemo(
+    () =>
+      complaintRows.slice(0, 3).map((r) => ({
+        type: r.complaint_type,
+        hours: r.estimated_hours,
+        avgMinutes: r.total_cases > 0 ? (r.estimated_hours / r.total_cases) * 60 : null,
+      })),
+    [complaintRows],
+  )
+
+  // Q3 — District demand. Top 3 district queues plus the count of queues modeled.
+  const topDistricts = useMemo(() => districtRows.slice(0, 3), [districtRows])
+
+  // Q4 — Supervisor queue growth. The day the review queue peaks (1-based) and
+  // whether it is still present at the end of the horizon.
+  const peakSupervisorDayIdx = useMemo(() => {
+    let idx = -1
+    let best = -1
+    dailyRows.forEach((r, i) => {
+      if (r.supervisor_queue_size > best) {
+        best = r.supervisor_queue_size
+        idx = i
+      }
+    })
+    return idx
+  }, [dailyRows])
+  const supervisorQueueAtEnd = dailyRows.length ? dailyRows[dailyRows.length - 1].supervisor_queue_size : 0
+
+  // Q5 — Backlog risk. The day backlog peaks (1-based) and the final backlog as a
+  // share of generated demand.
+  const peakBacklogDayIdx = useMemo(() => {
+    let idx = -1
+    let best = -1
+    dailyRows.forEach((r, i) => {
+      if (r.backlog > best) {
+        best = r.backlog
+        idx = i
+      }
+    })
+    return idx
+  }, [dailyRows])
+  const backlogShare = generatedCases > 0 ? finalBacklog / generatedCases : null
+
   return (
     <div className="mt-6 space-y-6">
       {/* Overview banner — frames the whole tab as a planning simulation. */}
@@ -1346,6 +1424,152 @@ function SimulationLab() {
               status={peakSupervisorQueue > 0 ? 'watch' : 'neutral'}
             />
             <SimCard label="Districts simulated" value={fmtInt(districtCount)} helper="Distinct district queues modeled" />
+          </div>
+        )}
+      </CtganSection>
+
+      {/* 1b. Methodology answers from this run — plain-English answers to the six
+          methodology questions, using only the latest run's data. */}
+      <CtganSection
+        title="Methodology answers from this run"
+        subtitle="The six methodology questions, answered directly from the latest simulation run. Plain-language planning signals from synthetic demand — not live Brampton operational data, and not enforcement decisioning."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {/* Q1 — Officer capacity */}
+            <MethodologyAnswerCard n={1} title="Officer capacity" question="How many officer minutes are available?">
+              {officerMinuteCapacity != null ? (
+                <p>
+                  Each officer unit is configured with{' '}
+                  <span className="font-semibold text-navy-900">{fmtInt(officerMinuteCapacity)} minutes</span> of capacity
+                  per day. This is the depleted resource the simulation draws down as cases are worked.
+                </p>
+              ) : (
+                <p>
+                  Officer minute capacity is used inside the model but is not currently exposed in this view. The
+                  per-officer daily minute budget drives processing in the simulation, but it is not yet persisted to the
+                  run metadata, so no configured value is shown here rather than an invented one.
+                </p>
+              )}
+            </MethodologyAnswerCard>
+
+            {/* Q2 — Case duration */}
+            <MethodologyAnswerCard n={2} title="Case duration" question="How long do different case types take?">
+              {hasComplaintHours && topComplaintDurations.length > 0 ? (
+                <>
+                  <p>
+                    The model estimates workload hours by complaint type. In this run the heaviest types are:
+                  </p>
+                  <ul className="mt-1.5 space-y-1">
+                    {topComplaintDurations.map((c) => (
+                      <li key={c.type} className="flex flex-wrap items-baseline gap-x-1.5">
+                        <span className="font-semibold text-navy-900">{c.type}</span>
+                        <span className="tabular-nums">~{fmtInt(Math.round(c.hours))} est. hours</span>
+                        {c.avgMinutes != null && (
+                          <span className="tabular-nums text-ink-subtle">
+                            (≈{fmtInt(Math.round(c.avgMinutes))} min/case)
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5">
+                    Average minutes per case is a proxy (estimated hours ÷ cases × 60), useful for comparing relative
+                    effort across types.
+                  </p>
+                </>
+              ) : (
+                <p>
+                  The model currently uses estimated workload hours by complaint type to represent how long different
+                  case types take. This run does not carry reliable per-type hours, so no average minutes-per-case figure
+                  is shown.
+                </p>
+              )}
+            </MethodologyAnswerCard>
+
+            {/* Q3 — District demand */}
+            <MethodologyAnswerCard n={3} title="District demand" question="Which districts receive demand?">
+              {topDistricts.length > 0 ? (
+                <p>
+                  Demand is distributed across{' '}
+                  <span className="font-semibold text-navy-900">{fmtInt(districtCount)} district queues</span>. The
+                  highest load in this run is{' '}
+                  <span className="font-semibold text-navy-900">{topDistricts[0].district_or_area}</span> with{' '}
+                  <span className="font-semibold text-navy-900">{fmtInt(topDistricts[0].total_cases)}</span> simulated
+                  cases
+                  {topDistricts.length > 1 && (
+                    <>
+                      , followed by {topDistricts.slice(1).map((d) => d.district_or_area).join(' and ')}
+                    </>
+                  )}
+                  .
+                </p>
+              ) : (
+                <p>District-level demand has not loaded for this run.</p>
+              )}
+            </MethodologyAnswerCard>
+
+            {/* Q4 — Supervisor queue growth */}
+            <MethodologyAnswerCard n={4} title="Supervisor queue growth" question="When do supervisor queues grow?">
+              {peakSupervisorDayIdx >= 0 && peakSupervisorQueue > 0 ? (
+                <p>
+                  The supervisor queue peaks at{' '}
+                  <span className="font-semibold text-navy-900">{fmtInt(peakSupervisorQueue)} cases</span> on{' '}
+                  <span className="font-semibold text-navy-900">Day {peakSupervisorDayIdx + 1}</span>. By Day{' '}
+                  {fmtInt(simulatedDays)} the queue is{' '}
+                  {supervisorQueueAtEnd > 0 ? (
+                    <>
+                      still present at <span className="font-semibold text-navy-900">{fmtInt(supervisorQueueAtEnd)} cases</span>
+                    </>
+                  ) : (
+                    <>cleared</>
+                  )}
+                  . This means review capacity becomes a second bottleneck after field work.
+                </p>
+              ) : (
+                <p>The supervisor review queue stays empty across this run&rsquo;s horizon.</p>
+              )}
+            </MethodologyAnswerCard>
+
+            {/* Q5 — Backlog risk */}
+            <MethodologyAnswerCard n={5} title="Backlog risk" question="When does backlog risk increase?">
+              {peakBacklogDayIdx >= 0 ? (
+                <p>
+                  Final backlog is{' '}
+                  <span className="font-semibold text-navy-900">{fmtInt(finalBacklog)}</span>
+                  {backlogShare != null && (
+                    <>
+                      , about{' '}
+                      <span className="font-semibold text-navy-900">{Math.round(backlogShare * 100)}%</span> of generated
+                      demand
+                    </>
+                  )}
+                  . Backlog peaks at{' '}
+                  <span className="font-semibold text-navy-900">{fmtInt(peakBacklog)}</span> on{' '}
+                  <span className="font-semibold text-navy-900">Day {peakBacklogDayIdx + 1}</span>.{' '}
+                  {finalBacklog > 0
+                    ? 'Backlog persists through the end of the horizon, which means officer capacity is binding in this run.'
+                    : 'Backlog clears within the horizon, so modeled capacity keeps pace with demand in this run.'}
+                </p>
+              ) : (
+                <p>Daily backlog metrics have not loaded for this run.</p>
+              )}
+            </MethodologyAnswerCard>
+
+            {/* Q6 — Resident update delay */}
+            <MethodologyAnswerCard n={6} title="Resident update delay" question="When are resident updates delayed?">
+              <p>
+                Resident update delay is a{' '}
+                <span className="font-semibold text-navy-900">proxy</span>, not live resident communication. It is
+                represented by cases that have been worked but are not yet cleared through supervisor review. In this run,{' '}
+                <span className="font-semibold text-navy-900">{fmtInt(processedCases)}</span> cases are processed but only{' '}
+                <span className="font-semibold text-navy-900">{fmtInt(closedCases)}</span> are closed, and the supervisor
+                queue peaks at <span className="font-semibold text-navy-900">{fmtInt(peakSupervisorQueue)}</span>. As a
+                planning signal, this indicates that review capacity can delay resident closure updates.
+              </p>
+            </MethodologyAnswerCard>
           </div>
         )}
       </CtganSection>
@@ -1500,6 +1724,36 @@ function CtganSection({ title, subtitle, children }: { title: string; subtitle: 
       </div>
       <div className="px-5 py-5">{children}</div>
     </section>
+  )
+}
+
+// A numbered plain-English answer card for the "Methodology answers from this
+// run" section. Pairs the methodology question with the answer derived from the
+// latest run's data.
+function MethodologyAnswerCard({
+  n,
+  title,
+  question,
+  children,
+}: {
+  n: number
+  title: string
+  question: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-start gap-2">
+        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-navy-900 text-[10px] font-semibold text-white">
+          {n}
+        </span>
+        <div>
+          <div className="text-sm font-semibold text-navy-900">{title}</div>
+          <div className="text-[11px] italic text-ink-subtle">{question}</div>
+        </div>
+      </div>
+      <div className="mt-2 text-xs leading-relaxed text-ink-subtle">{children}</div>
+    </div>
   )
 }
 
