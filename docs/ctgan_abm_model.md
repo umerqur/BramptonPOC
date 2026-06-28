@@ -141,6 +141,37 @@ python scripts/ctgan_abm/run_ctgan_abm_stress_lab.py \
     --top-districts 50 --epochs 50 --batch-size 1024
 ```
 
+## Database schema & loading (migrations 033 → 034)
+
+- **Migration `033`** introduced the initial CTGAN ABM tables and views (uuid ids,
+  a minimal column set).
+- **Migration `034`** aligns the database schema with the *actual* generated ABM
+  output CSVs: it switches ids to **text** (the run uses human-readable ids such
+  as `scenario_000` and `run_000_20260624_020547`) and adds the full metric
+  columns (`processed`, `backlog`, `stale_cases`, `supervisor_queue_size`,
+  `overload_flag`, `processed_cases`, `closed_cases`, `final_backlog`). Because no
+  ABM data has been loaded yet, `034` safely drops and recreates only the
+  `ctgan_abm_*` views and tables — it does **not** touch `municipal_service_requests`
+  or any other table.
+
+These ABM outputs are **planning signals, not enforcement decisions** — they
+describe where synthetic demand would pressure queues under stress, to inform
+staffing and review-capacity planning. They do not direct action against any
+individual case or location.
+
+Loading into Supabase is a **separate, manual step performed after review** (it
+is never part of the model run). Use the client-side loader
+[`scripts/ctgan_abm/load_ctgan_abm_500k.sql`](../scripts/ctgan_abm/load_ctgan_abm_500k.sql)
+once migrations `033` and `034` are applied:
+
+```bash
+psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f scripts/ctgan_abm/load_ctgan_abm_500k.sql
+```
+
+It uses `\copy` (client-side) so it works against hosted Supabase, lists columns
+explicitly per table, and loads the 5 metric CSVs only —
+`synthetic_complaint_arrivals.csv` is not loaded (no destination table).
+
 ## Outputs (`outputs/ctgan_abm/`)
 
 | File | Contents |
