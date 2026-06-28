@@ -46,9 +46,10 @@ import {
 import {
   getCtganLatestRunSummary,
   getCtganScenarioSummary,
-  getCtganDailySummary,
-  getCtganDistrictPressure,
-  getCtganComplaintTypePressure,
+  getCtganLatestDailyMetrics,
+  getCtganLatestDistrictPressure,
+  getCtganLatestComplaintTypePressure,
+  type CtganDailyMetricRow,
   type CtganDistrictPressureRow,
   type CtganComplaintTypePressureRow,
 } from '../../services/ctganAbmStress'
@@ -1161,10 +1162,6 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 // support only, not live Brampton operational data and not enforcement
 // decisioning.
 
-// Officer effort is modeled in hours in the views; the ABM's binding constraint
-// is expressed in minutes, so convert at the edge.
-const MINUTES_PER_HOUR = 60
-
 // Shown verbatim wherever a CTGAN ABM view is empty or missing. Deliberately
 // calm, non-technical language for a pending load — never an error/failure tone.
 const CTGAN_PENDING_MESSAGE =
@@ -1193,9 +1190,9 @@ const ctDate = (v: unknown): string => formatPlainDate(v == null ? null : String
 function SimulationLab() {
   const latestRun = useLive<Record<string, unknown> | null>(getCtganLatestRunSummary)
   const scenarios = useLive<Record<string, unknown>[]>(getCtganScenarioSummary)
-  const daily = useLive<{ day: string; total_cases: number }[]>(getCtganDailySummary)
-  const districts = useLive<CtganDistrictPressureRow[]>(getCtganDistrictPressure)
-  const complaintTypes = useLive<CtganComplaintTypePressureRow[]>(getCtganComplaintTypePressure)
+  const daily = useLive<CtganDailyMetricRow[]>(getCtganLatestDailyMetrics)
+  const districts = useLive<CtganDistrictPressureRow[]>(getCtganLatestDistrictPressure)
+  const complaintTypes = useLive<CtganComplaintTypePressureRow[]>(getCtganLatestComplaintTypePressure)
 
   const scenarioRows = useMemo(() => scenarios.data ?? [], [scenarios.data])
   const dailyRows = useMemo(() => daily.data ?? [], [daily.data])
@@ -1215,22 +1212,25 @@ function SimulationLab() {
     complaintRows.length > 0
   const showPending = !anyLoading && !hasData
 
-  // Derived headline measures — only meaningful once data is present.
-  const totalGenerated = ctNum(latestRun.data?.generated_cases)
+  // Headline measures — ALL scoped to the latest run. generated/processed/closed/
+  // final_backlog come straight from the run summary; simulated_days and the two
+  // peaks are derived from the latest run's daily series. We never sum across the
+  // other loaded scenario runs (that is what produced the millions-vs-48k mismatch).
+  const generatedCases = ctNum(latestRun.data?.generated_cases)
+  const processedCases = ctNum(latestRun.data?.processed_cases)
+  const closedCases = ctNum(latestRun.data?.closed_cases)
+  const finalBacklog = ctNum(latestRun.data?.final_backlog)
   const simulatedDays = dailyRows.length
-  const totalDailyDemand = useMemo(() => dailyRows.reduce((a, r) => a + r.total_cases, 0), [dailyRows])
-  const peakDay = useMemo(
-    () =>
-      dailyRows.reduce<{ day: string; total_cases: number } | null>(
-        (best, r) => (best == null || r.total_cases > best.total_cases ? r : best),
-        null,
-      ),
+  const peakBacklog = useMemo(() => dailyRows.reduce((m, r) => Math.max(m, r.backlog), 0), [dailyRows])
+  const peakSupervisorQueue = useMemo(
+    () => dailyRows.reduce((m, r) => Math.max(m, r.supervisor_queue_size), 0),
     [dailyRows],
   )
+
+  // Backlog interpretation for the capacity-bottleneck callout: does the backlog
+  // clear by the end of the horizon, or is officer/supervisor capacity binding?
+  const backlogBinding = finalBacklog > 0 && peakBacklog > 0
   const districtCount = districtRows.length
-  const totalDistrictCases = useMemo(() => districtRows.reduce((a, r) => a + r.total_cases, 0), [districtRows])
-  const totalEstimatedHours = useMemo(() => districtRows.reduce((a, r) => a + r.estimated_hours, 0), [districtRows])
-  const totalOfficerMinutes = totalEstimatedHours * MINUTES_PER_HOUR
 
   return (
     <div className="mt-6 space-y-6">
@@ -1246,9 +1246,9 @@ function SimulationLab() {
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-navy-100">
             A conditional GAN (CTGAN) generates synthetic service-request demand from public 311 benchmark patterns, and
             an agent-based model (ABM) runs that demand through each district&rsquo;s intake queue. Officer daily minutes
-            are the constrained resource, and a supervisor review queue forms the second bottleneck. This is capacity
-            planning and stress testing only — decision support, not live Brampton operational data, and never an
-            enforcement decision.
+            are the constrained resource, and a supervisor review queue forms the second bottleneck. Every figure below is
+            scoped to the latest simulation run. This is capacity planning and stress testing only — decision support,
+            not live Brampton operational data, and never an enforcement decision.
           </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {['CTGAN demand', 'Agent-based model', 'Capacity planning', 'Decision support only', 'Not enforcement decisioning'].map(
@@ -1283,7 +1283,7 @@ function SimulationLab() {
                 <span className="font-semibold text-navy-900">Run date:</span> {ctDate(latestRun.data?.run_date)}
               </span>
               <span>
-                <span className="font-semibold text-navy-900">Scenarios:</span> {fmtInt(scenarioRows.length)}
+                <span className="font-semibold text-navy-900">Scenarios available:</span> {fmtInt(scenarioRows.length)}
               </span>
             </div>
           )}
@@ -1314,115 +1314,153 @@ function SimulationLab() {
         />
       </div>
 
-      {/* 1. CTGAN demand generation — run + daily summary measures. */}
+      {/* 1. Executive simulation summary — latest run only. */}
       <CtganSection
-        title="CTGAN demand generation"
-        subtitle="Synthetic demand generated for the latest run, used as the ABM's arrival stream. Planning estimate, not a forecast."
+        title="Executive simulation summary"
+        subtitle="Headline measures for the latest simulation run only. A planning estimate from synthetic demand, not a forecast."
       >
         {showPending ? (
           <CtganPendingNote />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <SimCard label="Generated cases" value={fmtInt(totalGenerated)} helper="Synthetic demand in the latest run" />
-            <SimCard label="Simulated days" value={fmtInt(simulatedDays)} helper="Days in the demand horizon" />
-            <SimCard label="Total daily demand" value={fmtInt(totalDailyDemand)} helper="Sum of cases across simulated days" />
+            <SimCard label="Generated cases" value={fmtInt(generatedCases)} helper="Synthetic demand generated for this run" />
+            <SimCard label="Processed cases" value={fmtInt(processedCases)} helper="Cases worked by officer field capacity" />
+            <SimCard label="Closed cases" value={fmtInt(closedCases)} helper="Cleared through supervisor review" />
             <SimCard
-              label="Peak demand day"
-              value={peakDay ? ctDate(peakDay.day) : '—'}
-              helper={peakDay ? `${fmtInt(peakDay.total_cases)} cases on the peak day` : 'No daily rows yet'}
+              label="Final backlog"
+              value={fmtInt(finalBacklog)}
+              helper="Cases still queued at the end of the horizon"
+              status={finalBacklog > 0 ? 'watch' : 'good'}
             />
-          </div>
-        )}
-      </CtganSection>
-
-      {/* 2. ABM district queue simulation — queue totals. */}
-      <CtganSection
-        title="ABM district queue simulation"
-        subtitle="Generated demand routed into per-district intake queues and advanced by the agent-based model."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SimCard label="Simulated days" value={fmtInt(simulatedDays)} helper="Length of the modeled horizon" />
+            <SimCard
+              label="Peak backlog"
+              value={fmtInt(peakBacklog)}
+              helper="Highest single-day district backlog"
+              status={peakBacklog > 0 ? 'watch' : 'neutral'}
+            />
+            <SimCard
+              label="Peak supervisor queue"
+              value={fmtInt(peakSupervisorQueue)}
+              helper="Highest single-day review queue"
+              status={peakSupervisorQueue > 0 ? 'watch' : 'neutral'}
+            />
             <SimCard label="Districts simulated" value={fmtInt(districtCount)} helper="Distinct district queues modeled" />
-            <SimCard label="Cases queued" value={fmtInt(totalDistrictCases)} helper="Total cases routed into district queues" />
-            <SimCard label="Estimated field hours" value={fmtInt(totalEstimatedHours)} helper="Modeled officer effort across districts" />
-            <SimCard
-              label="Avg cases / district"
-              value={districtCount ? fmtInt(totalDistrictCases / districtCount) : '—'}
-              helper="Mean queue load per district"
-            />
           </div>
         )}
       </CtganSection>
 
-      {/* 3. Officer daily minutes — the constrained resource. */}
+      {/* 2. 30-day ABM time series — the most important graphic. */}
       <CtganSection
-        title="Officer daily minutes — the constrained resource"
-        subtitle="Each officer has a fixed budget of working minutes per day. When demand exceeds available minutes, cases queue rather than disappear — the model's binding constraint."
+        title="30-day ABM simulation"
+        subtitle="How the latest run evolves day by day. Cumulative intake and processed are running totals; backlog, stale cases, and the supervisor queue are point-in-time levels. The gap between intake and processed is the open backlog."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : dailyRows.length === 0 ? (
+          <CtganPendingNote />
+        ) : (
+          <AbmTimeSeriesChart rows={dailyRows} />
+        )}
+      </CtganSection>
+
+      {/* 3. Capacity bottleneck explanation — calm, plain-language callout. */}
+      <CtganSection
+        title="Where capacity binds"
+        subtitle="Reading the simulation as a staffing conversation."
       >
         {showPending ? (
           <CtganPendingNote />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <SimCard label="Officer-minutes demanded" value={fmtInt(totalOfficerMinutes)} helper="Modeled effort converted to minutes (hours × 60)" />
-            <SimCard label="Equivalent field hours" value={fmtInt(totalEstimatedHours)} helper="Total constrained effort across the run" />
-            <SimCard
-              label="Per simulated day"
-              value={simulatedDays ? fmtInt(totalOfficerMinutes / simulatedDays) : '—'}
-              helper="Average officer-minutes of demand per day"
-            />
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <BottleneckNote
+                title="Officer daily minutes"
+                body="Each officer has a fixed daily minute budget. When generated demand needs more minutes than are available, cases stay in the district queue instead of being processed — the model's first binding constraint."
+              />
+              <BottleneckNote
+                title="Supervisor review queue"
+                body="Cases needing sign-off move to a capacity-limited supervisor review queue after field work. Backlog can build here even when field minutes are free — the second bottleneck."
+              />
+            </div>
+            <div
+              className={`rounded-lg border px-4 py-3 text-xs leading-relaxed ${
+                backlogBinding
+                  ? 'border-amber-200 bg-amber-50/70 text-amber-900'
+                  : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+              }`}
+            >
+              <span className="font-semibold">Reading this run: </span>
+              {backlogBinding ? (
+                <>
+                  backlog persists to the end of the horizon (final backlog {fmtInt(finalBacklog)}, peak{' '}
+                  {fmtInt(peakBacklog)}) while processing is capped by officer minutes — capacity is binding, so added
+                  field or review capacity is where the simulation would relieve pressure.
+                </>
+              ) : (
+                <>
+                  backlog clears within the simulated horizon (final backlog {fmtInt(finalBacklog)}) — modeled capacity
+                  keeps pace with generated demand in this run.
+                </>
+              )}
+            </div>
           </div>
         )}
       </CtganSection>
 
-      {/* 4. Supervisor review queue — the second bottleneck. */}
-      <CtganSection
-        title="Supervisor review queue bottleneck"
-        subtitle="Cases that require sign-off enter a supervisor review queue after field work. Limited review capacity makes this a second bottleneck where backlog can build even when field minutes are available."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <SimCard label="Cases entering review" value={fmtInt(totalDistrictCases)} helper="Cases routed through the modeled review stage" />
-            <SimCard label="Review effort (hours)" value={fmtInt(totalEstimatedHours)} helper="Effort competing for supervisor capacity" />
-            <SimCard label="Stage" value="Post-field" helper="Review queue forms after officer field work" />
-          </div>
-        )}
-      </CtganSection>
-
-      {/* 5. District pressure */}
+      {/* 4. District pressure — top 15 horizontal bars, full list optional below. */}
       <CtganSection
         title="District pressure"
-        subtitle="Where simulated demand concentrates by district or area. Planning estimate, not performance scoring."
+        subtitle="Top 15 districts by simulated case load in the latest run. Planning estimate, not performance scoring."
       >
         {showPending ? (
           <CtganPendingNote />
         ) : (
-          <CtganPressureTable
+          <PressureBars
             firstColLabel="District / area"
-            rows={districtRows.map((r) => ({ label: r.district_or_area, total_cases: r.total_cases, estimated_hours: r.estimated_hours }))}
+            rows={districtRows.map((r) => ({
+              label: r.district_or_area,
+              total_cases: r.total_cases,
+              share_of_cases: r.share_of_cases,
+              estimated_hours: r.estimated_hours,
+              backlog: r.backlog,
+              stale_cases: r.stale_cases,
+            }))}
           />
         )}
+        {/*
+          TODO (optional pressure map): district_or_area values are "Council District N".
+          The NYC workload map (NYCWorkloadMapPanel) keys council-district geometry by the
+          bare number N (AreaUnit.key), so a join is feasible by parsing the trailing integer
+          from district_or_area (e.g. "Council District 11" -> "11"). It is deferred here
+          because NYCWorkloadMapPanel is hardwired to the NYC metric services and is not yet
+          parameterized to accept externally-supplied keyed values; wiring CTGAN pressure in
+          would require refactoring that panel to take generic {key,value} rows. The line and
+          bar charts above are the required visuals; the map stays optional until that refactor.
+        */}
       </CtganSection>
 
-      {/* 6. Complaint type pressure */}
+      {/* 5. Complaint type pressure — top 15 horizontal bars, full list optional. */}
       <CtganSection
         title="Complaint type pressure"
-        subtitle="Which complaint types drive the most simulated workload across the run."
+        subtitle="Top 15 complaint types by simulated case load in the latest run. The full list is collapsed below."
       >
         {showPending ? (
           <CtganPendingNote />
         ) : (
-          <CtganPressureTable
+          <PressureBars
             firstColLabel="Complaint type"
-            rows={complaintRows.map((r) => ({ label: r.complaint_type, total_cases: r.total_cases, estimated_hours: r.estimated_hours }))}
+            rows={complaintRows.map((r) => ({
+              label: r.complaint_type,
+              total_cases: r.total_cases,
+              share_of_cases: r.share_of_cases,
+              estimated_hours: r.estimated_hours,
+            }))}
           />
         )}
       </CtganSection>
 
-      {/* 7. Clear note — planning simulation only, not enforcement decisioning. */}
+      {/* 6. Clear note — planning simulation only, not enforcement decisioning. */}
       <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
         <div className="text-sm font-semibold text-navy-900">Planning simulation only — not enforcement decisioning</div>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-subtle">
@@ -1465,41 +1503,246 @@ function CtganSection({ title, subtitle, children }: { title: string; subtitle: 
   )
 }
 
-type CtganPressureRow = { label: string; total_cases: number; estimated_hours: number }
-
-// Compact, mobile-responsive ranked table for district / complaint-type pressure.
-function CtganPressureTable({ firstColLabel, rows }: { firstColLabel: string; rows: CtganPressureRow[] }) {
-  if (rows.length === 0) return <CtganPendingNote />
-  const maxCases = rows.reduce((m, r) => Math.max(m, r.total_cases), 0) || 1
+// A plain-language bottleneck explainer card for the capacity callout.
+function BottleneckNote({ title, body }: { title: string; body: string }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
-            <th className="py-2 pr-3 font-semibold">{firstColLabel}</th>
-            <th className="py-2 pr-3 text-right font-semibold">Cases</th>
-            <th className="py-2 pr-3 text-right font-semibold">Est. hours</th>
-            <th className="hidden py-2 font-semibold sm:table-cell">Share of cases</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.label} className="border-b border-slate-100 last:border-0">
-              <td className="py-2 pr-3 text-navy-900">{r.label}</td>
-              <td className="py-2 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.total_cases)}</td>
-              <td className="py-2 pr-3 text-right tabular-nums text-ink-subtle">{fmtInt(r.estimated_hours)}</td>
-              <td className="hidden py-2 sm:table-cell">
-                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                  <div
-                    className="h-full rounded-full bg-sky-500"
-                    style={{ width: `${Math.max(2, Math.min(100, (r.total_cases / maxCases) * 100))}%` }}
-                  />
-                </div>
-              </td>
-            </tr>
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="text-sm font-semibold text-navy-900">{title}</div>
+      <p className="mt-1 text-xs leading-relaxed text-ink-subtle">{body}</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 30-day ABM time-series chart (lightweight inline SVG — no chart dependency)
+// ---------------------------------------------------------------------------
+
+// The five series plotted over the latest run's daily metrics. total_cases and
+// processed are cumulative running totals; the rest are point-in-time levels.
+type AbmSeriesKey = 'total_cases' | 'processed' | 'backlog' | 'stale_cases' | 'supervisor_queue_size'
+const ABM_SERIES: { key: AbmSeriesKey; label: string; color: string }[] = [
+  { key: 'total_cases', label: 'Cumulative intake', color: '#0369a1' },
+  { key: 'processed', label: 'Processed', color: '#0d9488' },
+  { key: 'backlog', label: 'Backlog', color: '#dc2626' },
+  { key: 'stale_cases', label: 'Stale cases', color: '#d97706' },
+  { key: 'supervisor_queue_size', label: 'Supervisor queue', color: '#7c3aed' },
+]
+
+// Round a max value up to a clean axis top (1/2/5 × power of ten).
+function niceCeil(v: number): number {
+  if (v <= 0) return 1
+  const mag = Math.pow(10, Math.floor(Math.log10(v)))
+  const norm = v / mag
+  const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10
+  return step * mag
+}
+
+// Evenly spaced indices (inclusive of first/last) for axis tick labels.
+function pickTickIndices(n: number, count: number): number[] {
+  if (n <= 0) return []
+  if (n <= count) return Array.from({ length: n }, (_, i) => i)
+  const out: number[] = []
+  for (let k = 0; k < count; k++) out.push(Math.round((k / (count - 1)) * (n - 1)))
+  return Array.from(new Set(out))
+}
+
+function AbmTimeSeriesChart({ rows }: { rows: CtganDailyMetricRow[] }) {
+  const W = 760
+  const H = 300
+  const padL = 52
+  const padR = 16
+  const padT = 16
+  const padB = 40
+  const plotW = W - padL - padR
+  const plotH = H - padT - padB
+  const n = rows.length
+
+  const maxY = Math.max(
+    1,
+    ...rows.flatMap((r) => [r.total_cases, r.processed, r.backlog, r.stale_cases, r.supervisor_queue_size]),
+  )
+  const niceMax = niceCeil(maxY)
+  const x = (i: number) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW)
+  const y = (v: number) => padT + plotH - (v / niceMax) * plotH
+
+  const tickCount = 4
+  const yTicks = Array.from({ length: tickCount + 1 }, (_, i) => (niceMax / tickCount) * i)
+  const xTickIdx = pickTickIndices(n, 6)
+  const bandW = n <= 1 ? plotW : plotW / (n - 1)
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          role="img"
+          aria-label="30-day ABM simulation time series"
+          className="block w-full min-w-[560px]"
+        >
+          {yTicks.map((t, i) => (
+            <g key={i}>
+              <line x1={padL} y1={y(t)} x2={W - padR} y2={y(t)} stroke="#e2e8f0" strokeWidth={1} />
+              <text
+                x={padL - 8}
+                y={y(t)}
+                textAnchor="end"
+                dominantBaseline="central"
+                className="fill-ink-subtle"
+                style={{ fontSize: 10 }}
+              >
+                {fmtInt(Math.round(t))}
+              </text>
+            </g>
           ))}
-        </tbody>
-      </table>
+
+          {xTickIdx.map((i) => (
+            <text
+              key={i}
+              x={x(i)}
+              y={H - padB + 18}
+              textAnchor="middle"
+              className="fill-ink-subtle"
+              style={{ fontSize: 10 }}
+            >
+              Day {i + 1}
+            </text>
+          ))}
+
+          {ABM_SERIES.map((s) => (
+            <polyline
+              key={s.key}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              points={rows.map((r, i) => `${x(i)},${y(r[s.key])}`).join(' ')}
+            />
+          ))}
+
+          {/* Transparent per-day hover bands carry a tooltip with every series value. */}
+          {rows.map((r, i) => (
+            <rect key={i} x={x(i) - bandW / 2} y={padT} width={bandW} height={plotH} fill="transparent">
+              <title>
+                {`Day ${i + 1}\nCumulative intake: ${fmtInt(r.total_cases)}\nProcessed: ${fmtInt(r.processed)}\nBacklog: ${fmtInt(
+                  r.backlog,
+                )}\nStale cases: ${fmtInt(r.stale_cases)}\nSupervisor queue: ${fmtInt(r.supervisor_queue_size)}`}
+              </title>
+            </rect>
+          ))}
+        </svg>
+      </div>
+
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+        {ABM_SERIES.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1.5 text-[11px] text-ink-subtle">
+            <span aria-hidden className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+            {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// District / complaint-type pressure — top-15 horizontal bars, full list folded
+// ---------------------------------------------------------------------------
+
+type PressureBarRow = {
+  label: string
+  total_cases: number
+  share_of_cases: number
+  estimated_hours: number
+  backlog?: number
+  stale_cases?: number
+}
+
+const PRESSURE_TOP_N = 15
+
+const sharePct = (share: number) => (share > 0 ? `${(share * 100).toFixed(1)}%` : '—')
+
+// Top-N ranked horizontal bars. Rows arrive already ordered by total_cases desc
+// from the latest-run views, so the full list is never the main experience — the
+// remaining rows stay collapsed in a compact details table.
+function PressureBars({ firstColLabel, rows }: { firstColLabel: string; rows: PressureBarRow[] }) {
+  if (rows.length === 0) return <CtganPendingNote />
+  const top = rows.slice(0, PRESSURE_TOP_N)
+  const rest = rows.slice(PRESSURE_TOP_N)
+  const maxCases = top.reduce((m, r) => Math.max(m, r.total_cases), 0) || 1
+  const hasSecondary = rows.some((r) => r.backlog != null || r.stale_cases != null)
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        {top.map((r) => {
+          const pct = Math.max(2, Math.min(100, (r.total_cases / maxCases) * 100))
+          return (
+            <div key={r.label} className="space-y-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="truncate text-xs font-medium text-navy-900" title={r.label}>
+                  {r.label}
+                </span>
+                <span className="whitespace-nowrap text-[11px] tabular-nums text-ink-subtle">
+                  <span className="font-semibold text-navy-900">{fmtInt(r.total_cases)}</span> · {sharePct(r.share_of_cases)}
+                </span>
+              </div>
+              <div className="h-3 w-full overflow-hidden rounded bg-slate-100">
+                <div className="h-full rounded bg-sky-500" style={{ width: `${pct}%` }} />
+              </div>
+              {(r.backlog != null || r.stale_cases != null) && (
+                <div className="text-[10px] text-ink-subtle">
+                  {r.backlog != null && <>Backlog {fmtInt(r.backlog)}</>}
+                  {r.backlog != null && r.stale_cases != null && ' · '}
+                  {r.stale_cases != null && <>Stale {fmtInt(r.stale_cases)}</>}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {rest.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-2.5">
+          <summary className="cursor-pointer text-xs font-medium text-accent-700">
+            Show all {fmtInt(rows.length)} rows
+          </summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
+                  <th className="py-2 pr-3 font-semibold">{firstColLabel}</th>
+                  <th className="py-2 pr-3 text-right font-semibold">Cases</th>
+                  <th className="py-2 pr-3 text-right font-semibold">Share</th>
+                  <th className="py-2 pr-3 text-right font-semibold">Est. hours</th>
+                  {hasSecondary && <th className="py-2 pr-3 text-right font-semibold">Backlog</th>}
+                  {hasSecondary && <th className="py-2 text-right font-semibold">Stale</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.label} className="border-b border-slate-100 last:border-0">
+                    <td className="py-1.5 pr-3 text-navy-900">{r.label}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.total_cases)}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{sharePct(r.share_of_cases)}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{fmtInt(r.estimated_hours)}</td>
+                    {hasSecondary && (
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">
+                        {r.backlog != null ? fmtInt(r.backlog) : '—'}
+                      </td>
+                    )}
+                    {hasSecondary && (
+                      <td className="py-1.5 text-right tabular-nums text-ink-subtle">
+                        {r.stale_cases != null ? fmtInt(r.stale_cases) : '—'}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </div>
   )
 }
