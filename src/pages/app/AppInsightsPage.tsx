@@ -1,21 +1,19 @@
-import { Navigate, useSearchParams } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import InsightsDashboard, { InsightsSourceBanner } from '../../components/app/InsightsDashboard'
-import CtganAbmFramework from '../../components/insights/CtganAbmFramework'
 import { useWorkflow } from '../../lib/workflowStore'
 
-// Insights — supervisor/coordinator operational workload intelligence over the
-// New York City 311 public service request dataset. Three tabs: Overview (map,
-// KPIs, charts), Case Explorer (paginated, filtered case search + detail), and
-// Open cases (review priority queue when the open dataset is loaded). Aggregates
-// read small materialized views; the Case Explorer reads paginated, filtered
-// rows — never the full table.
+// Insights — supervisor/coordinator operational workload intelligence over a
+// public 311 benchmark service-request dataset. Tabs: Overview (map, KPIs,
+// charts), Case Explorer (paginated, filtered case search + detail), Open cases
+// (review priority queue when the open dataset is loaded), and Stress Testing
+// (the CTGAN + ABM planning simulation framework). Aggregates read small
+// materialized views; the Case Explorer reads paginated, filtered rows — never
+// the full table. The active tab is selected by ?tab= inside InsightsDashboard.
 //
 // By-law Officers do not see supervisor Insights and are redirected to their
 // Officer Field Console. Decision support only — not a risk prediction.
 export default function AppInsightsPage() {
   const { role } = useWorkflow()
-  const [searchParams] = useSearchParams()
-  const isStressTesting = searchParams.get('tab') === 'simulations'
 
   if (role === 'officer') return <Navigate to="/app/field" replace />
 
@@ -27,15 +25,15 @@ export default function AppInsightsPage() {
           Workload Intelligence
         </h1>
         <p className="mt-2 text-ink-muted">
-          Live benchmark view of service request volume, backlog, closure pressure, and field activity patterns. Uses
-          NYC 311 public data for the demo, not Brampton operational data.
+          Benchmark view of service request volume, backlog, closure pressure, and field activity patterns. Uses public
+          311 benchmark data for the demo, not Brampton operational data.
         </p>
       </div>
 
-      {/* Data source banner — the live NYC 311 public dataset behind the dashboard. */}
+      {/* Data source banner — the public 311 benchmark dataset behind the dashboard. */}
       <InsightsSourceBanner />
 
-      {isStressTesting ? <CtganAbmFramework /> : <InsightsDashboard />}
+      <InsightsDashboard />
     </div>
   )
 }

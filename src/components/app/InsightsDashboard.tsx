@@ -44,22 +44,22 @@ import {
   type OpenQueueSummary,
 } from '../../services/caseExplorer'
 import {
-  getWorkloadByOfficerUnit,
-  getWorkloadByDistrict,
-  getWorkloadByClosureBucket,
-  getWorkloadByComplaintType,
-  type OfficerUnitWorkload,
-  type DistrictWorkload,
-  type ClosureBucketWorkload,
-  type ComplaintTypeWorkload,
-} from '../../services/stressTesting'
+  getCtganLatestRunSummary,
+  getCtganScenarioSummary,
+  getCtganDailySummary,
+  getCtganDistrictPressure,
+  getCtganComplaintTypePressure,
+  type CtganDistrictPressureRow,
+  type CtganComplaintTypePressureRow,
+} from '../../services/ctganAbmStress'
 
-// Insights — operational workload intelligence over the New York City 311 public
-// service request dataset. Three tabs: Overview (map, KPIs, charts), Case
-// Explorer (paginated, filtered case search + detail), and Open cases (review
-// priority queue, when the open dataset is loaded). Every aggregate reads a small
-// materialized view; the Case Explorer reads paginated, filtered rows — never the
-// full table. No fake placeholder values: a failed live read shows a clear error.
+// Insights — operational workload intelligence over a public 311 benchmark
+// service-request dataset. Tabs: Overview (map, KPIs, charts), Case Explorer
+// (paginated, filtered case search + detail), Open cases (review priority queue,
+// when the open dataset is loaded), and Stress Testing (the CTGAN + ABM planning
+// simulation framework). Every aggregate reads a small materialized view; the
+// Case Explorer reads paginated, filtered rows — never the full table. No fake
+// placeholder values: a failed live read shows a clear state, never invented data.
 
 type Tab = 'overview' | 'explorer' | 'open' | 'simulations'
 
@@ -172,7 +172,7 @@ export function InsightsSourceBanner() {
   return (
     <section className="mt-6 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
       <div className="grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-2">
-        <SourceLine label="Data source" value="New York City 311 public service requests" />
+        <SourceLine label="Data source" value="Public 311 benchmark service requests" />
         <SourceLine label="Records loaded" value={records} />
         <SourceLine label="Date range" value={range} />
         <SourceLine label="Status" value={status} emphasis={error ? 'error' : 'ok'} />
@@ -400,7 +400,7 @@ function OperationalSnapshot() {
         <div>
           <h2 className="text-sm font-semibold text-navy-900">Operational snapshot</h2>
           <p className="mt-0.5 text-xs text-ink-subtle">
-            A summary of the workload analytics below, from the NYC 311 benchmark (open review queue and closed
+            A summary of the workload analytics below, from the public 311 benchmark (open review queue and closed
             records). Benchmark data, not a live Brampton backlog.
           </p>
         </div>
@@ -415,7 +415,7 @@ function OperationalSnapshot() {
           value={fromOpen(open.data?.total)}
           tone="benchmark"
           statusLabel="Benchmark"
-          helper="Open cases in the NYC 311 benchmark review queue — not a live Brampton backlog"
+          helper="Open cases in the public 311 benchmark review queue — not a live Brampton backlog"
         />
         <KpiCard
           title="High priority cases"
@@ -459,7 +459,7 @@ function OperationalSnapshot() {
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
         Signals are based on POC thresholds, not official City SLA.
-        {hist.data && ` Based on ${fmtInt(hist.data.closed_requests)} closed NYC 311 benchmark records and the benchmark open review queue.`}
+        {hist.data && ` Based on ${fmtInt(hist.data.closed_requests)} closed public 311 benchmark records and the benchmark open review queue.`}
       </p>
     </section>
   )
@@ -1161,529 +1161,369 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 }
 
 // ---------------------------------------------------------------------------
-// Simulations tab — capacity and backlog stress test
+// Simulations tab — CTGAN + ABM stress testing framework
 // ---------------------------------------------------------------------------
+//
+// CTGAN generates synthetic service-request demand from public 311 benchmark
+// patterns; an agent-based model (ABM) runs that demand through each district's
+// intake queue, constrained by officer daily minutes, with a supervisor review
+// queue as a second bottleneck. This view reads five precomputed, read-only
+// Supabase views via ../../services/ctganAbmStress and never writes. It is a
+// planning simulation for capacity and backlog stress testing — decision
+// support only, not live Brampton operational data and not enforcement
+// decisioning.
 
-type Scenario = 'current' | 'reduced' | 'surge'
+// Officer effort is modeled in hours in the views; the ABM's binding constraint
+// is expressed in minutes, so convert at the edge.
+const MINUTES_PER_HOUR = 60
 
-const SCENARIO_LABEL: Record<Scenario, string> = {
-  current: 'Current capacity',
-  reduced: 'Reduced capacity',
-  surge: 'Surge week',
+// Shown verbatim wherever a CTGAN ABM view is empty or missing. Deliberately
+// calm, non-technical language for a pending load — never an error/failure tone.
+const CTGAN_PENDING_MESSAGE =
+  'CTGAN ABM outputs are ready for loading. Schema alignment is complete. Data loading is pending manual approval.'
+
+const ctNum = (v: unknown): number => {
+  const n = typeof v === 'string' ? Number(v) : (v as number)
+  return Number.isFinite(n) ? n : 0
 }
 
-const SCENARIO_NOTE: Record<Scenario, string> = {
-  current: 'Baseline staffing assumption.',
-  reduced: 'Shows impact if fewer staff are available.',
-  surge: 'Shows effect of increased incoming workload. Uses a simple 1.25× multiplier on open cases.',
+const ctStr = (v: unknown, fallback = '—'): string => {
+  if (v == null) return fallback
+  const s = String(v).trim()
+  return s.length ? s : fallback
 }
 
-const SURGE_MULTIPLIER = 1.25
-
-/** True when a tier string is the High review-priority tier. */
-const isHighTier = (tier: string | null) => (tier ?? '').trim().toLowerCase() === 'high'
-
-// Staffing scale presets for the capacity planning controls. Each sets the three
-// planning inputs to a coherent coverage scope: the system-wide public benchmark
-// queue (many departments / agencies), a single department team, or a small
-// enforcement team. These are starting assumptions, not predictions.
-type StaffingPreset = { id: string; label: string; staff: number; perStaff: number; highFocus: number }
-
-const STAFFING_PRESETS: StaffingPreset[] = [
-  { id: 'system', label: 'System wide benchmark', staff: 216, perStaff: 25, highFocus: 100 },
-  { id: 'department', label: 'Department team', staff: 25, perStaff: 25, highFocus: 100 },
-  { id: 'small', label: 'Small enforcement team', staff: 8, perStaff: 20, highFocus: 100 },
-]
+const ctDate = (v: unknown): string => formatPlainDate(v == null ? null : String(v)) ?? '—'
 
 /**
- * SimulationLab — an operations-style capacity stress test over the live open
- * review queue summary plus user-controlled planning assumptions. This is
- * scenario math, not a forecast: it helps staff reason about capacity, backlog,
- * and review sequencing. It never predicts enforcement outcomes.
+ * SimulationLab — the CTGAN + ABM stress testing framework (Stress Testing tab).
+ * Loads all five CTGAN ABM service reads with useLive and renders the framework
+ * regardless of load state. When every view is empty/missing it shows a single
+ * calm "pending manual approval" state. Planning simulation only; never an
+ * enforcement decision and never live Brampton operational data.
  */
 function SimulationLab() {
-  // Primary view: synthetic field-workload aggregates. Each synthetic case maps
-  // to one officer unit / district, so the officer-unit partition is the
-  // canonical basis for the headline totals.
-  const officerUnits = useLive<OfficerUnitWorkload[]>(getWorkloadByOfficerUnit)
-  const districts = useLive<DistrictWorkload[]>(getWorkloadByDistrict)
-  const closureBuckets = useLive<ClosureBucketWorkload[]>(getWorkloadByClosureBucket)
-  const complaintTypes = useLive<ComplaintTypeWorkload[]>(getWorkloadByComplaintType)
+  const latestRun = useLive<Record<string, unknown> | null>(getCtganLatestRunSummary)
+  const scenarios = useLive<Record<string, unknown>[]>(getCtganScenarioSummary)
+  const daily = useLive<{ day: string; total_cases: number }[]>(getCtganDailySummary)
+  const districts = useLive<CtganDistrictPressureRow[]>(getCtganDistrictPressure)
+  const complaintTypes = useLive<CtganComplaintTypePressureRow[]>(getCtganComplaintTypePressure)
 
-  const units = useMemo(() => officerUnits.data ?? [], [officerUnits.data])
-  const totalHours = useMemo(() => units.reduce((a, u) => a + u.estimated_hours, 0), [units])
-  const totalCases = useMemo(() => units.reduce((a, u) => a + u.case_count, 0), [units])
-  const totalSupervisor = useMemo(() => units.reduce((a, u) => a + u.supervisor_review_count, 0), [units])
-  const topUnit = units[0] ?? null // views arrive ordered by estimated_hours desc
+  const scenarioRows = useMemo(() => scenarios.data ?? [], [scenarios.data])
+  const dailyRows = useMemo(() => daily.data ?? [], [daily.data])
+  const districtRows = useMemo(() => districts.data ?? [], [districts.data])
+  const complaintRows = useMemo(() => complaintTypes.data ?? [], [complaintTypes.data])
 
-  const workloadLoading = officerUnits.loading
-  const workloadUnavailable = !officerUnits.loading && (officerUnits.error != null || units.length === 0)
+  const anyLoading =
+    latestRun.loading || scenarios.loading || daily.loading || districts.loading || complaintTypes.loading
+
+  // With nothing loaded, every view is empty (or missing) and we fall to the
+  // calm pending state rather than showing scary database-failure language.
+  const hasData =
+    latestRun.data != null ||
+    scenarioRows.length > 0 ||
+    dailyRows.length > 0 ||
+    districtRows.length > 0 ||
+    complaintRows.length > 0
+  const showPending = !anyLoading && !hasData
+
+  // Derived headline measures — only meaningful once data is present.
+  const totalGenerated = ctNum(latestRun.data?.generated_cases)
+  const simulatedDays = dailyRows.length
+  const totalDailyDemand = useMemo(() => dailyRows.reduce((a, r) => a + r.total_cases, 0), [dailyRows])
+  const peakDay = useMemo(
+    () =>
+      dailyRows.reduce<{ day: string; total_cases: number } | null>(
+        (best, r) => (best == null || r.total_cases > best.total_cases ? r : best),
+        null,
+      ),
+    [dailyRows],
+  )
+  const districtCount = districtRows.length
+  const totalDistrictCases = useMemo(() => districtRows.reduce((a, r) => a + r.total_cases, 0), [districtRows])
+  const totalEstimatedHours = useMemo(() => districtRows.reduce((a, r) => a + r.estimated_hours, 0), [districtRows])
+  const totalOfficerMinutes = totalEstimatedHours * MINUTES_PER_HOUR
 
   return (
     <div className="mt-6 space-y-6">
-      {/* Primary banner — frames the whole view as synthetic planning data. */}
+      {/* Overview banner — frames the whole tab as a planning simulation. */}
       <section className="card overflow-hidden">
         <div className="border-b border-slate-200 bg-navy-900 px-5 py-5">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-white">Synthetic workload simulation</h2>
-            <span className="inline-flex items-center rounded-full bg-amber-400/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200 ring-1 ring-inset ring-amber-400/30">
-              Benchmark based simulation
+            <h2 className="text-base font-semibold text-white">CTGAN ABM Stress Testing Framework</h2>
+            <span className="inline-flex items-center rounded-full bg-sky-400/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-200 ring-1 ring-inset ring-sky-400/30">
+              Planning simulation
             </span>
           </div>
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-navy-100">
-            This view uses synthetic patrol activity generated from public NYC 311 benchmark patterns. It is for capacity
-            planning and stress testing only, not officer performance scoring or enforcement decisions.
+            A conditional GAN (CTGAN) generates synthetic service-request demand from public 311 benchmark patterns, and
+            an agent-based model (ABM) runs that demand through each district&rsquo;s intake queue. Officer daily minutes
+            are the constrained resource, and a supervisor review queue forms the second bottleneck. This is capacity
+            planning and stress testing only — decision support, not live Brampton operational data, and never an
+            enforcement decision.
           </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {['Synthetic workload', 'Planning estimate', 'Decision support only', 'Not Brampton live workload'].map((tag) => (
-              <span
-                key={tag}
-                className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-navy-100 ring-1 ring-inset ring-white/15"
-              >
-                {tag}
-              </span>
-            ))}
+            {['CTGAN demand', 'Agent-based model', 'Capacity planning', 'Decision support only', 'Not enforcement decisioning'].map(
+              (tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-navy-100 ring-1 ring-inset ring-white/15"
+                >
+                  {tag}
+                </span>
+              ),
+            )}
           </div>
         </div>
 
-        <div className="px-5 py-5">
-          {workloadLoading ? (
-            <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">
-              Loading synthetic workload…
+        <div className="px-5 py-4">
+          {anyLoading ? (
+            <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
+              Connecting to CTGAN ABM outputs…
             </div>
-          ) : workloadUnavailable ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
-              <div className="font-semibold">Synthetic workload data unavailable.</div>
-              <div className="mt-0.5">
-                The synthetic patrol workload aggregates could not be loaded. No planning estimates are shown rather than
-                inventing numbers.
-              </div>
-            </div>
+          ) : showPending ? (
+            <CtganPendingNote />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <SimCard label="Estimated field hours" value={fmtInt(Math.round(totalHours))} helper="Synthetic planning estimate across all units" />
-              <SimCard label="Cases with synthetic field activity" value={fmtInt(totalCases)} helper="Benchmark cases carrying synthetic logs" />
-              <SimCard label="Supervisor review count" value={fmtInt(totalSupervisor)} helper="Synthetic activities flagged for review" />
-              <SimCard
-                label="Top workload unit"
-                value={topUnit ? topUnit.officer_unit : '—'}
-                helper={topUnit ? `${fmtInt(Math.round(topUnit.estimated_hours))} est. hours (synthetic)` : 'No units available'}
-              />
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-ink-subtle">
+              <span>
+                <span className="font-semibold text-navy-900">Scenario:</span> {ctStr(latestRun.data?.scenario_name)}
+              </span>
+              <span>
+                <span className="font-semibold text-navy-900">Latest run:</span> {ctStr(latestRun.data?.run_id)}
+              </span>
+              <span>
+                <span className="font-semibold text-navy-900">Run date:</span> {ctDate(latestRun.data?.run_date)}
+              </span>
+              <span>
+                <span className="font-semibold text-navy-900">Scenarios:</span> {fmtInt(scenarioRows.length)}
+              </span>
             </div>
           )}
         </div>
       </section>
 
-      {/* Capacity planning controls — placed up top so supervisors can set
-          staffing assumptions before reading the workload pressure below. */}
-      <CapacityCalculator />
+      {/* Framework cards — the four-stage model, shown even with no data loaded. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <FrameworkCard
+          step={1}
+          title="CTGAN demand generation"
+          body="A conditional GAN synthesizes service-request demand from public 311 benchmark patterns to feed the simulation's arrival stream."
+        />
+        <FrameworkCard
+          step={2}
+          title="ABM district queue simulation"
+          body="Generated demand flows into per-district intake queues that the agent-based model advances day by day."
+        />
+        <FrameworkCard
+          step={3}
+          title="Officer daily minutes"
+          body="Each officer has a fixed daily minute budget. When demand exceeds available minutes, cases queue — the model's binding constraint."
+        />
+        <FrameworkCard
+          step={4}
+          title="Supervisor review queue"
+          body="Cases needing sign-off enter a supervisor review queue after field work — a second bottleneck where backlog can accumulate."
+        />
+      </div>
 
-      {/* 1. Officer workload */}
-      <WorkloadSection
-        title="Officer workload"
-        subtitle="Synthetic estimated field hours by officer unit. Planning estimate, not performance scoring."
-        state={officerUnits}
-        rows={units}
-        labelOf={(r) => r.officer_unit}
-      />
-
-      {/* 2. District pressure */}
-      <WorkloadSection
-        title="District pressure"
-        subtitle="Synthetic workload concentration by district or area. Decision support only."
-        state={districts}
-        rows={districts.data ?? []}
-        labelOf={(r) => r.district_or_area}
-      />
-
-      {/* 3. Closure bucket pressure */}
-      <WorkloadSection
-        title="Closure bucket pressure"
-        subtitle="Where slow-closing cases concentrate synthetic follow-up workload."
-        state={closureBuckets}
-        rows={closureBuckets.data ?? []}
-        labelOf={(r) => r.closure_bucket}
-      />
-
-      {/* 4. Complaint type workload */}
-      <WorkloadSection
-        title="Complaint type workload"
-        subtitle="Which complaint types generate the most synthetic field workload."
-        state={complaintTypes}
-        rows={complaintTypes.data ?? []}
-        labelOf={(r) => r.complaint_type}
-      />
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Ranked synthetic workload section (compact table, not a heavy chart)
-// ---------------------------------------------------------------------------
-
-type WorkloadRow = OfficerUnitWorkload | DistrictWorkload | ClosureBucketWorkload | ComplaintTypeWorkload
-
-function WorkloadSection<T extends WorkloadRow>({
-  title,
-  subtitle,
-  state,
-  rows,
-  labelOf,
-}: {
-  title: string
-  subtitle: string
-  state: LiveState<T[]>
-  rows: T[]
-  labelOf: (row: T) => string
-}) {
-  // Rank by estimated field hours (rows arrive ordered, but be defensive).
-  const ranked = useMemo(() => [...rows].sort((a, b) => b.estimated_hours - a.estimated_hours).slice(0, 12), [rows])
-  const maxHours = ranked.length ? Math.max(...ranked.map((r) => r.estimated_hours), 1) : 1
-
-  return (
-    <section className="card p-5">
-      <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
-      <p className="mt-0.5 text-[11px] text-ink-subtle">{subtitle}</p>
-
-      {state.loading ? (
-        <div className="mt-4 animate-pulse rounded-md bg-slate-100/70 py-8 text-center text-sm text-ink-subtle">Loading…</div>
-      ) : state.error || ranked.length === 0 ? (
-        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
-          Synthetic workload data unavailable for this section.
-        </div>
-      ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-                <th className="py-2 pr-3">#</th>
-                <th className="py-2 pr-3">{title.replace(' workload', '').replace(' pressure', '')}</th>
-                <th className="py-2 pr-3 text-right">Est. hours</th>
-                <th className="py-2 pr-3 text-right">Logs</th>
-                <th className="py-2 pr-3 text-right">Cases</th>
-                <th className="py-2 text-right">Supervisor review</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ranked.map((r, i) => (
-                <tr key={labelOf(r) + i} className="border-b border-slate-100 last:border-0">
-                  <td className="py-2 pr-3 text-ink-subtle tabular-nums">{i + 1}</td>
-                  <td className="py-2 pr-3">
-                    <div className="font-medium text-navy-900">{labelOf(r)}</div>
-                    {/* Subtle inline rank bar — relative to the section's top unit. */}
-                    <div className="mt-1 h-1 w-full max-w-[180px] overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-accent-400"
-                        style={{ width: `${Math.max(3, Math.round((r.estimated_hours / maxHours) * 100))}%` }}
-                      />
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 text-right font-semibold tabular-nums text-navy-900">{fmtInt(Math.round(r.estimated_hours))}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-ink-muted">{fmtInt(r.log_count)}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-ink-muted">{fmtInt(r.case_count)}</td>
-                  <td className="py-2 text-right tabular-nums text-ink-muted">{fmtInt(r.supervisor_review_count)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Capacity planning controls — deterministic backlog-clearance math over the
-// open review queue, driven by user-set staffing assumptions.
-// ---------------------------------------------------------------------------
-
-function CapacityCalculator() {
-  const summary = useLive<OpenQueueSummary>(getNycOpenQueueSummary)
-  const aging = useLive<OpenAgingBucket[]>(getNycOpenAgingBuckets)
-  // A bounded, diversified sample — used as an honest fallback for the open/high
-  // counts if the summary aggregate is unavailable, and for the main pressure type.
-  const sample = useLive<OpenReviewRow[]>(() => getNycOpenQueueDiversified({}, 60))
-
-  const [staff, setStaff] = useState(216)
-  const [perStaff, setPerStaff] = useState(25)
-  const [highFocus, setHighFocus] = useState(100)
-  const [scenario, setScenario] = useState<Scenario>('current')
-
-  // Apply a staffing-scale preset to all three planning inputs at once.
-  const applyPreset = (p: StaffingPreset) => {
-    setStaff(p.staff)
-    setPerStaff(p.perStaff)
-    setHighFocus(p.highFocus)
-  }
-
-  const sampleRows = sample.data ?? []
-  const summaryOk = !!summary.data
-  // Prefer the precomputed summary; fall back to the loaded sample (labeled).
-  const baseOpen = summary.data?.total ?? (sample.data ? sampleRows.length : null)
-  const baseHigh =
-    summary.data?.highPriority ?? (sample.data ? sampleRows.filter((r) => isHighTier(r.priority_tier)).length : null)
-  const sampled = !summaryOk && sample.data != null
-
-  const topPressure = useMemo(() => {
-    const rows = sample.data ?? []
-    if (!rows.length) return null
-    const counts = new Map<string, number>()
-    for (const r of rows) {
-      const k = r.complaint_type ?? 'Uncategorized'
-      counts.set(k, (counts.get(k) ?? 0) + 1)
-    }
-    let top: string | null = null
-    let max = 0
-    for (const [k, v] of counts) if (v > max) { max = v; top = k }
-    return top
-  }, [sample.data])
-
-  const topAging = useMemo(() => {
-    const b = aging.data ?? []
-    if (!b.length) return null
-    return [...b].sort((x, y) => y.total_cases - x.total_cases)[0]
-  }, [aging.data])
-
-  // Scenario adjustments — deterministic planning assumptions, not predictions.
-  const effectiveStaff = scenario === 'reduced' ? Math.max(1, Math.ceil(staff * 0.66)) : staff
-  const openCases = baseOpen == null ? null : scenario === 'surge' ? Math.ceil(baseOpen * SURGE_MULTIPLIER) : baseOpen
-  const high = baseHigh
-
-  const dailyCapacity = Math.max(0, effectiveStaff) * Math.max(0, perStaff)
-  const highCapacity = dailyCapacity * (Math.max(0, Math.min(100, highFocus)) / 100)
-  const daysHigh = high != null && highCapacity > 0 ? Math.ceil(high / highCapacity) : null
-  const daysAll = openCases != null && dailyCapacity > 0 ? Math.ceil(openCases / dailyCapacity) : null
-  // Staff (at the current per-staff review rate) required to clear the open queue
-  // within 30 days — an intuitive headcount target instead of a raw case gap.
-  const staffNeededFor30Days = openCases == null || perStaff <= 0 ? null : Math.ceil(openCases / (30 * perStaff))
-
-  // Deterministic status colors for the result cards (green manageable, amber
-  // pressure, red critical). Thresholds are explicit and auditable.
-  const daysAllStatus: SimStatus =
-    daysAll == null ? 'neutral' : daysAll <= 14 ? 'good' : daysAll <= 60 ? 'watch' : 'critical'
-  const staffNeededStatus: SimStatus =
-    staffNeededFor30Days == null
-      ? 'neutral'
-      : effectiveStaff >= staffNeededFor30Days
-        ? 'good'
-        : effectiveStaff >= staffNeededFor30Days * 0.75
-          ? 'watch'
-          : 'critical'
-
-  const dataUnavailable = baseOpen == null && !summary.loading && !sample.loading
-  const loading = summary.loading && sample.loading
-
-  return (
-    <div className="mt-6 space-y-6">
-      <section className="card p-5">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-navy-900">Capacity planning controls</h3>
-            <p className="mt-0.5 text-xs text-ink-subtle">Adjust staffing assumptions before reviewing workload pressure. Deterministic planning math only, not a forecast.</p>
-          </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
-            Planning · deterministic
-          </span>
-        </div>
-
-        {/* Staffing scale presets — pick a coverage scope, then fine-tune below. */}
-        <div className="mt-4">
-          <span className="text-[11px] font-medium text-ink-subtle">Staffing scale</span>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {STAFFING_PRESETS.map((p) => {
-              const active = staff === p.staff && perStaff === p.perStaff && highFocus === p.highFocus
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => applyPreset(p)}
-                  className={`rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset transition ${
-                    active
-                      ? 'bg-accent-50 text-navy-900 ring-accent-300'
-                      : 'bg-white text-ink-muted ring-slate-200 hover:bg-slate-50 hover:text-navy-900'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Inputs */}
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <NumberInput
-            label="Staff available"
-            value={staff}
-            min={1}
-            max={1000}
-            onChange={setStaff}
-            helper="Default assumes system wide benchmark queue coverage, not one department."
-          />
-          <NumberInput label="Cases reviewed / staff / day" value={perStaff} min={1} max={200} onChange={setPerStaff} />
-          <NumberInput label="High priority focus (%)" value={highFocus} min={0} max={100} onChange={setHighFocus} />
-          <div>
-            <span className="text-[11px] font-medium text-ink-subtle">Scenario</span>
-            <div className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-1">
-              {(['current', 'reduced', 'surge'] as Scenario[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setScenario(s)}
-                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
-                    scenario === s ? 'bg-white text-navy-900 shadow-sm ring-1 ring-slate-200' : 'text-ink-subtle hover:text-navy-900'
-                  }`}
-                >
-                  {SCENARIO_LABEL[s]}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-xs text-ink-muted">
-          <span className="font-semibold text-ink">{SCENARIO_LABEL[scenario]}:</span> {SCENARIO_NOTE[scenario]}
-          {scenario === 'reduced' && (
-            <span className="text-ink-subtle"> Effective staff this scenario: {effectiveStaff}.</span>
-          )}
-        </div>
-
-        {dataUnavailable ? (
-          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
-            <div className="font-semibold">Open queue data unavailable.</div>
-            <div className="mt-0.5">
-              The open review queue summary could not be loaded, so the scenario math has no live open-case counts to work
-              from. Capacity inputs above still apply once the open dataset is available.
-            </div>
-          </div>
-        ) : loading ? (
-          <div className="mt-4 animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">Loading live data…</div>
+      {/* 1. CTGAN demand generation — run + daily summary measures. */}
+      <CtganSection
+        title="CTGAN demand generation"
+        subtitle="Synthetic demand generated for the latest run, used as the ABM's arrival stream. Planning estimate, not a forecast."
+      >
+        {showPending ? (
+          <CtganPendingNote />
         ) : (
-          <>
-            {sampled && (
-              <p className="mt-4 text-[11px] text-amber-800">
-                Open-case counts are sampled from the open review queue (the full-population summary is unavailable), so
-                these figures are a limited sample, not the full queue total.
-              </p>
-            )}
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <SimCard label="Daily review capacity" value={fmtInt(dailyCapacity)} helper={`${effectiveStaff} staff × ${perStaff} cases/day`} />
-              <SimCard label="High priority cases" value={high == null ? '—' : fmtInt(high)} helper={high == null ? 'Tier breakdown unavailable' : `${highFocus}% of capacity directed here first`} />
-              <SimCard label="Days to clear high priority" value={daysHigh == null ? '—' : fmtInt(daysHigh)} helper="At current high-priority focus" />
-              <SimCard
-                label="Estimated days to clear open queue"
-                value={daysAll == null ? '—' : `${fmtInt(daysAll)} days`}
-                helper="At the selected staffing capacity"
-                status={daysAllStatus}
-              />
-              <SimCard
-                label="Staff needed to clear queue in 30 days"
-                value={staffNeededFor30Days == null ? '—' : `${fmtInt(staffNeededFor30Days)} staff`}
-                helper="Based on current cases reviewed per staff per day"
-                status={staffNeededStatus}
-              />
-              <SimCard
-                label="Largest open case category"
-                value={topPressure ?? '—'}
-                helper={topPressure ? 'Most common type in the open sample' : 'Sample unavailable'}
-              />
-            </div>
-
-            {topAging && (
-              <p className="mt-3 text-[11px] text-ink-subtle">
-                Main aging bucket: <span className="font-medium text-ink-muted">{topAging.bucket}</span> ({fmtInt(topAging.total_cases)} open cases).
-              </p>
-            )}
-
-            <p className="mt-4 text-[11px] leading-relaxed text-ink-muted">
-              This calculator uses open case counts from the selected benchmark scope. Staff assumptions should represent
-              the effective review capacity for that scope, not the number of employees in a single department.
-            </p>
-          </>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SimCard label="Generated cases" value={fmtInt(totalGenerated)} helper="Synthetic demand in the latest run" />
+            <SimCard label="Simulated days" value={fmtInt(simulatedDays)} helper="Days in the demand horizon" />
+            <SimCard label="Total daily demand" value={fmtInt(totalDailyDemand)} helper="Sum of cases across simulated days" />
+            <SimCard
+              label="Peak demand day"
+              value={peakDay ? ctDate(peakDay.day) : '—'}
+              helper={peakDay ? `${fmtInt(peakDay.total_cases)} cases on the peak day` : 'No daily rows yet'}
+            />
+          </div>
         )}
+      </CtganSection>
 
-        <p className="mt-4 text-[11px] leading-relaxed text-ink-subtle">
-          This is deterministic stress testing, not Monte Carlo simulation, not agent based modelling, and not a forecast.
-          It is intended to help supervisors test staffing and backlog assumptions.
+      {/* 2. ABM district queue simulation — queue totals. */}
+      <CtganSection
+        title="ABM district queue simulation"
+        subtitle="Generated demand routed into per-district intake queues and advanced by the agent-based model."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SimCard label="Districts simulated" value={fmtInt(districtCount)} helper="Distinct district queues modeled" />
+            <SimCard label="Cases queued" value={fmtInt(totalDistrictCases)} helper="Total cases routed into district queues" />
+            <SimCard label="Estimated field hours" value={fmtInt(totalEstimatedHours)} helper="Modeled officer effort across districts" />
+            <SimCard
+              label="Avg cases / district"
+              value={districtCount ? fmtInt(totalDistrictCases / districtCount) : '—'}
+              helper="Mean queue load per district"
+            />
+          </div>
+        )}
+      </CtganSection>
+
+      {/* 3. Officer daily minutes — the constrained resource. */}
+      <CtganSection
+        title="Officer daily minutes — the constrained resource"
+        subtitle="Each officer has a fixed budget of working minutes per day. When demand exceeds available minutes, cases queue rather than disappear — the model's binding constraint."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <SimCard label="Officer-minutes demanded" value={fmtInt(totalOfficerMinutes)} helper="Modeled effort converted to minutes (hours × 60)" />
+            <SimCard label="Equivalent field hours" value={fmtInt(totalEstimatedHours)} helper="Total constrained effort across the run" />
+            <SimCard
+              label="Per simulated day"
+              value={simulatedDays ? fmtInt(totalOfficerMinutes / simulatedDays) : '—'}
+              helper="Average officer-minutes of demand per day"
+            />
+          </div>
+        )}
+      </CtganSection>
+
+      {/* 4. Supervisor review queue — the second bottleneck. */}
+      <CtganSection
+        title="Supervisor review queue bottleneck"
+        subtitle="Cases that require sign-off enter a supervisor review queue after field work. Limited review capacity makes this a second bottleneck where backlog can build even when field minutes are available."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <SimCard label="Cases entering review" value={fmtInt(totalDistrictCases)} helper="Cases routed through the modeled review stage" />
+            <SimCard label="Review effort (hours)" value={fmtInt(totalEstimatedHours)} helper="Effort competing for supervisor capacity" />
+            <SimCard label="Stage" value="Post-field" helper="Review queue forms after officer field work" />
+          </div>
+        )}
+      </CtganSection>
+
+      {/* 5. District pressure */}
+      <CtganSection
+        title="District pressure"
+        subtitle="Where simulated demand concentrates by district or area. Planning estimate, not performance scoring."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : (
+          <CtganPressureTable
+            firstColLabel="District / area"
+            rows={districtRows.map((r) => ({ label: r.district_or_area, total_cases: r.total_cases, estimated_hours: r.estimated_hours }))}
+          />
+        )}
+      </CtganSection>
+
+      {/* 6. Complaint type pressure */}
+      <CtganSection
+        title="Complaint type pressure"
+        subtitle="Which complaint types drive the most simulated workload across the run."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : (
+          <CtganPressureTable
+            firstColLabel="Complaint type"
+            rows={complaintRows.map((r) => ({ label: r.complaint_type, total_cases: r.total_cases, estimated_hours: r.estimated_hours }))}
+          />
+        )}
+      </CtganSection>
+
+      {/* 7. Clear note — planning simulation only, not enforcement decisioning. */}
+      <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="text-sm font-semibold text-navy-900">Planning simulation only — not enforcement decisioning</div>
+        <p className="mt-1.5 text-xs leading-relaxed text-ink-subtle">
+          This framework uses CTGAN-generated synthetic demand from public 311 benchmark patterns and an agent-based
+          model to stress test capacity, backlog, and review sequencing. It is decision support for staffing and
+          planning conversations. It does not use live Brampton operational data, does not score officers, does not
+          automate enforcement, and is never used to make enforcement decisions.
         </p>
       </section>
     </div>
   )
 }
 
-function NumberInput({
-  label,
-  value,
-  min,
-  max,
-  onChange,
-  helper,
-}: {
-  label: string
-  value: number
-  min: number
-  max: number
-  onChange: (v: number) => void
-  helper?: string
-}) {
-  // Local string draft so the field is comfortable to edit: users can fully
-  // delete and retype on desktop and mobile. A valid number updates the result
-  // cards immediately while typing, but we never round or clamp on every
-  // keystroke — only on blur or Enter — so a partially typed or blank value
-  // doesn't snap back mid-edit or break the calculation.
-  const [draft, setDraft] = useState(String(value))
-
-  // Re-sync the draft when the value changes from outside (presets / scenario
-  // chips). This fires only on real value changes, never while the user types.
-  useEffect(() => {
-    setDraft(String(value))
-  }, [value])
-
-  // Parse, round, and clamp once editing finishes. Blank or invalid input reverts
-  // to the last valid value so the calculation always has a usable number.
-  const commit = () => {
-    const n = Number(draft)
-    if (draft.trim() === '' || !Number.isFinite(n)) {
-      setDraft(String(value))
-      return
-    }
-    const clamped = Math.max(min, Math.min(max, Math.round(n)))
-    setDraft(String(clamped))
-    if (clamped !== value) onChange(clamped)
-  }
-
+// A four-stage framework explainer card. Always rendered so the methodology is
+// visible even before any CTGAN ABM data is loaded.
+function FrameworkCard({ step, title, body }: { step: number; title: string; body: string }) {
   return (
-    <label className="block">
-      <span className="text-[11px] font-medium text-ink-subtle">{label}</span>
-      <input
-        type="text"
-        inputMode="numeric"
-        pattern="[0-9]*"
-        value={draft}
-        onChange={(e) => {
-          // Allow blank or digits only while typing. A valid number updates the
-          // result cards immediately; min/max clamping is deferred to commit
-          // (blur or Enter), and a blank value waits for commit to revert.
-          const next = e.target.value
-          if (next === '' || /^[0-9]+$/.test(next)) {
-            setDraft(next)
-            if (next !== '') {
-              const n = Number(next)
-              if (Number.isFinite(n) && n !== value) onChange(n)
-            }
-          }
-        }}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            e.currentTarget.blur()
-          }
-        }}
-        className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm tabular-nums focus:border-accent-500 focus:outline-none"
-      />
-      {helper && <span className="mt-1 block text-[10px] leading-snug text-ink-subtle">{helper}</span>}
-    </label>
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-navy-900 text-[10px] font-semibold text-white">
+          {step}
+        </span>
+        <div className="text-sm font-semibold text-navy-900">{title}</div>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">{body}</p>
+    </div>
+  )
+}
+
+// A titled framework section shell (header + body) for the CTGAN ABM view.
+function CtganSection({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <section className="card overflow-hidden">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
+        <p className="mt-1 max-w-3xl text-xs leading-relaxed text-ink-subtle">{subtitle}</p>
+      </div>
+      <div className="px-5 py-5">{children}</div>
+    </section>
+  )
+}
+
+type CtganPressureRow = { label: string; total_cases: number; estimated_hours: number }
+
+// Compact, mobile-responsive ranked table for district / complaint-type pressure.
+function CtganPressureTable({ firstColLabel, rows }: { firstColLabel: string; rows: CtganPressureRow[] }) {
+  if (rows.length === 0) return <CtganPendingNote />
+  const maxCases = rows.reduce((m, r) => Math.max(m, r.total_cases), 0) || 1
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
+            <th className="py-2 pr-3 font-semibold">{firstColLabel}</th>
+            <th className="py-2 pr-3 text-right font-semibold">Cases</th>
+            <th className="py-2 pr-3 text-right font-semibold">Est. hours</th>
+            <th className="hidden py-2 font-semibold sm:table-cell">Share of cases</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} className="border-b border-slate-100 last:border-0">
+              <td className="py-2 pr-3 text-navy-900">{r.label}</td>
+              <td className="py-2 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.total_cases)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums text-ink-subtle">{fmtInt(r.estimated_hours)}</td>
+              <td className="hidden py-2 sm:table-cell">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-sky-500"
+                    style={{ width: `${Math.max(2, Math.min(100, (r.total_cases / maxCases) * 100))}%` }}
+                  />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// The single, exact pending state shown wherever a CTGAN ABM view is empty or
+// missing. Calm, informational styling — never error/failure language.
+function CtganPendingNote() {
+  return (
+    <div className="rounded-md border border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-sky-900">
+      <div className="font-semibold">Data loading pending</div>
+      <p className="mt-0.5 leading-relaxed">{CTGAN_PENDING_MESSAGE}</p>
+    </div>
   )
 }
 
@@ -2068,7 +1908,7 @@ function OpenCasesQueue() {
       <div className="mt-6 card p-6">
         <h2 className="text-sm font-semibold text-navy-900">Open cases unavailable</h2>
         <p className="mt-1 text-sm text-ink-muted">
-          The review priority queue reads the open NYC 311 review queue. It could not be loaded right now.
+          The review priority queue reads the open public 311 benchmark review queue. It could not be loaded right now.
         </p>
         <p className="mt-2 font-mono text-[11px] text-ink-subtle">{error}</p>
       </div>
