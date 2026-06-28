@@ -27,11 +27,13 @@ function str(v: unknown, fallback = ''): string {
 export type CtganDistrictPressureRow = { district_or_area: string; total_cases: number; estimated_hours: number }
 export type CtganComplaintTypePressureRow = { complaint_type: string; total_cases: number; estimated_hours: number }
 
-export async function getCtganLatestRunSummary(): Promise<Record<string, unknown>> {
+// Returns null when no run has been loaded yet (the view is empty) rather than
+// throwing — an empty framework is a valid "pending load" state, not an error.
+export async function getCtganLatestRunSummary(): Promise<Record<string, unknown> | null> {
   const client = requireClient()
-  const { data, error } = await client.from(LATEST_RUN_VIEW).select('*').limit(1).single()
+  const { data, error } = await client.from(LATEST_RUN_VIEW).select('*').limit(1).maybeSingle()
   if (error) throw error
-  return data as Record<string, unknown>
+  return (data ?? null) as Record<string, unknown> | null
 }
 
 export async function getCtganScenarioSummary(): Promise<Record<string, unknown>[]> {
