@@ -9,6 +9,25 @@ import type { AreaUnit } from './NYCWorkloadMapPanel'
 import { formatMetric, metricConfig, metricRawValue, type AreaMetricValue, type MapMetric } from './mapMetrics'
 import { NYC_BOROUGH_BOUNDARIES } from '../../data/nycBoroughBoundaries'
 
+// Optional metric adapter. By default the deck reads its value + display from the
+// selected MapMetric in mapMetrics. An adapter lets a different caller (e.g. the
+// ABM simulation pressure map) drive the same extruded view with its own metric
+// semantics — case load, backlog, stale risk, supervisor queue — without leaking
+// those non-311 concepts into mapMetrics. When supplied, the adapter overrides how
+// each area's value is read, formatted, and titled.
+export type DeckMetricAdapter = {
+  /** Heading shown in the tooltip headline. */
+  title: string
+  /** Unit noun appended to a formatted value, e.g. "cases". */
+  unit: string
+  /** Whether a "share of total" line makes sense (additive counts only). */
+  additive: boolean
+  /** Read this area's value, or null for no data. */
+  rawValue: (row: AreaMetricValue | undefined) => number | null
+  /** Format a non-null value (without the unit). */
+  format: (value: number) => string
+}
+
 // Professional 3D workload view built on deck.gl's GeoJsonLayer (extruded
 // polygons). It renders the real NYC borough / council-district GeoJSON, extruded
 // by a CONTROLLED, relative height (sqrt scaling, hard-capped) and shaded with the
@@ -117,16 +136,16 @@ type Bounds = [[number, number], [number, number]]
 function buildScene(
   units: AreaUnit[],
   values: AreaMetricValue[],
-  metric: MapMetric,
+  rawValue: (row: AreaMetricValue | undefined) => number | null,
+  additive: boolean,
   min: number,
   max: number,
 ): { fc: FeatureCollection<Geometry, MetricProps>; bounds: Bounds | null } {
   const byKey = new Map<string, AreaMetricValue>()
   for (const v of values) byKey.set(v.key, v)
-  const additive = metricConfig(metric).additive
   // Share only makes sense for additive count metrics, never closure-day rates.
   const total = additive
-    ? values.reduce((s, v) => s + (metricRawValue(v, metric) ?? 0), 0)
+    ? values.reduce((s, v) => s + (rawValue(v) ?? 0), 0)
     : 0
 
   const features: MetricFeature[] = []
@@ -139,7 +158,7 @@ function buildScene(
     const geometry = toGeometry(u.geometry)
     if (!geometry) continue
     const row = byKey.get(u.key)
-    const value = metricRawValue(row, metric)
+    const value = rawValue(row)
     const colorT = max > min && value != null ? (value - min) / (max - min) : 0
     const share = additive && value != null && total > 0 ? value / total : null
     features.push({
@@ -318,6 +337,7 @@ export default function NYCWorkload3DDeck({
   mode = 'district',
   onHover,
   onSelect,
+  adapter,
 }: {
   units: AreaUnit[]
   values: AreaMetricValue[]
@@ -330,14 +350,30 @@ export default function NYCWorkload3DDeck({
   mode?: 'district' | 'borough'
   onHover: (key: string | null) => void
   onSelect: (key: string, label: string) => void
+  /** Optional metric adapter. When supplied, it overrides how each area's value is
+   *  read, formatted, and titled — used by the ABM simulation pressure map so the
+   *  same deck can render case load / backlog / stale risk / supervisor queue. */
+  adapter?: DeckMetricAdapter
 }) {
   // Bumping this remounts DeckGL, which re-reads initialViewState (i.e. resets).
   const [resetCount, setResetCount] = useState(0)
   const cfg = metricConfig(metric)
 
+  // Value extraction + display come from the adapter when present, otherwise from
+  // the selected MapMetric. Everything downstream (scene, tooltip, labels) reads
+  // these so the two paths share one render.
+  const rawValueOf = useMemo<(row: AreaMetricValue | undefined) => number | null>(
+    () => (adapter ? adapter.rawValue : (row) => metricRawValue(row, metric)),
+    [adapter, metric],
+  )
+  const additive = adapter ? adapter.additive : cfg.additive
+  const displayTitle = adapter ? adapter.title : cfg.title
+  const formatValue = (v: number | null): string =>
+    adapter ? (v == null ? 'No data' : `${adapter.format(v)} ${adapter.unit}`.trim()) : formatMetric(v, metric)
+
   const { fc, bounds } = useMemo(
-    () => buildScene(units, values, metric, min, max),
-    [units, values, metric, min, max],
+    () => buildScene(units, values, rawValueOf, additive, min, max),
+    [units, values, rawValueOf, additive, min, max],
   )
 
   const initialViewState = useMemo<MapViewState>(() => {
@@ -455,13 +491,15 @@ export default function NYCWorkload3DDeck({
   const getTooltip = (info: PickingInfo<MetricFeature>) => {
     const p = info.object?.properties
     if (!p) return null
-    const headline = `${cfg.title}: ${formatMetric(p.value, metric)}`
+    const headline = `${displayTitle}: ${formatValue(p.value)}`
     const share = p.share != null ? `${(p.share * 100).toFixed(1)}% of ${unitLabel} total` : null
+    // Supporting context (total requests / open backlog) is mapMetrics-specific, so
+    // it is shown only on the default path — an adapter brings its own semantics.
     const context: string[] = []
-    if (metric !== 'total_requests' && p.total_requests != null) {
+    if (!adapter && metric !== 'total_requests' && p.total_requests != null) {
       context.push(`Total requests: ${p.total_requests.toLocaleString()}`)
     }
-    if (metric !== 'open_backlog' && p.open_backlog != null) {
+    if (!adapter && metric !== 'open_backlog' && p.open_backlog != null) {
       context.push(`Open backlog: ${p.open_backlog.toLocaleString()}`)
     }
     return {
