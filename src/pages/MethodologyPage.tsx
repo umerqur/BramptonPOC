@@ -39,7 +39,7 @@ const workflowCards = [
 const aiCards = [
   [
     'Field Support Assistant',
-    'Case scoped AI assistant for officers. Helps prepare site checks, evidence notes, field summaries, and supervisor handoff. Backed by Groq LPU inference when configured. Staff decide all actions.',
+    'Case scoped AI assistant for officers. Helps prepare site checks, evidence notes, field summaries, and supervisor handoff. Staff decide all actions. Uses LPU (Language Processing Unit) inference to reduce latency and runtime cost compared with GPU based serving for supported language model workloads.',
   ],
   [
     'Similar Case Retrieval',
