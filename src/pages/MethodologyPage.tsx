@@ -30,29 +30,32 @@ const workflowCards = [
   ['Supervisor approved closure', 'A supervisor reviews and approves the final response before it is sent.'],
 ] as const
 
-// 3. Where AI is used — compact cards, one capability each. The officer guidance
-// assistant is implemented (Netlify function backed by Groq LPU inference), so it
-// is described as a current capability with staff judgment required.
+// 3. Where AI and advanced analytics are used — compact cards, one capability
+// each. Only genuine model-backed capabilities are described as AI: the case
+// scoped Field Support Assistant (Groq LPU inference), embeddings/reranking for
+// similar case retrieval, CTGAN synthetic demand, and the ABM queue simulation.
+// Rules based workflow support (intake, officer recommendation, closure) is
+// called out as decision support, not AI.
 const aiCards = [
   [
-    'Structured intake support',
-    'Extracts complaint details and creates consistent staff review context.',
+    'Field Support Assistant',
+    'Case scoped AI assistant for officers. Helps prepare site checks, evidence notes, field summaries, and supervisor handoff. Backed by Groq LPU inference when configured. Staff decide all actions.',
   ],
   [
-    'Officer recommendation support',
-    'Suggests a recommended officer or routing option based on workload, case type, district, and availability assumptions. Staff can override.',
+    'Similar Case Retrieval',
+    'Uses embeddings and reranking to surface comparable public benchmark cases for reference. It supports review context only and does not decide outcomes.',
   ],
   [
-    'Officer guidance assistant',
-    'Lets bylaw officers ask case and workflow guidance questions in plain language, with staff judgment required. Backed by Groq LPU inference.',
+    'Synthetic Demand',
+    'Uses CTGAN to generate synthetic planning demand from a public 311 benchmark. It does not create or claim real Brampton records.',
   ],
   [
-    'Closure support',
-    'Drafts consistent closure language for supervisor review before anything is sent.',
+    'Queue Simulation',
+    'Uses ABM to run synthetic demand through district queues, officer capacity, supervisor review, and closure pressure for capacity planning.',
   ],
   [
-    'Stress testing',
-    'Uses synthetic demand and ABM simulation to show backlog, stale case, district pressure, supervisor pressure, and prevention actions.',
+    'Rules Based Workflow Support',
+    'Structured intake, priority review, officer recommendation, and closure drafts use transparent rules, templates, and staff approval. They are decision support, not AI decisions.',
   ],
 ] as const
 
@@ -133,8 +136,11 @@ export default function MethodologyPage() {
           <FlowCards items={workflowCards} />
         </Section>
 
-        {/* Section 3: Where AI is used */}
-        <Section title="Where AI is used" lead="AI supports staff at each step. Staff stay in control of every decision.">
+        {/* Section 3: Where AI and advanced analytics are used */}
+        <Section
+          title="Where AI and advanced analytics are used"
+          lead="The POC combines rules based workflow support, case scoped AI assistance, retrieval, and synthetic workload simulation. Staff stay in control of every decision."
+        >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {aiCards.map(([title, detail]) => (
               <Card key={title} title={title} detail={detail} />
