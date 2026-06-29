@@ -267,7 +267,7 @@ function scoreDrivers(
     { key: 'wardMatch', label: 'Ward match', score: wardScore, weight: DRIVER_WEIGHTS.wardMatch, detail: wardDetail },
     {
       key: 'categoryExperience',
-      label: 'Complaint category experience',
+      label: 'Category experience',
       score: experienceScore,
       weight: DRIVER_WEIGHTS.categoryExperience,
       detail: experienceDetail,
@@ -340,18 +340,19 @@ export function recommendOfficer(
   return { recommended, recommendedScore, ranked, caseWard, category, rationale }
 }
 
-/** One-line, top-driver rationale for the recommended officer. */
+/** Short "why this officer" phrase — the single strongest driver. */
 function buildRationale(score: OfficerScore, caseWard: number, category: DemoCategory): string {
   const top = [...score.drivers].sort((a, b) => b.score * b.weight - a.score * a.weight)[0]
-  const lead =
-    top?.key === 'categoryExperience'
-      ? `strongest ${category} experience`
-      : top?.key === 'wardMatch'
-        ? `best coverage for ward ${caseWard}`
-        : top?.key === 'currentWorkload'
-          ? 'the most spare capacity'
-          : top?.key === 'recentAreaFamiliarity'
-            ? `recent work in ward ${caseWard}`
-            : 'current availability'
-  return `${score.name} scores highest for this case (${lead}).`
+  switch (top?.key) {
+    case 'categoryExperience':
+      return `Strongest ${category} experience`
+    case 'wardMatch':
+      return `Best coverage for ward ${caseWard}`
+    case 'currentWorkload':
+      return 'Most spare capacity'
+    case 'recentAreaFamiliarity':
+      return `Recent work in ward ${caseWard}`
+    default:
+      return 'Currently available'
+  }
 }
