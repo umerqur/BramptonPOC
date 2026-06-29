@@ -5,6 +5,8 @@ import { can, officerProfiles, officerDisplayName, type StaffProfile } from '../
 import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
 import { formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
+import { recommendOfficer, type RecommendationDriver } from '../../lib/officerRecommendation'
+import type { DemoCategory } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
   assignResidentRequestToOfficer,
@@ -603,10 +605,13 @@ function InboxCard({
 }
 
 // Supervisor/coordinator assignment panel. A prominent block (not a thin row)
-// with two clear states: before assignment it shows the routing recommendation
-// and a single role-based "Assign to Bylaw Officer" action; after assignment it
-// shows the assigned officer, role, status, and the next step. The officer's
-// account email is an implementation detail and is intentionally never shown.
+// with two clear states: before assignment it surfaces a deterministic,
+// rules-based officer recommendation (the primary "Assign recommended officer"
+// action) plus an explanation of WHY that officer was suggested, and an
+// override dropdown to choose another officer; after assignment it shows the
+// assigned officer, role, status, and the next step. The officer's account
+// email is an implementation detail and is intentionally never shown. The
+// recommendation is decision support only — staff approve every assignment.
 function AssignmentPanel({
   row,
   canAssign,
@@ -628,8 +633,20 @@ function AssignmentPanel({
   // The assignable By-law Officers (Officer Qureshi, Officer Mann, Officer Ahmed,
   // Officer Oakley). Assignment stores the chosen officer's login email.
   const officers = officerProfiles()
-  const [selectedEmail, setSelectedEmail] = useState(officers[0]?.email ?? '')
-  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? officers[0] ?? null
+  // Deterministic, rules-based recommendation for this submission. The top-scored
+  // officer is the default assignee; Officer Qureshi is recommended only when his
+  // score wins. Memoised so it doesn't re-run on every render.
+  const recommendation = useMemo(() => recommendOfficer(row, officers), [row, officers])
+  const recommendedOfficer = recommendation.recommended
+  // The override dropdown starts on the recommended officer so "Choose another
+  // officer" is an explicit, deliberate override of the recommendation.
+  const [selectedEmail, setSelectedEmail] = useState(
+    recommendedOfficer?.email ?? officers[0]?.email ?? '',
+  )
+  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? recommendedOfficer ?? null
+  const overridingRecommendation = Boolean(
+    selectedOfficer && recommendedOfficer && selectedOfficer.email !== recommendedOfficer.email,
+  )
 
   if (assignedComplete) {
     return (
@@ -681,7 +698,81 @@ function AssignmentPanel({
           This case shows as assigned but has no officer on file. Select an officer to complete the assignment.
         </p>
       )}
-      {canAssign && row.status !== 'closed' && (
+      {canAssign && row.status !== 'closed' && recommendedOfficer && recommendation.recommendedScore && (
+        <>
+          {/* Why this officer — a transparent, rules-based recommendation. This is
+              decision support; the supervisor still approves the assignment. */}
+          <RecommendationExplanation
+            officerName={recommendation.recommendedScore.name}
+            total={recommendation.recommendedScore.total}
+            caseWard={recommendation.caseWard}
+            category={recommendation.category}
+            rationale={recommendation.rationale}
+            drivers={recommendation.recommendedScore.drivers}
+          />
+
+          {/* Primary action — assign the recommended officer. */}
+          <div className="mt-3">
+            <button
+              onClick={() => onAssign(recommendedOfficer)}
+              disabled={assigning}
+              className="btn-primary text-sm py-2 px-4 disabled:opacity-60"
+            >
+              {assigning ? 'Assigning…' : 'Assign recommended officer'}
+            </button>
+            <p className="mt-1.5 text-[11px] text-ink-subtle">
+              Recommendation only — staff approve every assignment. You can choose another officer below.
+            </p>
+          </div>
+
+          {/* Override — choose another officer instead of the recommendation. */}
+          <div className="mt-3 border-t border-amber-200/70 pt-3">
+            <label
+              htmlFor={`officer-override-${row.id}`}
+              className="text-xs font-semibold uppercase tracking-wide text-ink-subtle"
+            >
+              Choose another officer
+            </label>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <select
+                id={`officer-override-${row.id}`}
+                value={selectedEmail}
+                onChange={(e) => setSelectedEmail(e.target.value)}
+                disabled={assigning}
+                aria-label="Choose another By-law Officer"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+              >
+                {officers.map((o) => {
+                  const label = officerDisplayName(o)
+                  return (
+                    <option key={o.email} value={o.email}>
+                      {o.email === recommendedOfficer.email ? `${label} (recommended)` : label}
+                    </option>
+                  )
+                })}
+              </select>
+              <button
+                onClick={() => selectedOfficer && onAssign(selectedOfficer)}
+                disabled={assigning || !selectedOfficer || !overridingRecommendation}
+                className="btn-secondary text-sm py-2 px-4 disabled:opacity-50"
+              >
+                {assigning
+                  ? 'Assigning…'
+                  : `Assign ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'} instead`}
+              </button>
+            </div>
+            {overridingRecommendation && (
+              <p className="mt-1.5 text-[11px] text-ink-subtle">
+                Overriding the recommendation — {selectedOfficer ? officerDisplayName(selectedOfficer) : 'this officer'}{' '}
+                will be assigned instead of {officerDisplayName(recommendedOfficer)}.
+              </p>
+            )}
+          </div>
+        </>
+      )}
+      {/* Fallback: no recommendation available (e.g. no assignable officers) but
+          assignment is still possible — keep a basic officer picker. */}
+      {canAssign && row.status !== 'closed' && !recommendedOfficer && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <select
             value={selectedEmail}
@@ -705,6 +796,66 @@ function AssignmentPanel({
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+// The recommendation explanation panel — shows WHY the deterministic scorer
+// suggested this officer, broken down by its five named drivers. Transparent,
+// rules-based decision support; no ML, no black box. Staff still approve.
+function RecommendationExplanation({
+  officerName,
+  total,
+  caseWard,
+  category,
+  rationale,
+  drivers,
+}: {
+  officerName: string
+  total: number
+  caseWard: number
+  category: DemoCategory
+  rationale: string
+  drivers: RecommendationDriver[]
+}) {
+  return (
+    <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-teal-500" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-teal-800">
+            Recommended officer · decision support
+          </span>
+        </div>
+        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-inset ring-teal-200 tabular-nums">
+          Fit score {total}/100
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-ink">
+        <span className="font-semibold text-navy-900">{officerName}</span> — {rationale}
+      </p>
+      <p className="mt-1 text-[11px] text-ink-subtle">
+        Deterministic rules-based scoring for ward {caseWard} · {category}. Not AI, GAN, or agent-based modelling.
+      </p>
+      <dl className="mt-3 space-y-2">
+        {drivers.map((driver) => (
+          <div key={driver.key} className="grid grid-cols-[10rem_1fr] items-center gap-x-3 gap-y-0.5">
+            <dt className="text-xs font-medium text-ink-muted">{driver.label}</dt>
+            <dd className="flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-teal-100">
+                <div
+                  className="h-full rounded-full bg-teal-500"
+                  style={{ width: `${Math.max(0, Math.min(100, driver.score))}%` }}
+                />
+              </div>
+              <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-ink-subtle">
+                {Math.round(driver.score)}
+              </span>
+            </dd>
+            <dd className="col-start-2 text-[11px] text-ink-subtle">{driver.detail}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   )
 }
