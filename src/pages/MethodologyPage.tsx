@@ -3,14 +3,20 @@
 // each, no walls of text. Deeper technical notes live behind one collapsed
 // "View technical details" disclosure, never on the visible page.
 
-const heroBadges = ['Decision support', 'Human approval', 'Public 311 benchmark', 'Capacity planning']
+const heroBadges = [
+  'Decision support',
+  'Human approval',
+  'Public 311 benchmark',
+  'Graph pressure layer',
+  'Capacity planning',
+] as const
 
 // 2. What the POC helps avoid — the strongest section, value first.
 const avoidCards = [
   ['Backlog growth', 'Shows where demand can exceed available capacity.'],
   ['Stale cases', 'Surfaces where cases may sit too long without movement.'],
   ['Review bottlenecks', 'Highlights where supervisor review can become the second queue.'],
-  ['Delayed closure updates', 'Shows where closure communication pressure may build.'],
+  ['Delayed closure updates', 'Shows where closure communication pressure may build when field work or review capacity is constrained.'],
 ] as const
 
 // 3. Workflow snapshot — four steps, not seven.
@@ -23,15 +29,17 @@ const workflowCards = [
 
 // 4. Stress testing snapshot — four steps.
 const stressCards = [
-  ['Public benchmark patterns', 'Uses public 311 benchmark patterns for POC modelling.'],
+  ['Public benchmark patterns', 'Uses public 311 benchmark patterns for complaint mix, timing, district pressure, and closure patterns.'],
   ['Synthetic demand', 'Creates planning demand scenarios from benchmark patterns.'],
-  ['Capacity simulation', 'Runs demand through district queues, officer capacity, and supervisor review.'],
-  ['Prevention action', 'Shows where capacity can be shifted before backlog compounds.'],
+  ['Graph pressure layer', 'Models how operational pressure can spill across related districts and complaint types.'],
+  ['Queue based ABM', 'Runs adjusted demand through district queues, officer capacity, supervisor review, and closure pressure.'],
+  ['Prevention action', 'Shows where field or review capacity can be shifted before backlog compounds.'],
 ] as const
 
 // 5. Methods used — small method tags only.
 const methodCards = [
   ['Synthetic demand', 'CTGAN', 'Creates synthetic workload patterns from the public benchmark.'],
+  ['Pressure relationships', 'Graph layer', 'Connects districts and complaint types so shocks can create operational pressure spillover.'],
   ['Operations simulation', 'ABM', 'Runs demand through queues, staff capacity, review, and closure pressure.'],
 ] as const
 
@@ -41,8 +49,10 @@ const outputs = [
   'Stale case risk',
   'District pressure',
   'Complaint type pressure',
+  'Pressure spillover',
   'Supervisor review pressure',
   'Staff capacity need',
+  'Prevention action',
 ] as const
 
 export default function MethodologyPage() {
@@ -51,12 +61,12 @@ export default function MethodologyPage() {
       {/* 1. Hero */}
       <header className="max-w-3xl">
         <div className="section-eyebrow">Methodology</div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-navy-900 sm:text-4xl">
-          How the enforcement intelligence POC works
+        <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight text-navy-900 sm:text-4xl">
+          How the POC works
         </h1>
         <p className="mt-4 text-base leading-relaxed text-ink-muted sm:text-lg">
-          A human reviewed workflow that helps staff triage complaints, understand workload pressure, and prepare
-          consistent closure support.
+          A human reviewed workflow that combines synthetic 311 demand, pressure relationships, and queue simulation so
+          staff can see where workload pressure may build before backlog grows.
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           {heroBadges.map((tag) => (
@@ -86,7 +96,7 @@ export default function MethodologyPage() {
         </Section>
 
         {/* 4. Stress testing snapshot */}
-        <Section title="How stress testing works" lead="Demand pressure modelled before it reaches residents and staff.">
+        <Section title="How stress testing works" lead="Scenario pressure modelled before it becomes backlog, stale cases, or delayed closure updates.">
           <FlowCards items={stressCards} />
           <p className="mt-4 text-xs leading-relaxed text-ink-subtle">
             Uses public 311 benchmark patterns. Not live Brampton operational data. Not enforcement decisioning.
@@ -126,8 +136,8 @@ export default function MethodologyPage() {
 
         {/* 7. Governance strip */}
         <div className="rounded-2xl bg-navy-900 px-6 py-5 text-sm font-medium leading-relaxed text-navy-50">
-          Decision support only. Public 311 benchmark. Not live Brampton data. Staff approve actions. No automated
-          enforcement.
+          Decision support only. Public 311 benchmark. Synthetic demand. Not live Brampton data. Staff approve actions.
+          No automated enforcement.
         </div>
 
         {/* Optional deeper detail — collapsed by default, intentionally short. */}
@@ -149,15 +159,19 @@ export default function MethodologyPage() {
           </summary>
           <div className="mt-3 space-y-2 text-sm leading-relaxed text-ink-muted">
             <p>
-              The synthetic demand generator (CTGAN) learns patterns in the public 311 benchmark — complaint mix,
-              district pressure, timing, and closure patterns — and produces synthetic demand scenarios that are
-              statistically similar to real demand but never claim to be real Brampton records.
+              The synthetic demand generator (CTGAN) learns patterns in the public 311 benchmark, including complaint
+              mix, district pressure, timing, and closure patterns. It produces synthetic planning demand that is
+              statistically similar to benchmark demand but never claims to be real Brampton records.
             </p>
             <p>
-              The operations simulation (ABM) runs that demand through district queues, officer capacity, and supervisor
-              review using clear, visible rules, so staff can see why capacity constrained queue pressure builds. The
-              Stress Testing tab reports a current baseline, a projected trajectory, the worst case red zones, and the
-              recommended prevention actions.
+              The graph pressure layer connects districts and complaint types using benchmark relationships. A scenario
+              shock can start in selected districts or complaint types, then create operational pressure spillover before
+              the demand enters the queue simulation.
+            </p>
+            <p>
+              The queue based operations simulation (ABM) runs that adjusted demand through district queues, officer
+              capacity, supervisor review, and closure pressure using clear, visible rules. This helps staff see why
+              capacity constrained queue pressure builds and where prevention actions may help.
             </p>
             <p className="text-xs text-ink-subtle">
               Planning simulation and decision support only. Staff remain responsible for review and action.
