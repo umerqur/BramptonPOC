@@ -1185,9 +1185,10 @@ const ctDate = (v: unknown): string => formatPlainDate(v == null ? null : String
 // Required, fixed POC labelling reused across the stress-testing visuals.
 const POC_BENCHMARK_NOTE = 'Public 311 benchmark data for POC modelling. Not live Brampton operational data.'
 
-// The ABM views emit "Council District N". We have no real Brampton ward geometry,
-// so districts are presented as SYNTHETIC stand-ins throughout the stress lab.
-const synthDistrict = (s: string): string => s.replace(/council district/i, 'Synthetic District')
+// The ABM views emit "Council District N" — real benchmark council-district
+// geography (a POC stand-in for Brampton wards). Only the scenario VALUES are
+// generated, so the districts are presented as council districts, never synthetic.
+const councilDistrict = (s: string): string => s.replace(/council district/i, 'Council District')
 const districtNumber = (s: string): string => s.match(/(\d+)\s*$/)?.[1] ?? s
 const sharePctText = (share: number): string => (share > 0 ? `${(share * 100).toFixed(1)}%` : '—')
 
@@ -1460,7 +1461,7 @@ function SimulationLab() {
       <div className="grid gap-6 lg:grid-cols-2">
         <CtganSection
           title="District pressure"
-          subtitle="Synthetic districts by simulated case load — the 3D map above is the primary view."
+          subtitle="Council districts by simulated case load — the 3D map above is the primary view."
         >
           {showPending ? (
             <CtganPendingNote />
@@ -1555,12 +1556,12 @@ function SimulationLab() {
                   Demand is distributed across{' '}
                   <span className="font-semibold text-navy-900">{fmtInt(districtCount)} district queues</span>. The
                   highest load in this run is{' '}
-                  <span className="font-semibold text-navy-900">{synthDistrict(topDistricts[0].district_or_area)}</span>{' '}
+                  <span className="font-semibold text-navy-900">{councilDistrict(topDistricts[0].district_or_area)}</span>{' '}
                   with <span className="font-semibold text-navy-900">{fmtInt(topDistricts[0].total_cases)}</span> simulated
                   cases
                   {topDistricts.length > 1 && (
                     <>
-                      , followed by {topDistricts.slice(1).map((d) => synthDistrict(d.district_or_area)).join(' and ')}
+                      , followed by {topDistricts.slice(1).map((d) => councilDistrict(d.district_or_area)).join(' and ')}
                     </>
                   )}
                   .
@@ -1956,7 +1957,7 @@ function SimComplaintDonut({ rows }: { rows: CtganComplaintTypePressureRow[] }) 
   )
 }
 
-// District pressure as a compact tile grid (one tile per synthetic district,
+// District pressure as a compact tile grid (one tile per council district,
 // shaded by case load). The 3D pressure map above is the primary district visual;
 // this is the scannable at-a-glance grid. The full ranked table is tucked behind
 // "View district details" so a long bar list is never the main view.
@@ -1972,7 +1973,7 @@ function SimDistrictTiles({ rows }: { rows: CtganDistrictPressureRow[] }) {
           return (
             <div
               key={r.district_or_area}
-              title={`${synthDistrict(r.district_or_area)}\nCases: ${fmtInt(r.total_cases)}\nBacklog: ${fmtInt(
+              title={`${councilDistrict(r.district_or_area)}\nCases: ${fmtInt(r.total_cases)}\nBacklog: ${fmtInt(
                 r.backlog,
               )}\nStale: ${fmtInt(r.stale_cases)}`}
               className="flex aspect-square flex-col items-center justify-center rounded-md px-1 text-center"
@@ -1996,9 +1997,9 @@ function SimDistrictTiles({ rows }: { rows: CtganDistrictPressureRow[] }) {
       </div>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
-          Case load by synthetic district
+          Scenario case load by council district
         </span>
-        <span className="text-[10px] text-ink-subtle">Low to high</span>
+        <span className="text-[10px] text-ink-subtle">Low to high across council districts</span>
       </div>
 
       <details className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-2.5">
@@ -2009,7 +2010,7 @@ function SimDistrictTiles({ rows }: { rows: CtganDistrictPressureRow[] }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
-                <th className="py-2 pr-3 font-semibold">Synthetic district</th>
+                <th className="py-2 pr-3 font-semibold">Council district</th>
                 <th className="py-2 pr-3 text-right font-semibold">Cases</th>
                 <th className="py-2 pr-3 text-right font-semibold">Share</th>
                 <th className="py-2 pr-3 text-right font-semibold">Backlog</th>
@@ -2019,7 +2020,7 @@ function SimDistrictTiles({ rows }: { rows: CtganDistrictPressureRow[] }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.district_or_area} className="border-b border-slate-100 last:border-0">
-                  <td className="py-1.5 pr-3 text-navy-900">{synthDistrict(r.district_or_area)}</td>
+                  <td className="py-1.5 pr-3 text-navy-900">{councilDistrict(r.district_or_area)}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.total_cases)}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{sharePctText(r.share_of_cases)}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{fmtInt(r.backlog)}</td>

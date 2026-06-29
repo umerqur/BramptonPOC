@@ -18,7 +18,7 @@ import { getResidentRequests } from '../services/residentRequests'
 
 // A top-nav entry. `match` decides the active state from the current location so
 // query-param routes (Stress Testing → /app/insights?tab=simulations) highlight
-// distinctly from Intelligence Command (/app/insights). `showBadge` marks the
+// distinctly from Insights (/app/insights). `showBadge` marks the
 // single Priority entry that carries the live active-item count badge.
 type NavItem = {
   to: string
@@ -36,7 +36,7 @@ const SUPERVISOR_NAV: NavItem[] = [
   { to: '/app', label: 'Priority', icon: <PriorityIcon />, match: (p) => p === '/app', showBadge: true },
   {
     to: '/app/insights',
-    label: 'Intelligence Command',
+    label: 'Insights',
     icon: <IntelligenceIcon />,
     match: (p, s) => p === '/app/insights' && tabParam(s) !== 'simulations',
   },
@@ -365,7 +365,7 @@ function PriorityIcon({ className = 'h-4 w-4' }: { className?: string }) {
   )
 }
 
-/** Intelligence Command — an analytics / chart-grid mark. */
+/** Insights — an analytics / chart-grid mark. */
 function IntelligenceIcon({ className = 'h-4 w-4' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
