@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { can, officerProfiles, officerDisplayName, type StaffProfile } from '../../lib/roles'
@@ -11,12 +11,15 @@ import {
   assignResidentRequestToOfficer,
   getResidentRequests,
   getResidentRequestAttachmentsForCases,
+  markSupervisorSeen,
   type ResidentRequestAttachment,
   type ResidentRequestRow,
 } from '../../services/residentRequests'
 import {
   mapResidentToWorkRow,
   sortByReviewPriority,
+  sortReadyForClosure,
+  sortAllActiveWork,
   isActiveResident,
   needsOfficerAssignment,
   REVIEW_PRIORITY_EXPLAINER,
@@ -26,24 +29,31 @@ import {
 } from '../../services/workQueue'
 import { QueueCard, DecisionStrip, Pill, FitPill } from '../../components/app/QueueCard'
 
-// Priority Queue — the active review surface staff land on first. Live resident
-// service requests (public.resident_service_requests) that need staff action,
-// grouped by where they sit in the workflow:
-//   New      → intakes that still need an officer assignment
-//   Active   → assigned / in progress
-//   Closure  → field outcome recorded, ready for supervisor closure approval
+// Priority Queue — the supervisor's review surface. The supervisor's main job is
+// closure approval, so the queue LEADS with "Ready to close" and lands there by
+// default. Live resident service requests (public.resident_service_requests)
+// that need staff action, grouped by where they sit in the workflow:
+//   Ready to close → field outcome recorded, waiting for closure approval
+//   Needs review   → intakes that still need an officer assignment
+//   In progress    → assigned / under review
+//   All            → every active case, closure work surfaced on top
 //
-// Closed historical cases and NYC open benchmark cases live in Intelligence
-// Command (Case Explorer / Open Cases), not here. Review priority is
-// deterministic decision support — the detail sits behind "How priority works".
+// "New" and "Active" were renamed because both sounded like open work. Closed
+// historical cases and NYC open benchmark cases live in Intelligence Command
+// (Case Explorer / Open Cases), not here. Review priority is deterministic
+// decision support — the detail sits behind "How priority works".
 
-type WorkTab = 'new' | 'active' | 'closure'
+type WorkTab = 'closure' | 'new' | 'active' | 'all'
 
 const WORK_TAB_LABELS: Record<WorkTab, string> = {
-  new: 'New',
-  active: 'Active',
-  closure: 'Closure',
+  closure: 'Ready to close',
+  new: 'Needs review',
+  active: 'In progress',
+  all: 'All',
 }
+
+// Leftmost / default tab is closure approval — the supervisor's primary job.
+const TAB_ORDER: WorkTab[] = ['closure', 'new', 'active', 'all']
 
 const STATUS_STYLES: Record<string, string> = {
   submitted: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
@@ -76,7 +86,8 @@ export default function AppStaffInboxPage() {
 
   const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
   const [attachmentsByCase, setAttachmentsByCase] = useState<Record<string, ResidentRequestAttachment[]>>({})
-  const [tab, setTab] = useState<WorkTab>('new')
+  // Supervisor lands on "Ready to close" by default — closure approval is the job.
+  const [tab, setTab] = useState<WorkTab>('closure')
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const canAssign = can(role, 'assignOfficer')
 
@@ -110,7 +121,7 @@ export default function AppStaffInboxPage() {
   // Active resident requests only — closed cases belong in Case Explorer.
   const residentActive = useMemo(() => resident.rows.filter(isActiveResident), [resident.rows])
 
-  // New = intakes that still need an officer assignment.
+  // Needs review = intakes that still need an officer assignment.
   const residentNeedsAssignment = useMemo(
     () => residentActive.filter(needsOfficerAssignment),
     [residentActive],
@@ -121,46 +132,48 @@ export default function AppStaffInboxPage() {
     [residentActive, attachmentsByCase],
   )
 
-  // Active = assigned / in progress. Closure = ready for closure review.
+  // In progress = assigned / under review. Ready to close = field outcome
+  // recorded, waiting on closure approval — sorted so unseen and highest-priority
+  // closures surface first. All = every active case, closure work on top.
   const assignedInProgress = useMemo(
     () => sortByReviewPriority(residentWorkRows.filter((r) => r.in_progress)),
     [residentWorkRows],
   )
   const readyForClosure = useMemo(
-    () => sortByReviewPriority(residentWorkRows.filter((r) => r.ready_for_closure)),
+    () => sortReadyForClosure(residentWorkRows.filter((r) => r.ready_for_closure)),
     [residentWorkRows],
+  )
+  const allWork = useMemo(() => sortAllActiveWork(residentWorkRows), [residentWorkRows])
+
+  // Ready-to-close cases a supervisor has not opened yet — drives the urgent badge.
+  const unseenClosureCount = useMemo(
+    () => readyForClosure.filter((r) => r.unseen_by_supervisor).length,
+    [readyForClosure],
   )
 
   const counts: Record<WorkTab, number> = useMemo(
     () => ({
+      closure: readyForClosure.length,
       new: residentNeedsAssignment.length,
       active: assignedInProgress.length,
-      closure: readyForClosure.length,
+      all: allWork.length,
     }),
-    [residentNeedsAssignment.length, assignedInProgress.length, readyForClosure.length],
+    [readyForClosure.length, residentNeedsAssignment.length, assignedInProgress.length, allWork.length],
   )
-
-  const TAB_ORDER: WorkTab[] = ['new', 'active', 'closure']
-
-  // Once loaded, land on the first tab that has items. Runs once; never overrides
-  // a manual tab choice.
-  const didInitTab = useRef(false)
-  useEffect(() => {
-    if (didInitTab.current) return
-    if (resident.loading) return
-    didInitTab.current = true
-    const firstWithItems = TAB_ORDER.find((t) => counts[t] > 0)
-    if (firstWithItems) setTab(firstWithItems)
-    // TAB_ORDER is a stable module-level constant.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resident.loading, counts])
 
   function openResidentCase(row: ResidentRequestRow) {
     ingestResidentCase(row)
     navigate(`/app/workbench?case=${encodeURIComponent(row.case_id)}`)
   }
 
+  // Opening a ready-to-close case for closure review counts as the supervisor
+  // "seeing" it — persist that (server-side) so the alert stops, then navigate.
   function openClosureReview(row: ResidentRequestRow) {
+    if (!row.supervisor_seen_at) {
+      void markSupervisorSeen(row.case_id).catch((err: unknown) =>
+        console.error('Failed to mark closure case as seen:', err),
+      )
+    }
     ingestResidentCase(row)
     navigate(`/app/closure?case=${encodeURIComponent(row.case_id)}`)
   }
@@ -206,9 +219,21 @@ export default function AppStaffInboxPage() {
         </button>
       </div>
 
-      <div role="tablist" aria-label="Priority queue filters" className="mt-6 flex gap-8 border-b border-slate-200">
+      <div
+        role="tablist"
+        aria-label="Priority queue filters"
+        className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 sm:gap-8"
+      >
         {TAB_ORDER.map((t) => (
-          <TabButton key={t} label={WORK_TAB_LABELS[t]} count={counts[t]} active={tab === t} onClick={() => setTab(t)} />
+          <TabButton
+            key={t}
+            label={WORK_TAB_LABELS[t]}
+            count={counts[t]}
+            // A red, pulsing alert badge on "Ready to close" for unseen closures.
+            alertCount={t === 'closure' ? unseenClosureCount : 0}
+            active={tab === t}
+            onClick={() => setTab(t)}
+          />
         ))}
       </div>
 
@@ -226,11 +251,15 @@ export default function AppStaffInboxPage() {
           />
         ) : (
           <NormalizedListView
-            rows={tab === 'active' ? assignedInProgress : readyForClosure}
+            rows={tab === 'active' ? assignedInProgress : tab === 'all' ? allWork : readyForClosure}
             loading={loading}
             residentError={resident.error}
             emptyLabel={
-              tab === 'active' ? 'No active cases right now.' : 'No cases awaiting closure approval right now.'
+              tab === 'active'
+                ? 'No cases in progress right now.'
+                : tab === 'all'
+                  ? 'No active cases right now.'
+                  : 'No cases ready to close right now.'
             }
             onOpen={openWorkRow}
             onReviewClosure={(row) => row.resident && openClosureReview(row.resident)}
@@ -338,6 +367,7 @@ function WorkRowCard({
   const state = workRowState(row)
   const showPriority = row.priority_tier === 'High' || row.priority_tier === 'Medium'
   const isClosure = row.ready_for_closure
+  const isUnseen = row.unseen_by_supervisor
   const decisionTone = isClosure ? 'emerald' : 'amber'
   const decisionText = isClosure
     ? 'Field outcome recorded · Ready for closure approval'
@@ -351,6 +381,17 @@ function WorkRowCard({
         <>
           <Pill className={state.style}>{state.label}</Pill>
           {showPriority && <Pill className={TIER_STYLES[row.priority_tier]}>{row.priority_tier} priority</Pill>}
+          {/* Unseen-by-supervisor alert — a small red pulsing badge, not a big
+              animation. Stops once the supervisor opens / reviews the case. */}
+          {isUnseen && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-200">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-600" />
+              </span>
+              New closure review
+            </span>
+          )}
         </>
       }
       title={row.complaint_type || 'Service request'}
@@ -426,11 +467,14 @@ function SourceWarning({ label, error }: { label: string; error: string }) {
 function TabButton({
   label,
   count,
+  alertCount = 0,
   active,
   onClick,
 }: {
   label: string
   count: number | null
+  /** Unseen / urgent items — shown as a small red pulsing badge after the count. */
+  alertCount?: number
   active: boolean
   onClick: () => void
 }) {
@@ -448,6 +492,18 @@ function TabButton({
     >
       {label}
       {count != null && <span className="ml-1 text-xs font-semibold text-teal-700">{count}</span>}
+      {alertCount > 0 && (
+        <span
+          className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-rose-600 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white"
+          title={`${alertCount} new closure review${alertCount === 1 ? '' : 's'} unseen by a supervisor`}
+        >
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+          </span>
+          {alertCount} new
+        </span>
+      )}
     </button>
   )
 }

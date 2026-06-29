@@ -96,6 +96,11 @@ export type WorkQueueRow = {
   workflow_stage: string | null
   /** Field outcome recorded, awaiting supervisor closure review (resident flow). */
   ready_for_closure: boolean
+  /**
+   * Ready for closure but no supervisor has opened / reviewed it yet (resident
+   * flow). Drives the "new closure review" alert and the unseen-first ordering.
+   */
+  unseen_by_supervisor: boolean
   /** Actively being worked: assigned or under review (resident flow). */
   in_progress: boolean
   // Back-references so the page can open the right detail/action per source.
@@ -280,6 +285,8 @@ export function mapResidentToWorkRow(row: ResidentRequestRow, attachmentCount = 
 
   const age = ageDays(row.created_at) ?? 0
   const readyForClosure = row.field_visit_completed && row.status !== 'closed'
+  // Ready to close but a supervisor has not opened / reviewed it yet.
+  const unseenBySupervisor = readyForClosure && !row.supervisor_seen_at
   // Once the officer has recorded a field outcome the case LEAVES "Assigned / in
   // progress" and belongs only in "Ready for closure review" — otherwise it would
   // count in both tabs and never look like it advanced.
@@ -311,6 +318,7 @@ export function mapResidentToWorkRow(row: ResidentRequestRow, attachmentCount = 
     assigned_to: row.assigned_officer_name,
     workflow_stage: STATUS_LABELS[row.status] ?? row.status,
     ready_for_closure: readyForClosure,
+    unseen_by_supervisor: unseenBySupervisor,
     in_progress: inProgress,
     resident: row,
   }
@@ -344,6 +352,7 @@ export function mapOpenToWorkRow(row: OpenReviewRow): WorkQueueRow {
     assigned_to: null,
     workflow_stage: 'Open · awaiting review',
     ready_for_closure: false,
+    unseen_by_supervisor: false,
     in_progress: false,
     open: row,
   }
@@ -372,4 +381,42 @@ export function sortByReviewPriority(rows: WorkQueueRow[]): WorkQueueRow[] {
     const tb = b.submitted_at ? new Date(b.submitted_at).getTime() : 0
     return tb - ta
   })
+}
+
+/** Rank used to order ready-to-close cards (lower rank = surfaced higher). */
+const TIER_RANK: Record<ReviewPriorityTier, number> = { High: 0, Medium: 1, Low: 2, Unscored: 3 }
+
+/**
+ * Sort the "Ready to close" queue so the supervisor's most important closure
+ * approvals surface first, in this card-priority order:
+ *   1. Unseen ready-to-close (not yet opened by a supervisor)
+ *   2. High-priority ready-to-close
+ *   3. Oldest ready-to-close
+ *   4. Other ready-to-close
+ * Decision support for review order only — staff approve every closure.
+ */
+export function sortReadyForClosure(rows: WorkQueueRow[]): WorkQueueRow[] {
+  return [...rows].sort((a, b) => {
+    // 1. Unseen first.
+    if (a.unseen_by_supervisor !== b.unseen_by_supervisor) return a.unseen_by_supervisor ? -1 : 1
+    // 2. Higher review-priority tier next.
+    const ra = TIER_RANK[a.priority_tier]
+    const rb = TIER_RANK[b.priority_tier]
+    if (ra !== rb) return ra - rb
+    // 3. Oldest first (longest-waiting closure surfaces above newer ones).
+    const ta = a.submitted_at ? new Date(a.submitted_at).getTime() : Infinity
+    const tb = b.submitted_at ? new Date(b.submitted_at).getTime() : Infinity
+    return ta - tb
+  })
+}
+
+/**
+ * Sort the combined "All" active-work view so cases ready for closure are always
+ * surfaced above normal active work (intake / in-progress), each group sorted by
+ * its own priority rules.
+ */
+export function sortAllActiveWork(rows: WorkQueueRow[]): WorkQueueRow[] {
+  const closure = sortReadyForClosure(rows.filter((r) => r.ready_for_closure))
+  const rest = sortByReviewPriority(rows.filter((r) => !r.ready_for_closure))
+  return [...closure, ...rest]
 }
