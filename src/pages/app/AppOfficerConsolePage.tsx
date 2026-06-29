@@ -8,6 +8,7 @@ import {
   type ResidentRequestRow,
 } from '../../services/residentRequests'
 import type { DemoCase } from '../../data/demoWorkflowTypes'
+import { QueueCard, DecisionStrip, Pill } from '../../components/app/QueueCard'
 
 // Officer Field Console — the By-law Officer's only landing surface. It shows
 // ONLY cases assigned to the SIGNED-IN officer's email (never the citywide Work
@@ -194,39 +195,35 @@ export default function AppOfficerConsolePage() {
 }
 
 function OfficerCaseCard({ item }: { item: OfficerItem }) {
+  const recorded = item.fieldVisitCompleted
   return (
-    <Link
-      to={`/app/field/${encodeURIComponent(item.caseId)}`}
-      className="card block p-5 transition hover:border-accent-300 hover:shadow-sm"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-navy-900">{item.caseId}</span>
-            <span className="badge bg-slate-100 text-slate-700">{item.statusLabel}</span>
-            <span className="badge bg-slate-100 text-slate-700">{item.complaintType}</span>
-            {item.source === 'nyc_open' && (
-              <span className="badge bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200">NYC open benchmark</span>
-            )}
-            {item.followUpRequired && (
-              <span className="badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200">Follow-up</span>
-            )}
-            {item.fieldVisitCompleted && (
-              <span className="badge bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200">
-                Field outcome recorded
-              </span>
-            )}
-          </div>
-          <div className="mt-1 text-sm text-ink-muted">{item.location || 'Location not provided'}</div>
-        </div>
-        <span className="shrink-0 text-xs text-ink-subtle tabular-nums">
-          Assigned {item.assignedAt ? formatDateTime(item.assignedAt) : '—'}
-        </span>
-      </div>
-      <div className="mt-3 text-sm font-semibold text-accent-600">
-        {item.fieldVisitCompleted ? 'View field outcome →' : 'Open case & record field outcome →'}
-      </div>
-    </Link>
+    <QueueCard
+      caseId={item.caseId}
+      pills={
+        <>
+          <Pill className="bg-slate-100 text-slate-700">{item.statusLabel}</Pill>
+          {item.source === 'nyc_open' && (
+            <Pill className="bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200">NYC open benchmark</Pill>
+          )}
+          {item.followUpRequired && (
+            <Pill className="bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200">Follow-up</Pill>
+          )}
+        </>
+      }
+      date={`Assigned ${item.assignedAt ? formatDateTime(item.assignedAt) : '—'}`}
+      title={item.complaintType}
+      subtitle={item.location || 'Location not provided'}
+      decision={
+        <DecisionStrip tone={recorded ? 'emerald' : 'neutral'}>
+          Assigned to you · {recorded ? 'Field outcome recorded' : 'Field outcome needed'}
+        </DecisionStrip>
+      }
+      actions={
+        <Link to={`/app/field/${encodeURIComponent(item.caseId)}`} className="btn-primary text-sm py-1.5 px-3">
+          {recorded ? 'View field outcome' : 'Open case & record field outcome'}
+        </Link>
+      }
+    />
   )
 }
 
