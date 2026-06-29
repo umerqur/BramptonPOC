@@ -395,8 +395,10 @@ function NYCWorkloadHeatMap({
     <section aria-label="NYC 311 workload map" className="mt-6 card overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-sm font-semibold text-navy-900">Service request workload map</div>
-          <div className="text-xs text-ink-subtle">{adapter.helper}</div>
+          <div className="text-sm font-semibold text-navy-900">3D benchmark heat map</div>
+          <div className="text-xs text-ink-subtle">
+            Shows public 311 benchmark complaint volume by council district. Not live Brampton operational data.
+          </div>
         </div>
         <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-sky-800 sm:self-auto">
           <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
