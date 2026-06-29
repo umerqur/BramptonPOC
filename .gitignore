@@ -43,3 +43,7 @@ reports/modeling/**/_*_log.txt
 outputs/
 data/ctgan_abm/*.csv
 data/processed/ctgan_abm_outputs/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
