@@ -1,72 +1,104 @@
-// Public methodology page — a short executive overview of the POC. It is built
-// to be read in about 60 seconds: strong headings, compact cards, one sentence
-// each, no walls of text. Deeper technical notes live behind one collapsed
+// Public methodology page — a short, business-readable overview of the POC.
+// It is built to be read in about 60 seconds and is organized around four plain
+// questions: what problem we solve, what the POC does, where AI is used, and
+// what the guardrails are. Deeper technical notes live behind one collapsed
 // "View technical details" disclosure, never on the visible page.
 
 const heroBadges = [
   'Decision support',
   'Human approval',
   'Public 311 benchmark',
-  'Graph pressure layer',
+  'Operational pressure map',
   'Capacity planning',
 ] as const
 
-// 2. What the POC helps avoid — the strongest section, value first.
-const avoidCards = [
-  ['Backlog growth', 'Shows where demand can exceed available capacity.'],
-  ['Stale cases', 'Surfaces where cases may sit too long without movement.'],
-  ['Review bottlenecks', 'Highlights where supervisor review can become the second queue.'],
-  ['Delayed closure updates', 'Shows where closure communication pressure may build when field work or review capacity is constrained.'],
+// 1. The problem — the operational pressures staff need to see early.
+const problemCards = [
+  ['Backlog growth', 'Complaints can pile up faster than available capacity can clear them.'],
+  ['Stale cases', 'Cases can sit too long without movement and quietly age.'],
+  ['Uneven officer workload', 'Demand can fall unevenly across officers and districts.'],
+  ['Review bottlenecks', 'Supervisor review can become the second queue.'],
+  ['Delayed closure updates', 'Residents can wait longer for a closure update when capacity is constrained.'],
 ] as const
 
-// 3. Workflow snapshot — four steps, not seven.
+// 2. What the POC does — a complaint becomes a structured workflow.
 const workflowCards = [
-  ['Resident intake', 'Structured complaint enters the staff workflow.'],
+  ['Resident intake', 'A structured complaint enters the staff workflow.'],
   ['Staff triage', 'Staff review priority, routing, and recommended next action.'],
-  ['Field follow up', 'Officer records the field outcome when needed.'],
-  ['Supervisor approved closure', 'Supervisor reviews and approves the final response.'],
+  ['Recommended routing', 'A recommended officer or routing option is surfaced for staff to confirm or override.'],
+  ['Field follow up', 'The assigned officer records the field outcome when needed.'],
+  ['Supervisor approved closure', 'A supervisor reviews and approves the final response before it is sent.'],
 ] as const
 
-// 4. Stress testing snapshot — four steps.
+// 3. Where AI is used — compact cards, one capability each. The officer guidance
+// assistant is implemented (Netlify function backed by Groq LPU inference), so it
+// is described as a current capability with staff judgment required.
+const aiCards = [
+  [
+    'Structured intake support',
+    'Extracts complaint details and creates consistent staff review context.',
+  ],
+  [
+    'Officer recommendation support',
+    'Suggests a recommended officer or routing option based on workload, case type, district, and availability assumptions. Staff can override.',
+  ],
+  [
+    'Officer guidance assistant',
+    'Lets bylaw officers ask case and workflow guidance questions in plain language, with staff judgment required. Backed by Groq LPU inference.',
+  ],
+  [
+    'Closure support',
+    'Drafts consistent closure language for supervisor review before anything is sent.',
+  ],
+  [
+    'Stress testing',
+    'Uses synthetic demand and ABM simulation to show backlog, stale case, district pressure, supervisor pressure, and prevention actions.',
+  ],
+] as const
+
+// 4. How stress testing works — synthetic demand, scenario shocks, queue ABM.
 const stressCards = [
-  ['Public benchmark patterns', 'Uses public 311 benchmark patterns for complaint mix, timing, district pressure, and closure patterns.'],
-  ['Synthetic demand', 'Creates planning demand scenarios from benchmark patterns.'],
-  ['Graph pressure layer', 'Models how operational pressure can spill across related districts and complaint types.'],
-  ['Queue based ABM', 'Runs adjusted demand through district queues, officer capacity, supervisor review, and closure pressure.'],
-  ['Prevention action', 'Shows where field or review capacity can be shifted before backlog compounds.'],
+  ['Synthetic 311 demand', 'Creates planning scenarios from a public 311 benchmark.'],
+  ['Scenario shock testing', 'Shows what happens when demand rises or capacity drops.'],
+  ['Queue based ABM', 'Runs demand through district queues, officer capacity, supervisor review, and closure pressure.'],
+  ['Stress Testing tab', 'Shows backlog risk, stale case risk, red zones, and prevention actions.'],
 ] as const
 
-// 5. Methods used — small method tags only.
-const methodCards = [
-  ['Synthetic demand', 'CTGAN', 'Creates synthetic workload patterns from the public benchmark.'],
-  ['Pressure relationships', 'Graph layer', 'Connects districts and complaint types so shocks can create operational pressure spillover.'],
-  ['Operations simulation', 'ABM', 'Runs demand through queues, staff capacity, review, and closure pressure.'],
-] as const
-
-// 6. Outputs — compact pills.
+// 5. What it produces — compact output pills.
 const outputs = [
   'Backlog risk',
   'Stale case risk',
   'District pressure',
   'Complaint type pressure',
-  'Pressure spillover',
   'Supervisor review pressure',
   'Staff capacity need',
+  'Operational pressure map',
   'Prevention action',
+] as const
+
+// 6. Governance and limits — the guardrails, stated plainly.
+const guardrails = [
+  'Decision support only',
+  'Public 311 benchmark',
+  'Synthetic demand',
+  'Not live Brampton operational data',
+  'Not enforcement decisioning',
+  'Staff approve actions',
+  'No automated enforcement',
 ] as const
 
 export default function MethodologyPage() {
   return (
     <div className="container-page py-12 sm:py-16">
-      {/* 1. Hero */}
+      {/* Hero */}
       <header className="max-w-3xl">
         <div className="section-eyebrow">Methodology</div>
         <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight text-navy-900 sm:text-4xl">
-          How the POC works
+          How the proactive enforcement POC works
         </h1>
         <p className="mt-4 text-base leading-relaxed text-ink-muted sm:text-lg">
-          A human reviewed workflow that combines synthetic 311 demand, pressure relationships, and queue simulation so
-          staff can see where workload pressure may build before backlog grows.
+          A human reviewed workflow that helps Enforcement and By Law staff triage complaints, support field follow up,
+          approve closures, and stress test workload pressure before backlog grows.
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           {heroBadges.map((tag) => (
@@ -81,46 +113,47 @@ export default function MethodologyPage() {
       </header>
 
       <div className="mt-10 space-y-10 sm:mt-12 sm:space-y-12">
-        {/* 2. What the POC helps avoid */}
-        <Section title="What the POC helps you avoid" lead="See workload pressure before it turns into a problem.">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {avoidCards.map(([title, detail]) => (
+        {/* Section 1: The problem */}
+        <Section
+          title="The problem"
+          lead="Staff need a way to see operational pressure early and decide where to shift attention."
+        >
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {problemCards.map(([title, detail]) => (
               <Card key={title} title={title} detail={detail} tone="avoid" />
             ))}
           </div>
         </Section>
 
-        {/* 3. Workflow snapshot */}
-        <Section title="The workflow at a glance">
+        {/* Section 2: What the POC does */}
+        <Section
+          title="What the POC does"
+          lead="It turns a complaint into a structured workflow: triage, recommended routing, officer follow up, supervisor approved closure, and resident communication support."
+        >
           <FlowCards items={workflowCards} />
         </Section>
 
-        {/* 4. Stress testing snapshot */}
-        <Section title="How stress testing works" lead="Scenario pressure modelled before it becomes backlog, stale cases, or delayed closure updates.">
-          <FlowCards items={stressCards} />
-          <p className="mt-4 text-xs leading-relaxed text-ink-subtle">
-            Uses public 311 benchmark patterns. Not live Brampton operational data. Not enforcement decisioning.
-          </p>
-        </Section>
-
-        {/* 5. Methods used */}
-        <Section title="Methods used">
-          <div className="grid gap-4 sm:grid-cols-2">
-            {methodCards.map(([title, tag, detail]) => (
-              <div key={title} className="rounded-2xl border border-slate-200 bg-white p-5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
-                  <span className="rounded-md bg-accent-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-800">
-                    {tag}
-                  </span>
-                </div>
-                <p className="mt-2 text-sm leading-relaxed text-ink-muted">{detail}</p>
-              </div>
+        {/* Section 3: Where AI is used */}
+        <Section title="Where AI is used" lead="AI supports staff at each step. Staff stay in control of every decision.">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {aiCards.map(([title, detail]) => (
+              <Card key={title} title={title} detail={detail} />
             ))}
           </div>
         </Section>
 
-        {/* 6. Outputs */}
+        {/* Section 4: How stress testing works */}
+        <Section
+          title="How stress testing works"
+          lead="Synthetic demand and a queue based simulation show workload pressure before it becomes backlog, stale cases, or delayed closure updates."
+        >
+          <FlowCards items={stressCards} />
+          <p className="mt-4 text-xs leading-relaxed text-ink-subtle">
+            Uses a public 311 benchmark and synthetic demand. Not live Brampton operational data. Not enforcement decisioning.
+          </p>
+        </Section>
+
+        {/* Section 5: What it produces */}
         <Section title="What it produces">
           <div className="flex flex-wrap gap-2">
             {outputs.map((o) => (
@@ -132,13 +165,30 @@ export default function MethodologyPage() {
               </span>
             ))}
           </div>
+          <p className="mt-4 text-sm leading-relaxed text-ink-muted">
+            Results surface on an operational pressure map, including a 3D district pressure heat map, so staff can see
+            where pressure is building and where a prevention action may help.
+          </p>
         </Section>
 
-        {/* 7. Governance strip */}
-        <div className="rounded-2xl bg-navy-900 px-6 py-5 text-sm font-medium leading-relaxed text-navy-50">
-          Decision support only. Public 311 benchmark. Synthetic demand. Not live Brampton data. Staff approve actions.
-          No automated enforcement.
-        </div>
+        {/* Section 6: Governance and limits */}
+        <Section title="Governance and limits">
+          <div className="rounded-2xl bg-navy-900 px-6 py-5">
+            <div className="flex flex-wrap gap-2">
+              {guardrails.map((g) => (
+                <span
+                  key={g}
+                  className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-navy-50 ring-1 ring-inset ring-white/15"
+                >
+                  {g}
+                </span>
+              ))}
+            </div>
+            <p className="mt-4 text-sm font-medium leading-relaxed text-navy-50">
+              The POC is decision support. Staff remain responsible for review, action, and any enforcement decision.
+            </p>
+          </div>
+        </Section>
 
         {/* Optional deeper detail — collapsed by default, intentionally short. */}
         <details className="group rounded-2xl border border-slate-200 bg-white p-5">
@@ -164,14 +214,19 @@ export default function MethodologyPage() {
               statistically similar to benchmark demand but never claims to be real Brampton records.
             </p>
             <p>
-              The graph pressure layer connects districts and complaint types using benchmark relationships. A scenario
-              shock can start in selected districts or complaint types, then create operational pressure spillover before
-              the demand enters the queue simulation.
+              A scenario shock layer applies pressure scenarios to that demand — for example demand rising in selected
+              districts or complaint types, or capacity dropping — before it enters the simulation. This is a planning
+              scenario layer, not a prediction of real events.
             </p>
             <p>
-              The queue based operations simulation (ABM) runs that adjusted demand through district queues, officer
+              The queue based operations simulation (ABM) runs the adjusted demand through district queues, officer
               capacity, supervisor review, and closure pressure using clear, visible rules. This helps staff see why
               capacity constrained queue pressure builds and where prevention actions may help.
+            </p>
+            <p>
+              The officer guidance assistant is a server-side, case-scoped helper backed by Groq LPU inference. It is
+              grounded only in the current case context and workflow timeline, never writes to any record, and never
+              makes an enforcement decision.
             </p>
             <p className="text-xs text-ink-subtle">
               Planning simulation and decision support only. Staff remain responsible for review and action.
