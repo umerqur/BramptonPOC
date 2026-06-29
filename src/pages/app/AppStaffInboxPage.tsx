@@ -5,7 +5,7 @@ import { can, officerProfiles, officerDisplayName, type StaffProfile } from '../
 import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
 import { formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
-import { recommendOfficer, type RecommendationDriver } from '../../lib/officerRecommendation'
+import { recommendOfficer } from '../../lib/officerRecommendation'
 import {
   STATUS_LABELS,
   assignResidentRequestToOfficer,
@@ -24,8 +24,6 @@ import {
   type WorkQueueRow,
   type ReviewPriorityTier,
 } from '../../services/workQueue'
-import { sanitizeResidentDescription } from '../../lib/residentDescription'
-import ResidentAttachments from '../../components/app/ResidentAttachments'
 import { DecisionLogicDisclosure, decisionLogicFromWorkRow } from '../../components/app/DecisionLogicPanel'
 
 // Priority Queue — the active review surface staff land on first. Live resident
@@ -221,12 +219,10 @@ export default function AppStaffInboxPage() {
           <ResidentIntakesView
             state={resident}
             rows={residentNeedsAssignment}
-            attachmentsByCase={attachmentsByCase}
             canAssign={canAssign}
             assigningId={assigningId}
             onAssign={assignToOfficer}
             onOpen={openResidentCase}
-            onOpenClosureReview={openClosureReview}
           />
         ) : (
           <NormalizedListView
@@ -377,21 +373,17 @@ function WorkRowCard({
 function ResidentIntakesView({
   state,
   rows,
-  attachmentsByCase,
   canAssign,
   assigningId,
   onAssign,
   onOpen,
-  onOpenClosureReview,
 }: {
   state: ResidentState
   rows: ResidentRequestRow[]
-  attachmentsByCase: Record<string, ResidentRequestAttachment[]>
   canAssign: boolean
   assigningId: string | null
   onAssign: (row: ResidentRequestRow, officer: StaffProfile) => void
   onOpen: (row: ResidentRequestRow) => void
-  onOpenClosureReview: (row: ResidentRequestRow) => void
 }) {
   if (state.error) {
     return (
@@ -413,12 +405,10 @@ function ResidentIntakesView({
         <li key={row.case_id}>
           <InboxCard
             row={row}
-            attachments={attachmentsByCase[row.case_id] ?? []}
             canAssign={canAssign}
             assigning={assigningId === row.case_id}
             onAssign={(officer) => onAssign(row, officer)}
             onOpen={() => onOpen(row)}
-            onOpenClosureReview={() => onOpenClosureReview(row)}
           />
         </li>
       ))}
@@ -463,394 +453,149 @@ function TabButton({
   )
 }
 
+// A compact intake row for the Supervisor Priority Queue. Same visual density as
+// the By-law Officer Field Console / CSR queue: one white rectangle, case id and
+// pills on top, complaint type · location under it, the recommended officer + fit
+// score + one short reason on a single line, and small text-button actions. The
+// heavy decision-support detail (resident complaint, missing information, score
+// bars, full summary) lives in the case detail view behind "Open case".
+//
+// The assignment, recommended-officer, and fit-score LOGIC is unchanged — only
+// the presentation is simplified. The recommendation is decision support; staff
+// approve every assignment.
 function InboxCard({
   row,
-  attachments,
   canAssign,
   assigning,
   onAssign,
   onOpen,
-  onOpenClosureReview,
 }: {
   row: ResidentRequestRow
-  attachments: ResidentRequestAttachment[]
   canAssign: boolean
   assigning: boolean
   onAssign: (officer: StaffProfile) => void
   onOpen: () => void
-  onOpenClosureReview: () => void
 }) {
-  // Deterministic intake decision-support result for this submission. The intake
-  // pipeline is deterministic (rule based), not an agentic dispatcher: it only
-  // SUGGESTS a category, priority, routing recommendation, missing information,
-  // and closure readiness. A human coordinator/supervisor still approves the
-  // assignment below. Memoised so we don't re-run it on every render.
-  const triageCase = useMemo(() => residentRowToCase(row), [row])
-  const { triage, summary } = triageCase
+  // Deterministic, rules-based intake triage + officer recommendation. Same
+  // calculations as before — we just render a one-line summary instead of panels.
+  const triage = useMemo(() => residentRowToCase(row).triage, [row])
   const priority = triage.recommendedPriority
-  const missingInformation = triage.missingInformation
-  const residentComplaint = sanitizeResidentDescription(row.description)
+  const routing = triage.recommendedDepartment
+
+  const officers = useMemo(() => officerProfiles(), [])
+  const recommendation = useMemo(() => recommendOfficer(row, officers), [row, officers])
+  const recommendedOfficer = recommendation.recommended
+  const fitScore = recommendation.recommendedScore?.total ?? null
+  const reason = recommendation.rationale
+
+  // "Change officer" reveals a single compact picker — not a large nested panel.
+  const [changing, setChanging] = useState(false)
+  const [selectedEmail, setSelectedEmail] = useState(recommendedOfficer?.email ?? officers[0]?.email ?? '')
+  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? recommendedOfficer ?? null
+
+  const location = [row.location, row.city].filter(Boolean).join(', ') || 'Location not provided'
+  const meta = [row.request_type, location].filter(Boolean).join(' · ')
 
   return (
-    <div className="card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="card p-4">
+      {/* Top: case id + status + priority pills, with the submitted date. */}
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-navy-900">{row.case_id}</span>
-            <span className={`badge ${STATUS_STYLES[row.status]}`}>{STATUS_LABELS[row.status]}</span>
+            <span className={`badge ${STATUS_STYLES[row.status] ?? 'bg-slate-100 text-slate-700'}`}>
+              {STATUS_LABELS[row.status]}
+            </span>
+            <span className={`badge ${PRIORITY_STYLES[priority] ?? 'bg-slate-100 text-slate-700'}`}>
+              {priority} priority
+            </span>
           </div>
-          <div className="mt-1 text-sm text-ink-muted">
-            {row.request_type} · {[row.location, row.city].filter(Boolean).join(', ')}
-          </div>
+          <div className="mt-1 truncate text-sm text-ink-muted">{meta}</div>
         </div>
         <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDateTime(row.created_at)}</span>
       </div>
 
-      {/* Assignment — supervisor/coordinator assigns the case to a Bylaw Officer.
-          This is an explicit human assignment. The routing recommendation is
-          decision support only and never dispatches an officer on its own. */}
-      <AssignmentPanel
-        row={row}
-        canAssign={canAssign}
-        assigning={assigning}
-        onAssign={onAssign}
-        routingRecommendation={triage.recommendedDepartment}
-      />
-
-      {/* Officer has recorded a field outcome — ready for supervisor closure review. */}
-      {row.field_visit_completed && row.status !== 'closed' && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-emerald-800">
-                Ready for closure review
+      {/* One-line recommendation summary: routing + recommended officer + fit
+          score + one short reason. The full scoring detail is behind Open case. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-subtle">
+        <span>
+          Routing: <span className="text-ink-muted">{routing}</span>
+        </span>
+        {recommendedOfficer && (
+          <>
+            <span aria-hidden>·</span>
+            <span>
+              Recommended: <span className="font-medium text-navy-900">{officerDisplayName(recommendedOfficer)}</span>
+            </span>
+            {fitScore != null && (
+              <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-inset ring-teal-200 tabular-nums">
+                Fit {fitScore}/100
               </span>
-            </div>
-            <p className="mt-1 text-sm text-ink">
-              Field outcome recorded by {row.assigned_officer_name ?? 'the assigned officer'}.
-            </p>
-          </div>
-          <button onClick={onOpenClosureReview} className="btn-primary text-sm py-2 px-4">
-            Open closure review →
-          </button>
-        </div>
-      )}
-
-      {/* Resident's own words — shown before, and above, the generated triage. */}
-      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <div className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">Resident complaint</div>
-        {residentComplaint ? (
-          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink">{residentComplaint}</p>
-        ) : (
-          <p className="mt-2 text-sm italic text-ink-subtle">
-            No resident description was provided for this older demo record.
-          </p>
+            )}
+          </>
         )}
       </div>
-
-      {/* Resident-uploaded photos / documents (private; viewed via signed URL). */}
-      <ResidentAttachments caseId={row.case_id} attachments={attachments} variant="card" />
-
-      {/* Decision support summary — generated from intake details, below the
-          resident's complaint. Staff review required. */}
-      <div className="mt-4 rounded-lg border border-accent-200 bg-accent-50/50 p-4">
-        <div className="text-xs font-semibold uppercase tracking-wide text-accent-800">Decision support summary</div>
-        <p className="mt-2 text-sm leading-relaxed text-ink">{summary.plainLanguage}</p>
-
-        <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Detail label="Routing recommendation" value={triage.recommendedDepartment} />
-          <Detail label="Classification" value={triage.category} />
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-subtle">Priority</dt>
-            <dd className="mt-0.5">
-              <span className={`badge ${PRIORITY_STYLES[priority] ?? 'bg-slate-100 text-slate-700'}`}>{priority}</span>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-subtle">File readiness</dt>
-            <dd className="mt-0.5 text-ink">
-              {Math.round(triage.confidence * 100)}% · {triage.confidenceLevel}
-            </dd>
-          </div>
-        </dl>
-
-        <div className="mt-3">
-          <div className="text-xs uppercase tracking-wide text-ink-subtle">Missing information</div>
-          {missingInformation.length > 0 ? (
-            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink">
-              {missingInformation.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-0.5 text-sm text-ink">No missing intake information identified.</p>
-          )}
-        </div>
-
-        <div className="mt-3">
-          <div className="text-xs uppercase tracking-wide text-ink-subtle">Recommended next action</div>
-          <p className="mt-0.5 text-sm text-navy-900">{summary.recommendedNextStep}</p>
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center justify-end">
-        <button onClick={onOpen} className="btn-primary text-sm py-2 px-4">
-          {row.status === 'closed' ? 'View closed case →' : 'Open case →'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// Supervisor/coordinator assignment panel. A prominent block (not a thin row)
-// with two clear states: before assignment it surfaces a deterministic,
-// rules-based officer recommendation (the primary "Assign recommended officer"
-// action) plus an explanation of WHY that officer was suggested, and an
-// override dropdown to choose another officer; after assignment it shows the
-// assigned officer, role, status, and the next step. The officer's account
-// email is an implementation detail and is intentionally never shown. The
-// recommendation is decision support only — staff approve every assignment.
-function AssignmentPanel({
-  row,
-  canAssign,
-  assigning,
-  onAssign,
-  routingRecommendation,
-}: {
-  row: ResidentRequestRow
-  canAssign: boolean
-  assigning: boolean
-  onAssign: (officer: StaffProfile) => void
-  routingRecommendation: string
-}) {
-  // Only a recorded officer name means the assignment actually completed. A row
-  // can carry status 'assigned' with NO officer on file (an incomplete or stale
-  // assignment) — that is not "assigned", it needs the supervisor to finish it.
-  const assignedComplete = Boolean(row.assigned_officer_name)
-  const assignmentIncomplete = !assignedComplete && row.status === 'assigned'
-  // The assignable By-law Officers (Officer Qureshi, Officer Mann, Officer Ahmed,
-  // Officer Oakley). Assignment stores the chosen officer's login email.
-  const officers = officerProfiles()
-  // Deterministic, rules-based recommendation for this submission. The top-scored
-  // officer is the default assignee; Officer Qureshi is recommended only when his
-  // score wins. Memoised so it doesn't re-run on every render.
-  const recommendation = useMemo(() => recommendOfficer(row, officers), [row, officers])
-  const recommendedOfficer = recommendation.recommended
-  // The override dropdown starts on the recommended officer so "Choose another
-  // officer" is an explicit, deliberate override of the recommendation.
-  const [selectedEmail, setSelectedEmail] = useState(
-    recommendedOfficer?.email ?? officers[0]?.email ?? '',
-  )
-  const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? recommendedOfficer ?? null
-  const overridingRecommendation = Boolean(
-    selectedOfficer && recommendedOfficer && selectedOfficer.email !== recommendedOfficer.email,
-  )
-
-  if (assignedComplete) {
-    return (
-      <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
-        <div className="flex items-center gap-2">
-          <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-indigo-500" />
-          <span className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Assignment</span>
-        </div>
-        <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Detail label="Assigned officer" value={row.assigned_officer_name ?? 'the assigned officer'} />
-          <Detail label="Role" value="Bylaw Officer" />
-          <Detail label="Status" value="Assigned for field review" />
-          <Detail label="Next step" value="Officer records field outcome" />
-        </dl>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className={`mt-4 rounded-xl border p-4 ${
-        assignmentIncomplete ? 'border-rose-200 bg-rose-50/60' : 'border-amber-200 bg-amber-50/60'
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        <span
-          aria-hidden
-          className={`inline-block h-2 w-2 rounded-full ${assignmentIncomplete ? 'bg-rose-500' : 'bg-amber-500'}`}
-        />
-        <span
-          className={`text-xs font-semibold uppercase tracking-wide ${
-            assignmentIncomplete ? 'text-rose-800' : 'text-amber-800'
-          }`}
-        >
-          Assignment
-        </span>
-      </div>
-      <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-xs uppercase tracking-wide text-ink-subtle">Status</dt>
-          <dd className={`mt-0.5 font-medium ${assignmentIncomplete ? 'text-rose-700' : 'text-amber-700'}`}>
-            {assignmentIncomplete ? 'Assignment incomplete — select an officer again' : 'Human assignment required'}
-          </dd>
-        </div>
-        <Detail label="Routing recommendation" value={routingRecommendation} />
-      </dl>
-      {assignmentIncomplete && (
-        <p className="mt-2 text-[11px] text-rose-700">
-          This case shows as assigned but has no officer on file. Select an officer to complete the assignment.
+      {recommendedOfficer && reason && (
+        <p className="mt-1 truncate text-[11px] text-ink-subtle">
+          <span className="font-medium text-ink">Why:</span> {reason}
         </p>
       )}
-      {canAssign && row.status !== 'closed' && recommendedOfficer && recommendation.recommendedScore && (
-        <>
-          {/* Why this officer — a transparent, rules-based recommendation. This is
-              decision support; the supervisor still approves the assignment. */}
-          <RecommendationExplanation
-            officerName={recommendation.recommendedScore.name}
-            total={recommendation.recommendedScore.total}
-            rationale={recommendation.rationale}
-            drivers={recommendation.recommendedScore.drivers}
-          />
 
-          {/* Primary action — assign the recommended officer. */}
-          <div className="mt-3">
-            <button
-              onClick={() => onAssign(recommendedOfficer)}
-              disabled={assigning}
-              className="btn-primary text-sm py-2 px-4 disabled:opacity-60"
-            >
-              {assigning ? 'Assigning…' : 'Assign recommended officer'}
-            </button>
-            <p className="mt-1.5 text-[11px] text-ink-subtle">
-              Recommendation only. Staff approve every assignment.
-            </p>
-          </div>
+      {/* Actions: Assign recommended · Change officer · Open case. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {canAssign && recommendedOfficer && (
+          <button
+            onClick={() => onAssign(recommendedOfficer)}
+            disabled={assigning}
+            className="btn-primary text-sm py-1.5 px-3 disabled:opacity-60"
+          >
+            {assigning ? 'Assigning…' : 'Assign recommended'}
+          </button>
+        )}
+        {canAssign && officers.length > 1 && (
+          <button
+            onClick={() => setChanging((v) => !v)}
+            disabled={assigning}
+            className="btn-secondary text-sm py-1.5 px-3"
+            aria-expanded={changing}
+          >
+            Change officer
+          </button>
+        )}
+        <button onClick={onOpen} className="btn-secondary text-sm py-1.5 px-3">
+          Open case
+        </button>
+      </div>
 
-          {/* Override — choose another officer instead of the recommendation. */}
-          <div className="mt-3 border-t border-amber-200/70 pt-3">
-            <label
-              htmlFor={`officer-override-${row.id}`}
-              className="text-xs font-semibold uppercase tracking-wide text-ink-subtle"
-            >
-              Choose another officer
-            </label>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <select
-                id={`officer-override-${row.id}`}
-                value={selectedEmail}
-                onChange={(e) => setSelectedEmail(e.target.value)}
-                disabled={assigning}
-                aria-label="Choose another By-law Officer"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
-              >
-                {officers.map((o) => {
-                  const label = officerDisplayName(o)
-                  return (
-                    <option key={o.email} value={o.email}>
-                      {o.email === recommendedOfficer.email ? `${label} (recommended)` : label}
-                    </option>
-                  )
-                })}
-              </select>
-              <button
-                onClick={() => selectedOfficer && onAssign(selectedOfficer)}
-                disabled={assigning || !selectedOfficer || !overridingRecommendation}
-                className="btn-secondary text-sm py-2 px-4 disabled:opacity-50"
-              >
-                {assigning
-                  ? 'Assigning…'
-                  : `Assign ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'} instead`}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-      {/* Fallback: no recommendation available (e.g. no assignable officers) but
-          assignment is still possible — keep a basic officer picker. */}
-      {canAssign && row.status !== 'closed' && !recommendedOfficer && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/* Compact officer picker, only when "Change officer" is toggled. */}
+      {changing && canAssign && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <select
             value={selectedEmail}
             onChange={(e) => setSelectedEmail(e.target.value)}
             disabled={assigning}
-            aria-label="Select By-law Officer"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+            aria-label="Choose another By-law Officer"
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
           >
             {officers.map((o) => (
               <option key={o.email} value={o.email}>
-                {officerDisplayName(o)}
+                {recommendedOfficer && o.email === recommendedOfficer.email
+                  ? `${officerDisplayName(o)} (recommended)`
+                  : officerDisplayName(o)}
               </option>
             ))}
           </select>
           <button
             onClick={() => selectedOfficer && onAssign(selectedOfficer)}
             disabled={assigning || !selectedOfficer}
-            className="btn-primary text-sm py-2 px-4 disabled:opacity-60"
+            className="btn-secondary text-sm py-1.5 px-3 disabled:opacity-50"
           >
-            {assigning ? 'Assigning…' : `Assign to ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
+            {assigning ? 'Assigning…' : `Assign ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
           </button>
         </div>
       )}
-    </div>
-  )
-}
 
-// The recommendation panel — a compact, staff-facing summary: recommended
-// officer, fit score, a one-line "why", and the five driver rows (short label +
-// bar + short rationale). Intentionally free of technical/modelling language;
-// the scoring method lives in code comments and technical docs, not on screen.
-function RecommendationExplanation({
-  officerName,
-  total,
-  rationale,
-  drivers,
-}: {
-  officerName: string
-  total: number
-  rationale: string
-  drivers: RecommendationDriver[]
-}) {
-  return (
-    <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50/60 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-teal-500" />
-          <span className="text-xs font-semibold uppercase tracking-wide text-teal-800">
-            Recommended officer
-          </span>
-        </div>
-        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-inset ring-teal-200 tabular-nums">
-          Fit score {total}/100
-        </span>
-      </div>
-      <p className="mt-2 text-sm font-semibold text-navy-900">{officerName}</p>
-      <p className="mt-1 text-xs text-ink-muted">
-        <span className="font-medium text-ink">Why this officer:</span> {rationale}
-      </p>
-      <dl className="mt-3 space-y-2">
-        {drivers.map((driver) => (
-          <div key={driver.key} className="grid grid-cols-[10rem_1fr] items-center gap-x-3 gap-y-0.5">
-            <dt className="text-xs font-medium text-ink-muted">{driver.label}</dt>
-            <dd className="flex items-center gap-2">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-teal-100">
-                <div
-                  className="h-full rounded-full bg-teal-500"
-                  style={{ width: `${Math.max(0, Math.min(100, driver.score))}%` }}
-                />
-              </div>
-              <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-ink-subtle">
-                {Math.round(driver.score)}
-              </span>
-            </dd>
-            <dd className="col-start-2 text-[11px] text-ink-subtle">{driver.detail}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  )
-}
-
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs uppercase tracking-wide text-ink-subtle">{label}</dt>
-      <dd className="mt-0.5 break-words text-ink">{value}</dd>
+      <p className="mt-2 text-[11px] text-ink-subtle">Recommendation only. Staff approve every assignment.</p>
     </div>
   )
 }
