@@ -1,22 +1,24 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 
-// Stress Testing — synthetic field-workload readers for the Simulation Lab.
+// Stress Testing — synthetic field-workload readers for the Stress Testing tab.
 //
 // These functions read four small, precomputed aggregate views over
-// public.synthetic_patrol_logs. The underlying rows are SYNTHETIC field
-// activity generated from public NYC 311 benchmark patterns — they are NOT
-// Brampton operational data and NOT a record of real officer performance.
-// The app only ever reads these compact aggregates, never the raw rows, and
-// never writes. This powers capacity planning and stress testing only; it does
-// not make enforcement decisions and does not score officers.
+// public.synthetic_patrol_logs (migration 032). The underlying rows are
+// SYNTHETIC, rules-based field activity estimated from public NYC 311 benchmark
+// cases — they are NOT Brampton operational data and NOT a record of real
+// officer performance. The app only ever reads these compact aggregates, never
+// the raw rows, and never writes. They power capacity planning and stress
+// testing only; they do not make enforcement decisions and do not score officers.
 //
 // There is NO hardcoded fallback data: when a view cannot be loaded the caller
-// surfaces a clear "Live data unavailable" state rather than inventing numbers.
+// surfaces a clear "pending / unavailable" state rather than inventing numbers.
+//
+// Column names below mirror migration 032 exactly (total_logs, distinct_cases,
+// total_estimated_hours, supervisor_review_count, …) so a select never asks for
+// a column the view does not expose.
 
 const WORKLOAD_BY_OFFICER_UNIT_VIEW = 'v_synthetic_patrol_workload_by_officer_unit'
 const WORKLOAD_BY_DISTRICT_VIEW = 'v_synthetic_patrol_workload_by_district'
-const WORKLOAD_BY_CLOSURE_BUCKET_VIEW = 'v_synthetic_patrol_workload_by_closure_bucket'
-const WORKLOAD_BY_COMPLAINT_TYPE_VIEW = 'v_synthetic_patrol_workload_by_complaint_type'
 
 function requireClient() {
   if (!isSupabaseConfigured || !supabase) {
@@ -37,32 +39,35 @@ function str(value: unknown, fallback: string): string {
   return s.length > 0 ? s : fallback
 }
 
-// Shared numeric workload measures present on every view.
+// Shared synthetic-workload measures present on the officer-unit and district views.
 type WorkloadMeasures = {
-  log_count: number
-  case_count: number
-  estimated_minutes: number
-  estimated_hours: number
+  total_logs: number
+  distinct_cases: number
+  total_estimated_minutes: number
+  total_estimated_hours: number
+  avg_estimated_minutes: number
   supervisor_review_count: number
 }
 
 export type OfficerUnitWorkload = WorkloadMeasures & { officer_unit: string }
-export type DistrictWorkload = WorkloadMeasures & { district_or_area: string }
-export type ClosureBucketWorkload = WorkloadMeasures & { closure_bucket: string }
-export type ComplaintTypeWorkload = WorkloadMeasures & { complaint_type: string }
+export type DistrictWorkload = WorkloadMeasures & {
+  district_or_area: string
+  distinct_officer_units: number
+}
 
-// The four views expose the same measure columns; map them once.
 function mapMeasures(r: Record<string, unknown>): WorkloadMeasures {
   return {
-    log_count: num(r.log_count),
-    case_count: num(r.case_count),
-    estimated_minutes: num(r.estimated_minutes),
-    estimated_hours: num(r.estimated_hours),
+    total_logs: num(r.total_logs),
+    distinct_cases: num(r.distinct_cases),
+    total_estimated_minutes: num(r.total_estimated_minutes),
+    total_estimated_hours: num(r.total_estimated_hours),
+    avg_estimated_minutes: num(r.avg_estimated_minutes),
     supervisor_review_count: num(r.supervisor_review_count),
   }
 }
 
-const MEASURE_COLUMNS = 'log_count, case_count, estimated_minutes, estimated_hours, supervisor_review_count'
+const MEASURE_COLUMNS =
+  'total_logs, distinct_cases, total_estimated_minutes, total_estimated_hours, avg_estimated_minutes, supervisor_review_count'
 
 /** Synthetic workload by officer unit, ranked by estimated field hours (desc). */
 export async function getWorkloadByOfficerUnit(): Promise<OfficerUnitWorkload[]> {
@@ -70,7 +75,7 @@ export async function getWorkloadByOfficerUnit(): Promise<OfficerUnitWorkload[]>
   const { data, error } = await client
     .from(WORKLOAD_BY_OFFICER_UNIT_VIEW)
     .select(`officer_unit, ${MEASURE_COLUMNS}`)
-    .order('estimated_hours', { ascending: false })
+    .order('total_estimated_hours', { ascending: false })
   if (error) throw error
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     officer_unit: str(r.officer_unit, 'Unassigned'),
@@ -83,39 +88,12 @@ export async function getWorkloadByDistrict(): Promise<DistrictWorkload[]> {
   const client = requireClient()
   const { data, error } = await client
     .from(WORKLOAD_BY_DISTRICT_VIEW)
-    .select(`district_or_area, ${MEASURE_COLUMNS}`)
-    .order('estimated_hours', { ascending: false })
+    .select(`district_or_area, distinct_officer_units, ${MEASURE_COLUMNS}`)
+    .order('total_estimated_hours', { ascending: false })
   if (error) throw error
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     district_or_area: str(r.district_or_area, 'Unknown'),
-    ...mapMeasures(r),
-  }))
-}
-
-/** Synthetic workload by closure-timing bucket, ranked by estimated field hours (desc). */
-export async function getWorkloadByClosureBucket(): Promise<ClosureBucketWorkload[]> {
-  const client = requireClient()
-  const { data, error } = await client
-    .from(WORKLOAD_BY_CLOSURE_BUCKET_VIEW)
-    .select(`closure_bucket, ${MEASURE_COLUMNS}`)
-    .order('estimated_hours', { ascending: false })
-  if (error) throw error
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
-    closure_bucket: str(r.closure_bucket, 'Unknown'),
-    ...mapMeasures(r),
-  }))
-}
-
-/** Synthetic workload by complaint type, ranked by estimated field hours (desc). */
-export async function getWorkloadByComplaintType(): Promise<ComplaintTypeWorkload[]> {
-  const client = requireClient()
-  const { data, error } = await client
-    .from(WORKLOAD_BY_COMPLAINT_TYPE_VIEW)
-    .select(`complaint_type, ${MEASURE_COLUMNS}`)
-    .order('estimated_hours', { ascending: false })
-  if (error) throw error
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
-    complaint_type: str(r.complaint_type, 'Uncategorized'),
+    distinct_officer_units: num(r.distinct_officer_units),
     ...mapMeasures(r),
   }))
 }
