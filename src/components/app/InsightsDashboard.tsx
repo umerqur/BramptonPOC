@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
+import SimulationPressureMap from './SimulationPressureMap'
+import { calmWorkloadRgb } from './workloadColor'
 import {
   getInsightsKpis,
   getInsightsComplaintTypeVolume,
@@ -1180,6 +1182,15 @@ const ctStr = (v: unknown, fallback = '—'): string => {
 
 const ctDate = (v: unknown): string => formatPlainDate(v == null ? null : String(v)) ?? '—'
 
+// Required, fixed POC labelling reused across the stress-testing visuals.
+const POC_BENCHMARK_NOTE = 'Public 311 benchmark data for POC modelling. Not live Brampton operational data.'
+
+// The ABM views emit "Council District N". We have no real Brampton ward geometry,
+// so districts are presented as SYNTHETIC stand-ins throughout the stress lab.
+const synthDistrict = (s: string): string => s.replace(/council district/i, 'Synthetic District')
+const districtNumber = (s: string): string => s.match(/(\d+)\s*$/)?.[1] ?? s
+const sharePctText = (share: number): string => (share > 0 ? `${(share * 100).toFixed(1)}%` : '—')
+
 /**
  * SimulationLab — the CTGAN + ABM stress testing framework (Stress Testing tab).
  * Loads all five CTGAN ABM service reads with useLive and renders the framework
@@ -1312,90 +1323,99 @@ function SimulationLab() {
 
   return (
     <div className="mt-6 space-y-6">
-      {/* Overview banner — frames the whole tab as a planning simulation. */}
+      {/* 1. Run interpretation — concise headline + how to read this run. */}
       <section className="card overflow-hidden">
-        <div className="border-b border-slate-200 bg-navy-900 px-5 py-5">
+        <div className="border-b border-slate-200 bg-navy-900 px-5 py-4">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-white">CTGAN ABM Stress Testing Framework</h2>
+            <h2 className="text-base font-semibold text-white">Run interpretation</h2>
             <span className="inline-flex items-center rounded-full bg-sky-400/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-200 ring-1 ring-inset ring-sky-400/30">
               Planning simulation
             </span>
           </div>
-          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-navy-100">
-            A conditional GAN (CTGAN) generates synthetic service-request demand from public 311 benchmark patterns, and
-            an agent-based model (ABM) runs that demand through each district&rsquo;s intake queue. Officer daily minutes
-            are the constrained resource, and a supervisor review queue forms the second bottleneck. Every figure below is
-            scoped to the latest simulation run. This is capacity planning and stress testing only — decision support,
-            not live Brampton operational data, and never an enforcement decision.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {['CTGAN demand', 'Agent-based model', 'Capacity planning', 'Decision support only', 'Not enforcement decisioning'].map(
-              (tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-navy-100 ring-1 ring-inset ring-white/15"
-                >
-                  {tag}
-                </span>
-              ),
-            )}
-          </div>
+          {anyLoading ? (
+            <p className="mt-1.5 text-xs text-navy-100">Connecting to CTGAN ABM outputs…</p>
+          ) : showPending ? (
+            <p className="mt-1.5 text-xs text-navy-100">The latest CTGAN ABM run is pending load.</p>
+          ) : (
+            <p className="mt-1.5 max-w-3xl text-xs leading-relaxed text-navy-100">
+              {ctStr(latestRun.data?.scenario_name)} · run {ctStr(latestRun.data?.run_id)} ·{' '}
+              {ctDate(latestRun.data?.run_date)}. Synthetic 311 demand run through {fmtInt(districtCount)} district queues
+              over {fmtInt(simulatedDays)} days. Decision support only — not live Brampton operational data, never an
+              enforcement decision.
+            </p>
+          )}
         </div>
 
-        <div className="px-5 py-4">
-          {anyLoading ? (
-            <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
-              Connecting to CTGAN ABM outputs…
+        {!anyLoading && !showPending && (
+          <div className="px-5 py-4">
+            <div
+              className={`rounded-lg border px-4 py-3 text-xs leading-relaxed ${
+                backlogBinding
+                  ? 'border-amber-200 bg-amber-50/70 text-amber-900'
+                  : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+              }`}
+            >
+              <span className="font-semibold">Reading this run: </span>
+              {backlogBinding ? (
+                <>
+                  capacity is binding. Backlog persists to the end of the horizon (final {fmtInt(finalBacklog)}, peak{' '}
+                  {fmtInt(peakBacklog)}) and the supervisor queue peaks at {fmtInt(peakSupervisorQueue)} — added field or
+                  review capacity is where the simulation relieves pressure.
+                </>
+              ) : (
+                <>
+                  modeled capacity keeps pace. Backlog clears within the horizon (final {fmtInt(finalBacklog)}) under the
+                  generated demand.
+                </>
+              )}
             </div>
-          ) : showPending ? (
-            <CtganPendingNote />
-          ) : (
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-ink-subtle">
-              <span>
-                <span className="font-semibold text-navy-900">Scenario:</span> {ctStr(latestRun.data?.scenario_name)}
-              </span>
-              <span>
-                <span className="font-semibold text-navy-900">Latest run:</span> {ctStr(latestRun.data?.run_id)}
-              </span>
-              <span>
-                <span className="font-semibold text-navy-900">Run date:</span> {ctDate(latestRun.data?.run_date)}
-              </span>
-              <span>
-                <span className="font-semibold text-navy-900">Scenarios available:</span> {fmtInt(scenarioRows.length)}
-              </span>
-            </div>
-          )}
+          </div>
+        )}
+      </section>
+
+      {/* 2. 3D simulation pressure map — the command-centre centrepiece. */}
+      <SimulationPressureMap
+        districtRows={districtRows}
+        peakSupervisorQueue={peakSupervisorQueue}
+        loading={anyLoading}
+      />
+
+      {/* 3. ABM flow diagram — the four-stage model, shown even with no data loaded. */}
+      <section className="card overflow-hidden">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <h3 className="text-sm font-semibold text-navy-900">ABM flow diagram</h3>
+          <p className="mt-1 text-xs text-ink-subtle">
+            CTGAN demand → district queues → officer minutes → supervisor review.
+          </p>
+        </div>
+        <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+          <FrameworkCard
+            step={1}
+            title="CTGAN demand"
+            body="A conditional GAN synthesizes service-request demand from public 311 benchmark patterns."
+          />
+          <FrameworkCard
+            step={2}
+            title="District queues"
+            body="Generated demand flows into per-district intake queues advanced day by day."
+          />
+          <FrameworkCard
+            step={3}
+            title="Officer minutes"
+            body="Each officer has a fixed daily minute budget. When demand exceeds it, cases queue — the binding constraint."
+          />
+          <FrameworkCard
+            step={4}
+            title="Supervisor review"
+            body="Cases needing sign-off enter a capacity-limited review queue — the second bottleneck."
+          />
         </div>
       </section>
 
-      {/* Framework cards — the four-stage model, shown even with no data loaded. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <FrameworkCard
-          step={1}
-          title="CTGAN demand generation"
-          body="A conditional GAN synthesizes service-request demand from public 311 benchmark patterns to feed the simulation's arrival stream."
-        />
-        <FrameworkCard
-          step={2}
-          title="ABM district queue simulation"
-          body="Generated demand flows into per-district intake queues that the agent-based model advances day by day."
-        />
-        <FrameworkCard
-          step={3}
-          title="Officer daily minutes"
-          body="Each officer has a fixed daily minute budget. When demand exceeds available minutes, cases queue — the model's binding constraint."
-        />
-        <FrameworkCard
-          step={4}
-          title="Supervisor review queue"
-          body="Cases needing sign-off enter a supervisor review queue after field work — a second bottleneck where backlog can accumulate."
-        />
-      </div>
-
-      {/* 1. Executive simulation summary — latest run only. */}
+      {/* 4. Key numbers — latest run only. */}
       <CtganSection
-        title="Executive simulation summary"
-        subtitle="Headline measures for the latest simulation run only. A planning estimate from synthetic demand, not a forecast."
+        title="Key numbers"
+        subtitle="Headline measures for the latest run. A planning estimate from synthetic demand, not a forecast."
       >
         {showPending ? (
           <CtganPendingNote />
@@ -1428,11 +1448,50 @@ function SimulationLab() {
         )}
       </CtganSection>
 
-      {/* 1b. Methodology answers from this run — plain-English answers to the six
-          methodology questions, using only the latest run's data. */}
+      {/* 5. Readable charts — backlog over time, plus district pressure (3D map
+          above + tile grid) and the complaint-mix donut. Visual-first, minimal prose. */}
+      <CtganSection
+        title="Backlog over time"
+        subtitle="Cumulative intake and processed are running totals; backlog, stale cases, and the supervisor queue are point-in-time levels."
+      >
+        {showPending || dailyRows.length === 0 ? <CtganPendingNote /> : <AbmTimeSeriesChart rows={dailyRows} />}
+      </CtganSection>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <CtganSection
+          title="District pressure"
+          subtitle="Synthetic districts by simulated case load — the 3D map above is the primary view."
+        >
+          {showPending ? (
+            <CtganPendingNote />
+          ) : (
+            <div className="space-y-3">
+              <PocNote />
+              <SimDistrictTiles rows={districtRows} />
+            </div>
+          )}
+        </CtganSection>
+
+        <CtganSection
+          title="Complaint type pressure"
+          subtitle="Top six complaint types by simulated case load; the rest folded into Other."
+        >
+          {showPending ? (
+            <CtganPendingNote />
+          ) : (
+            <div className="space-y-3">
+              <PocNote />
+              <SimComplaintDonut rows={complaintRows} />
+            </div>
+          )}
+        </CtganSection>
+      </div>
+
+      {/* 6. Methodology — lower down. Plain-English answers to the six methodology
+          questions, using only the latest run's data. */}
       <CtganSection
         title="Methodology answers from this run"
-        subtitle="The six methodology questions, answered directly from the latest simulation run. Plain-language planning signals from synthetic demand — not live Brampton operational data, and not enforcement decisioning."
+        subtitle="The six methodology questions, answered directly from the latest run. Planning signals from synthetic demand — not live Brampton operational data, and not enforcement decisioning."
       >
         {showPending ? (
           <CtganPendingNote />
@@ -1496,12 +1555,12 @@ function SimulationLab() {
                   Demand is distributed across{' '}
                   <span className="font-semibold text-navy-900">{fmtInt(districtCount)} district queues</span>. The
                   highest load in this run is{' '}
-                  <span className="font-semibold text-navy-900">{topDistricts[0].district_or_area}</span> with{' '}
-                  <span className="font-semibold text-navy-900">{fmtInt(topDistricts[0].total_cases)}</span> simulated
+                  <span className="font-semibold text-navy-900">{synthDistrict(topDistricts[0].district_or_area)}</span>{' '}
+                  with <span className="font-semibold text-navy-900">{fmtInt(topDistricts[0].total_cases)}</span> simulated
                   cases
                   {topDistricts.length > 1 && (
                     <>
-                      , followed by {topDistricts.slice(1).map((d) => d.district_or_area).join(' and ')}
+                      , followed by {topDistricts.slice(1).map((d) => synthDistrict(d.district_or_area)).join(' and ')}
                     </>
                   )}
                   .
@@ -1574,117 +1633,7 @@ function SimulationLab() {
         )}
       </CtganSection>
 
-      {/* 2. 30-day ABM time series — the most important graphic. */}
-      <CtganSection
-        title="30-day ABM simulation"
-        subtitle="How the latest run evolves day by day. Cumulative intake and processed are running totals; backlog, stale cases, and the supervisor queue are point-in-time levels. The gap between intake and processed is the open backlog."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : dailyRows.length === 0 ? (
-          <CtganPendingNote />
-        ) : (
-          <AbmTimeSeriesChart rows={dailyRows} />
-        )}
-      </CtganSection>
-
-      {/* 3. Capacity bottleneck explanation — calm, plain-language callout. */}
-      <CtganSection
-        title="Where capacity binds"
-        subtitle="Reading the simulation as a staffing conversation."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <BottleneckNote
-                title="Officer daily minutes"
-                body="Each officer has a fixed daily minute budget. When generated demand needs more minutes than are available, cases stay in the district queue instead of being processed — the model's first binding constraint."
-              />
-              <BottleneckNote
-                title="Supervisor review queue"
-                body="Cases needing sign-off move to a capacity-limited supervisor review queue after field work. Backlog can build here even when field minutes are free — the second bottleneck."
-              />
-            </div>
-            <div
-              className={`rounded-lg border px-4 py-3 text-xs leading-relaxed ${
-                backlogBinding
-                  ? 'border-amber-200 bg-amber-50/70 text-amber-900'
-                  : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
-              }`}
-            >
-              <span className="font-semibold">Reading this run: </span>
-              {backlogBinding ? (
-                <>
-                  backlog persists to the end of the horizon (final backlog {fmtInt(finalBacklog)}, peak{' '}
-                  {fmtInt(peakBacklog)}) while processing is capped by officer minutes — capacity is binding, so added
-                  field or review capacity is where the simulation would relieve pressure.
-                </>
-              ) : (
-                <>
-                  backlog clears within the simulated horizon (final backlog {fmtInt(finalBacklog)}) — modeled capacity
-                  keeps pace with generated demand in this run.
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </CtganSection>
-
-      {/* 4. District pressure — top 15 horizontal bars, full list optional below. */}
-      <CtganSection
-        title="District pressure"
-        subtitle="Top 15 districts by simulated case load in the latest run. Planning estimate, not performance scoring."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <PressureBars
-            firstColLabel="District / area"
-            rows={districtRows.map((r) => ({
-              label: r.district_or_area,
-              total_cases: r.total_cases,
-              share_of_cases: r.share_of_cases,
-              estimated_hours: r.estimated_hours,
-              backlog: r.backlog,
-              stale_cases: r.stale_cases,
-            }))}
-          />
-        )}
-        {/*
-          TODO (optional pressure map): district_or_area values are "Council District N".
-          The NYC workload map (NYCWorkloadMapPanel) keys council-district geometry by the
-          bare number N (AreaUnit.key), so a join is feasible by parsing the trailing integer
-          from district_or_area (e.g. "Council District 11" -> "11"). It is deferred here
-          because NYCWorkloadMapPanel is hardwired to the NYC metric services and is not yet
-          parameterized to accept externally-supplied keyed values; wiring CTGAN pressure in
-          would require refactoring that panel to take generic {key,value} rows. The line and
-          bar charts above are the required visuals; the map stays optional until that refactor.
-        */}
-      </CtganSection>
-
-      {/* 5. Complaint type pressure — top 15 horizontal bars, full list optional. */}
-      <CtganSection
-        title="Complaint type pressure"
-        subtitle="Top 15 complaint types by simulated case load in the latest run. The full list is collapsed below."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <PressureBars
-            firstColLabel="Complaint type"
-            rows={complaintRows.map((r) => ({
-              label: r.complaint_type,
-              total_cases: r.total_cases,
-              share_of_cases: r.share_of_cases,
-              estimated_hours: r.estimated_hours,
-            }))}
-          />
-        )}
-      </CtganSection>
-
-      {/* 6. Clear note — planning simulation only, not enforcement decisioning. */}
+      {/* 7. Clear note — planning simulation only, not enforcement decisioning. */}
       <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
         <div className="text-sm font-semibold text-navy-900">Planning simulation only — not enforcement decisioning</div>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-subtle">
@@ -1753,16 +1702,6 @@ function MethodologyAnswerCard({
         </div>
       </div>
       <div className="mt-2 text-xs leading-relaxed text-ink-subtle">{children}</div>
-    </div>
-  )
-}
-
-// A plain-language bottleneck explainer card for the capacity callout.
-function BottleneckNote({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="text-sm font-semibold text-navy-900">{title}</div>
-      <p className="mt-1 text-xs leading-relaxed text-ink-subtle">{body}</p>
     </div>
   )
 }
@@ -1900,103 +1839,197 @@ function AbmTimeSeriesChart({ rows }: { rows: CtganDailyMetricRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// District / complaint-type pressure — top-15 horizontal bars, full list folded
+// Stress-lab visuals — complaint mix donut + district pressure tile grid
 // ---------------------------------------------------------------------------
 
-type PressureBarRow = {
-  label: string
-  total_cases: number
-  share_of_cases: number
-  estimated_hours: number
-  backlog?: number
-  stale_cases?: number
-}
+// Distinct hues for the six headline complaint types; Other is a calm slate.
+const SIM_DONUT_COLORS = ['#2563eb', '#0ea5e9', '#7c3aed', '#f59e0b', '#10b981', '#ec4899']
+const SIM_OTHER_COLOR = '#94a3b8'
 
-const PRESSURE_TOP_N = 15
+type DonutSlice = { label: string; value: number; color: string }
 
-const sharePct = (share: number) => (share > 0 ? `${(share * 100).toFixed(1)}%` : '—')
+// Complaint mix as a donut: the top six types as slices, everything else folded
+// into "Other", with the run's total simulated cases in the centre. The long bar
+// list is gone from the main view — the full ranking lives behind "View full list".
+function SimComplaintDonut({ rows }: { rows: CtganComplaintTypePressureRow[] }) {
+  const sorted = useMemo(() => [...rows].sort((a, b) => b.total_cases - a.total_cases), [rows])
+  if (sorted.length === 0) return <CtganPendingNote />
 
-// Top-N ranked horizontal bars. Rows arrive already ordered by total_cases desc
-// from the latest-run views, so the full list is never the main experience — the
-// remaining rows stay collapsed in a compact details table.
-function PressureBars({ firstColLabel, rows }: { firstColLabel: string; rows: PressureBarRow[] }) {
-  if (rows.length === 0) return <CtganPendingNote />
-  const top = rows.slice(0, PRESSURE_TOP_N)
-  const rest = rows.slice(PRESSURE_TOP_N)
-  const maxCases = top.reduce((m, r) => Math.max(m, r.total_cases), 0) || 1
-  const hasSecondary = rows.some((r) => r.backlog != null || r.stale_cases != null)
+  const top = sorted.slice(0, 6)
+  const otherTotal = sorted.slice(6).reduce((s, r) => s + r.total_cases, 0)
+  const total = sorted.reduce((s, r) => s + r.total_cases, 0)
+  const slices: DonutSlice[] = top.map((r, i) => ({
+    label: r.complaint_type,
+    value: r.total_cases,
+    color: SIM_DONUT_COLORS[i % SIM_DONUT_COLORS.length],
+  }))
+  if (otherTotal > 0) slices.push({ label: 'Other', value: otherTotal, color: SIM_OTHER_COLOR })
+
+  const size = 200
+  const stroke = 26
+  const r = size / 2 - stroke / 2
+  const circ = 2 * Math.PI * r
+  let offset = 0
 
   return (
     <div className="space-y-4">
-      <div className="space-y-3">
-        {top.map((r) => {
-          const pct = Math.max(2, Math.min(100, (r.total_cases / maxCases) * 100))
+      <div className="flex flex-col items-center gap-4">
+        <div className="relative" style={{ width: size, height: size }}>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Complaint type mix">
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={stroke} />
+            {total > 0 &&
+              slices.map((s) => {
+                const len = (s.value / total) * circ
+                const el = (
+                  <circle
+                    key={s.label}
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={r}
+                    fill="none"
+                    stroke={s.color}
+                    strokeWidth={stroke}
+                    strokeDasharray={`${len} ${circ - len}`}
+                    strokeDashoffset={-offset}
+                    transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                  >
+                    <title>{`${s.label}: ${fmtInt(s.value)} (${sharePctText(s.value / total)})`}</title>
+                  </circle>
+                )
+                offset += len
+                return el
+              })}
+          </svg>
+          {/* Centre label — total simulated cases for the run. */}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+            <span className="text-2xl font-bold tabular-nums text-navy-900">{fmtInt(total)}</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Simulated cases</span>
+          </div>
+        </div>
+
+        {/* Compact top-6 (+ Other) legend under the donut. */}
+        <ul className="grid w-full grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
+          {slices.map((s) => (
+            <li key={s.label} className="flex items-center justify-between gap-2 text-xs">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+                <span className="truncate text-ink" title={s.label}>
+                  {s.label}
+                </span>
+              </span>
+              <span className="shrink-0 tabular-nums text-ink-subtle">
+                {fmtInt(s.value)} · {total > 0 ? sharePctText(s.value / total) : '—'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <details className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <summary className="cursor-pointer text-xs font-medium text-accent-700">
+          View full list ({fmtInt(sorted.length)} types)
+        </summary>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
+                <th className="py-2 pr-3 font-semibold">Complaint type</th>
+                <th className="py-2 pr-3 text-right font-semibold">Cases</th>
+                <th className="py-2 pr-3 text-right font-semibold">Share</th>
+                <th className="py-2 text-right font-semibold">Est. hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.complaint_type} className="border-b border-slate-100 last:border-0">
+                  <td className="py-1.5 pr-3 text-navy-900">{r.complaint_type}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.total_cases)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{sharePctText(r.share_of_cases)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-ink-subtle">{fmtInt(r.estimated_hours)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  )
+}
+
+// District pressure as a compact tile grid (one tile per synthetic district,
+// shaded by case load). The 3D pressure map above is the primary district visual;
+// this is the scannable at-a-glance grid. The full ranked table is tucked behind
+// "View district details" so a long bar list is never the main view.
+function SimDistrictTiles({ rows }: { rows: CtganDistrictPressureRow[] }) {
+  if (rows.length === 0) return <CtganPendingNote />
+  const max = rows.reduce((m, r) => Math.max(m, r.total_cases), 0) || 1
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-8 lg:grid-cols-10">
+        {rows.map((r) => {
+          const [rr, gg, bb] = calmWorkloadRgb(r.total_cases / max)
           return (
-            <div key={r.label} className="space-y-1">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="truncate text-xs font-medium text-navy-900" title={r.label}>
-                  {r.label}
-                </span>
-                <span className="whitespace-nowrap text-[11px] tabular-nums text-ink-subtle">
-                  <span className="font-semibold text-navy-900">{fmtInt(r.total_cases)}</span> · {sharePct(r.share_of_cases)}
-                </span>
-              </div>
-              <div className="h-3 w-full overflow-hidden rounded bg-slate-100">
-                <div className="h-full rounded bg-sky-500" style={{ width: `${pct}%` }} />
-              </div>
-              {(r.backlog != null || r.stale_cases != null) && (
-                <div className="text-[10px] text-ink-subtle">
-                  {r.backlog != null && <>Backlog {fmtInt(r.backlog)}</>}
-                  {r.backlog != null && r.stale_cases != null && ' · '}
-                  {r.stale_cases != null && <>Stale {fmtInt(r.stale_cases)}</>}
-                </div>
-              )}
+            <div
+              key={r.district_or_area}
+              title={`${synthDistrict(r.district_or_area)}\nCases: ${fmtInt(r.total_cases)}\nBacklog: ${fmtInt(
+                r.backlog,
+              )}\nStale: ${fmtInt(r.stale_cases)}`}
+              className="flex aspect-square flex-col items-center justify-center rounded-md px-1 text-center"
+              style={{ backgroundColor: `rgb(${rr}, ${gg}, ${bb})` }}
+            >
+              <span
+                className="text-xs font-bold leading-none text-white"
+                style={{ textShadow: '0 1px 2px rgba(15,23,42,0.55)' }}
+              >
+                {districtNumber(r.district_or_area)}
+              </span>
+              <span
+                className="mt-0.5 text-[9px] font-medium leading-none text-white/90"
+                style={{ textShadow: '0 1px 2px rgba(15,23,42,0.55)' }}
+              >
+                {fmtInt(r.total_cases)}
+              </span>
             </div>
           )
         })}
       </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+          Case load by synthetic district
+        </span>
+        <span className="text-[10px] text-ink-subtle">Low to high</span>
+      </div>
 
-      {rest.length > 0 && (
-        <details className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-2.5">
-          <summary className="cursor-pointer text-xs font-medium text-accent-700">
-            Show all {fmtInt(rows.length)} rows
-          </summary>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
-                  <th className="py-2 pr-3 font-semibold">{firstColLabel}</th>
-                  <th className="py-2 pr-3 text-right font-semibold">Cases</th>
-                  <th className="py-2 pr-3 text-right font-semibold">Share</th>
-                  <th className="py-2 pr-3 text-right font-semibold">Est. hours</th>
-                  {hasSecondary && <th className="py-2 pr-3 text-right font-semibold">Backlog</th>}
-                  {hasSecondary && <th className="py-2 text-right font-semibold">Stale</th>}
+      <details className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <summary className="cursor-pointer text-xs font-medium text-accent-700">
+          View district details ({fmtInt(rows.length)} districts)
+        </summary>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
+                <th className="py-2 pr-3 font-semibold">Synthetic district</th>
+                <th className="py-2 pr-3 text-right font-semibold">Cases</th>
+                <th className="py-2 pr-3 text-right font-semibold">Share</th>
+                <th className="py-2 pr-3 text-right font-semibold">Backlog</th>
+                <th className="py-2 text-right font-semibold">Stale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.district_or_area} className="border-b border-slate-100 last:border-0">
+                  <td className="py-1.5 pr-3 text-navy-900">{synthDistrict(r.district_or_area)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.total_cases)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{sharePctText(r.share_of_cases)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{fmtInt(r.backlog)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-ink-subtle">{fmtInt(r.stale_cases)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.label} className="border-b border-slate-100 last:border-0">
-                    <td className="py-1.5 pr-3 text-navy-900">{r.label}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.total_cases)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{sharePct(r.share_of_cases)}</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">{fmtInt(r.estimated_hours)}</td>
-                    {hasSecondary && (
-                      <td className="py-1.5 pr-3 text-right tabular-nums text-ink-subtle">
-                        {r.backlog != null ? fmtInt(r.backlog) : '—'}
-                      </td>
-                    )}
-                    {hasSecondary && (
-                      <td className="py-1.5 text-right tabular-nums text-ink-subtle">
-                        {r.stale_cases != null ? fmtInt(r.stale_cases) : '—'}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      )}
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   )
 }
@@ -2008,6 +2041,17 @@ function CtganPendingNote() {
     <div className="rounded-md border border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-sky-900">
       <div className="font-semibold">Data loading pending</div>
       <p className="mt-0.5 leading-relaxed">{CTGAN_PENDING_MESSAGE}</p>
+    </div>
+  )
+}
+
+// The fixed POC labelling, shown on each stress-testing visual so the synthetic /
+// benchmark provenance travels with the chart rather than only the page header.
+function PocNote() {
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-amber-100 bg-amber-50/60 px-3 py-1.5 text-[11px] font-medium text-amber-900">
+      <span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+      {POC_BENCHMARK_NOTE}
     </div>
   )
 }
