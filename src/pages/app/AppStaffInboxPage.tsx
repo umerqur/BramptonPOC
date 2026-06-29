@@ -6,7 +6,6 @@ import { GuardrailFooter } from '../../components/workflow/WorkflowUI'
 import { formatDateTime } from '../../services/demoWorkflowService'
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import { recommendOfficer, type RecommendationDriver } from '../../lib/officerRecommendation'
-import type { DemoCategory } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
   assignResidentRequestToOfficer,
@@ -705,8 +704,6 @@ function AssignmentPanel({
           <RecommendationExplanation
             officerName={recommendation.recommendedScore.name}
             total={recommendation.recommendedScore.total}
-            caseWard={recommendation.caseWard}
-            category={recommendation.category}
             rationale={recommendation.rationale}
             drivers={recommendation.recommendedScore.drivers}
           />
@@ -721,7 +718,7 @@ function AssignmentPanel({
               {assigning ? 'Assigning…' : 'Assign recommended officer'}
             </button>
             <p className="mt-1.5 text-[11px] text-ink-subtle">
-              Recommendation only — staff approve every assignment. You can choose another officer below.
+              Recommendation only. Staff approve every assignment.
             </p>
           </div>
 
@@ -761,12 +758,6 @@ function AssignmentPanel({
                   : `Assign ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'} instead`}
               </button>
             </div>
-            {overridingRecommendation && (
-              <p className="mt-1.5 text-[11px] text-ink-subtle">
-                Overriding the recommendation — {selectedOfficer ? officerDisplayName(selectedOfficer) : 'this officer'}{' '}
-                will be assigned instead of {officerDisplayName(recommendedOfficer)}.
-              </p>
-            )}
           </div>
         </>
       )}
@@ -800,21 +791,18 @@ function AssignmentPanel({
   )
 }
 
-// The recommendation explanation panel — shows WHY the deterministic scorer
-// suggested this officer, broken down by its five named drivers. Transparent,
-// rules-based decision support; no ML, no black box. Staff still approve.
+// The recommendation panel — a compact, staff-facing summary: recommended
+// officer, fit score, a one-line "why", and the five driver rows (short label +
+// bar + short rationale). Intentionally free of technical/modelling language;
+// the scoring method lives in code comments and technical docs, not on screen.
 function RecommendationExplanation({
   officerName,
   total,
-  caseWard,
-  category,
   rationale,
   drivers,
 }: {
   officerName: string
   total: number
-  caseWard: number
-  category: DemoCategory
   rationale: string
   drivers: RecommendationDriver[]
 }) {
@@ -824,18 +812,16 @@ function RecommendationExplanation({
         <div className="flex items-center gap-2">
           <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-teal-500" />
           <span className="text-xs font-semibold uppercase tracking-wide text-teal-800">
-            Recommended officer · decision support
+            Recommended officer
           </span>
         </div>
         <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-inset ring-teal-200 tabular-nums">
           Fit score {total}/100
         </span>
       </div>
-      <p className="mt-2 text-sm text-ink">
-        <span className="font-semibold text-navy-900">{officerName}</span> — {rationale}
-      </p>
-      <p className="mt-1 text-[11px] text-ink-subtle">
-        Deterministic rules-based scoring for ward {caseWard} · {category}. Not AI, GAN, or agent-based modelling.
+      <p className="mt-2 text-sm font-semibold text-navy-900">{officerName}</p>
+      <p className="mt-1 text-xs text-ink-muted">
+        <span className="font-medium text-ink">Why this officer:</span> {rationale}
       </p>
       <dl className="mt-3 space-y-2">
         {drivers.map((driver) => (
