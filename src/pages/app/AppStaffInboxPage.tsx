@@ -24,7 +24,7 @@ import {
   type WorkQueueRow,
   type ReviewPriorityTier,
 } from '../../services/workQueue'
-import { DecisionLogicDisclosure, decisionLogicFromWorkRow } from '../../components/app/DecisionLogicPanel'
+import { QueueCard, DecisionStrip, Pill, FitPill } from '../../components/app/QueueCard'
 
 // Priority Queue — the active review surface staff land on first. Live resident
 // service requests (public.resident_service_requests) that need staff action,
@@ -321,9 +321,10 @@ function workRowState(row: WorkQueueRow): { label: string; style: string } {
 }
 
 /**
- * A compact operational task card: case id + one state pill (+ a priority pill
- * only when High/Medium), complaint type · location as plain text, a single
- * primary action, and the rules-based "why" tucked behind a collapsed disclosure.
+ * A compact operational task card on the shared queue-card standard: case id +
+ * one state pill (+ a priority pill only when High/Medium), complaint type and
+ * location, a readable decision strip naming what needs to happen next, and a
+ * single primary action.
  */
 function WorkRowCard({
   row,
@@ -337,32 +338,30 @@ function WorkRowCard({
   const state = workRowState(row)
   const showPriority = row.priority_tier === 'High' || row.priority_tier === 'Medium'
   const isClosure = row.ready_for_closure
-  const meta = [row.complaint_type, row.location].filter(Boolean).join(' · ') || 'Location not provided'
+  const decisionTone = isClosure ? 'emerald' : 'amber'
+  const decisionText = isClosure
+    ? 'Field outcome recorded · Ready for closure approval'
+    : row.in_progress
+      ? `Assigned${row.assigned_to ? ` to ${row.assigned_to}` : ''} · In progress`
+      : 'Needs staff review'
   return (
-    <div className="card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          {/* Max two pills on mobile: state, plus priority only if High/Medium. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-navy-900">{row.case_id}</span>
-            <span className={`badge ${state.style}`}>{state.label}</span>
-            {showPriority && <span className={`badge ${TIER_STYLES[row.priority_tier]}`}>{row.priority_tier} priority</span>}
-          </div>
-          <div className="mt-1 truncate text-sm text-ink-muted">{meta}</div>
-          {row.in_progress && row.assigned_to && (
-            <div className="mt-0.5 text-xs text-ink-subtle">Officer: {row.assigned_to}</div>
-          )}
-        </div>
-        <button
-          onClick={isClosure ? onReviewClosure : onOpen}
-          className="btn-primary shrink-0 text-sm py-1.5 px-3"
-        >
+    <QueueCard
+      caseId={row.case_id}
+      pills={
+        <>
+          <Pill className={state.style}>{state.label}</Pill>
+          {showPriority && <Pill className={TIER_STYLES[row.priority_tier]}>{row.priority_tier} priority</Pill>}
+        </>
+      }
+      title={row.complaint_type || 'Service request'}
+      subtitle={row.location || 'Location not provided'}
+      decision={<DecisionStrip tone={decisionTone}>{decisionText}</DecisionStrip>}
+      actions={
+        <button onClick={isClosure ? onReviewClosure : onOpen} className="btn-primary text-sm py-1.5 px-3">
           {isClosure ? 'Review closure' : 'Open case'}
         </button>
-      </div>
-
-      <DecisionLogicDisclosure data={decisionLogicFromWorkRow(row)} />
-    </div>
+      }
+    />
   )
 }
 
@@ -494,109 +493,105 @@ function InboxCard({
   const selectedOfficer = officers.find((o) => o.email === selectedEmail) ?? recommendedOfficer ?? null
 
   const location = [row.location, row.city].filter(Boolean).join(', ') || 'Location not provided'
-  const meta = [row.request_type, location].filter(Boolean).join(' · ')
 
   return (
-    <div className="card p-4">
-      {/* Top: case id + status + priority pills, with the submitted date. */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-navy-900">{row.case_id}</span>
-            <span className={`badge ${STATUS_STYLES[row.status] ?? 'bg-slate-100 text-slate-700'}`}>
-              {STATUS_LABELS[row.status]}
-            </span>
-            <span className={`badge ${PRIORITY_STYLES[priority] ?? 'bg-slate-100 text-slate-700'}`}>
-              {priority} priority
-            </span>
-          </div>
-          <div className="mt-1 truncate text-sm text-ink-muted">{meta}</div>
-        </div>
-        <span className="shrink-0 text-xs text-ink-subtle tabular-nums">{formatDateTime(row.created_at)}</span>
-      </div>
-
-      {/* One-line recommendation summary: routing + recommended officer + fit
-          score + one short reason. The full scoring detail is behind Open case. */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-subtle">
-        <span>
-          Routing: <span className="text-ink-muted">{routing}</span>
-        </span>
-        {recommendedOfficer && (
-          <>
-            <span aria-hidden>·</span>
+    <QueueCard
+      caseId={row.case_id}
+      pills={
+        <>
+          <Pill className={STATUS_STYLES[row.status] ?? 'bg-slate-100 text-slate-700'}>
+            {STATUS_LABELS[row.status]}
+          </Pill>
+          <Pill className={PRIORITY_STYLES[priority] ?? 'bg-slate-100 text-slate-700'}>{priority} priority</Pill>
+        </>
+      }
+      date={formatDateTime(row.created_at)}
+      title={row.request_type}
+      subtitle={location}
+      decision={
+        // The decision row — the actual value of the supervisor queue. Readable
+        // 13px text on a soft strip, never tiny muted text.
+        <DecisionStrip tone="teal">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>
-              Recommended: <span className="font-medium text-navy-900">{officerDisplayName(recommendedOfficer)}</span>
+              Routing: <span className="font-semibold text-navy-900">{routing}</span>
             </span>
-            {fitScore != null && (
-              <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-inset ring-teal-200 tabular-nums">
-                Fit {fitScore}/100
-              </span>
+            {recommendedOfficer && (
+              <>
+                <span aria-hidden className="text-ink-subtle">
+                  ·
+                </span>
+                <span>
+                  Recommended:{' '}
+                  <span className="font-semibold text-navy-900">{officerDisplayName(recommendedOfficer)}</span>
+                </span>
+                {fitScore != null && <FitPill score={fitScore} />}
+              </>
             )}
-          </>
-        )}
-      </div>
-      {recommendedOfficer && reason && (
-        <p className="mt-1 truncate text-[11px] text-ink-subtle">
-          <span className="font-medium text-ink">Why:</span> {reason}
-        </p>
-      )}
-
-      {/* Actions: Assign recommended · Change officer · Open case. */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {canAssign && recommendedOfficer && (
-          <button
-            onClick={() => onAssign(recommendedOfficer)}
-            disabled={assigning}
-            className="btn-primary text-sm py-1.5 px-3 disabled:opacity-60"
-          >
-            {assigning ? 'Assigning…' : 'Assign recommended'}
+          </div>
+          {recommendedOfficer && reason && (
+            <div className="mt-0.5">
+              <span className="font-medium">Why:</span> {reason}
+            </div>
+          )}
+        </DecisionStrip>
+      }
+      actions={
+        <>
+          {canAssign && recommendedOfficer && (
+            <button
+              onClick={() => onAssign(recommendedOfficer)}
+              disabled={assigning}
+              className="btn-primary text-sm py-1.5 px-3 disabled:opacity-60"
+            >
+              {assigning ? 'Assigning…' : 'Assign recommended'}
+            </button>
+          )}
+          {canAssign && officers.length > 1 && (
+            <button
+              onClick={() => setChanging((v) => !v)}
+              disabled={assigning}
+              className="btn-secondary text-sm py-1.5 px-3"
+              aria-expanded={changing}
+            >
+              Change officer
+            </button>
+          )}
+          <button onClick={onOpen} className="btn-secondary text-sm py-1.5 px-3">
+            Open case
           </button>
-        )}
-        {canAssign && officers.length > 1 && (
-          <button
-            onClick={() => setChanging((v) => !v)}
-            disabled={assigning}
-            className="btn-secondary text-sm py-1.5 px-3"
-            aria-expanded={changing}
-          >
-            Change officer
-          </button>
-        )}
-        <button onClick={onOpen} className="btn-secondary text-sm py-1.5 px-3">
-          Open case
-        </button>
-      </div>
 
-      {/* Compact officer picker, only when "Change officer" is toggled. */}
-      {changing && canAssign && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <select
-            value={selectedEmail}
-            onChange={(e) => setSelectedEmail(e.target.value)}
-            disabled={assigning}
-            aria-label="Choose another By-law Officer"
-            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
-          >
-            {officers.map((o) => (
-              <option key={o.email} value={o.email}>
-                {recommendedOfficer && o.email === recommendedOfficer.email
-                  ? `${officerDisplayName(o)} (recommended)`
-                  : officerDisplayName(o)}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => selectedOfficer && onAssign(selectedOfficer)}
-            disabled={assigning || !selectedOfficer}
-            className="btn-secondary text-sm py-1.5 px-3 disabled:opacity-50"
-          >
-            {assigning ? 'Assigning…' : `Assign ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
-          </button>
-        </div>
-      )}
-
-      <p className="mt-2 text-[11px] text-ink-subtle">Recommendation only. Staff approve every assignment.</p>
-    </div>
+          {/* Compact officer picker — wraps to its own line when toggled. */}
+          {changing && canAssign && (
+            <div className="flex w-full flex-wrap items-center gap-2">
+              <select
+                value={selectedEmail}
+                onChange={(e) => setSelectedEmail(e.target.value)}
+                disabled={assigning}
+                aria-label="Choose another By-law Officer"
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50"
+              >
+                {officers.map((o) => (
+                  <option key={o.email} value={o.email}>
+                    {recommendedOfficer && o.email === recommendedOfficer.email
+                      ? `${officerDisplayName(o)} (recommended)`
+                      : officerDisplayName(o)}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => selectedOfficer && onAssign(selectedOfficer)}
+                disabled={assigning || !selectedOfficer}
+                className="btn-secondary text-sm py-1.5 px-3 disabled:opacity-50"
+              >
+                {assigning ? 'Assigning…' : `Assign ${selectedOfficer ? officerDisplayName(selectedOfficer) : 'officer'}`}
+              </button>
+            </div>
+          )}
+        </>
+      }
+      footer="Recommendation only. Staff approve every assignment."
+    />
   )
 }
 

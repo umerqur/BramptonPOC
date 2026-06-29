@@ -24,10 +24,16 @@ export default function WorkflowRail() {
 
   // Officers have a simplified, role-specific flow — no lifecycle rail.
   if (role === 'officer') return null
-  // Insights is an analytics workspace, not part of the case lifecycle.
-  if (pathname.startsWith('/app/insights')) return null
-  // Officer field surfaces never show the supervisor rail.
-  if (pathname.startsWith('/app/field')) return null
+  // The rail belongs to the case-handling flow only (Workbench → Closure Review →
+  // Case detail), where a single case is being worked. It is intentionally NOT
+  // shown on queue landing pages (the Priority Queue at /app), on Insights, or on
+  // the Officer field surfaces: on a queue list no single case is open yet, so a
+  // "Case workflow" rail there is confusing. Queue pages stay clean list pages.
+  const onCaseFlow =
+    pathname.startsWith('/app/workbench') ||
+    pathname.startsWith('/app/closure') ||
+    pathname.startsWith('/app/cases/')
+  if (!onCaseFlow) return null
 
   const activeCaseId = activeCase?.id ?? null
 
