@@ -178,6 +178,10 @@ export type ResidentRequestRow = {
   field_officer_notes: string | null
   field_follow_up_required: boolean
   field_outcome_recorded_at: string | null
+  // Supervisor closure-review "seen" state (migration 036). First time a
+  // supervisor opened / reviewed this case for closure; null while a ready-to-
+  // close case is still unseen by a supervisor.
+  supervisor_seen_at: string | null
 }
 
 /** What an officer records as the field outcome for an assigned request. */
@@ -510,11 +514,19 @@ const RESIDENT_REQUEST_ASSIGNMENT_COLUMNS = `${RESIDENT_REQUEST_BASE_COLUMNS}, a
 // Columns added by migration 028 (structured enforcement action).
 const RESIDENT_REQUEST_ENFORCEMENT_COLUMNS = 'field_enforcement_action, field_service_method, field_reference_number'
 
-const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_ASSIGNMENT_COLUMNS}, ${RESIDENT_REQUEST_ENFORCEMENT_COLUMNS}`
+const RESIDENT_REQUEST_ENFORCEMENT_TIER = `${RESIDENT_REQUEST_ASSIGNMENT_COLUMNS}, ${RESIDENT_REQUEST_ENFORCEMENT_COLUMNS}`
+
+// Column added by migration 036 (supervisor closure-review "seen" state).
+const RESIDENT_REQUEST_SUPERVISOR_COLUMN = 'supervisor_seen_at'
+
+const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_ENFORCEMENT_TIER}, ${RESIDENT_REQUEST_SUPERVISOR_COLUMN}`
 
 // Ordered richest → oldest for graceful degradation when a migration is missing.
+// Each tier drops only the columns from the migration above it, so a not-yet-
+// applied later migration never wipes the columns from earlier ones.
 const RESIDENT_COLUMN_TIERS = [
   RESIDENT_REQUEST_COLUMNS,
+  RESIDENT_REQUEST_ENFORCEMENT_TIER,
   RESIDENT_REQUEST_ASSIGNMENT_COLUMNS,
   RESIDENT_REQUEST_BASE_COLUMNS,
 ] as const
@@ -561,6 +573,7 @@ function withAssignmentDefaults(row: Record<string, unknown>): ResidentRequestRo
     field_officer_notes: (row.field_officer_notes as string | null) ?? null,
     field_follow_up_required: (row.field_follow_up_required as boolean | undefined) ?? false,
     field_outcome_recorded_at: (row.field_outcome_recorded_at as string | null) ?? null,
+    supervisor_seen_at: (row.supervisor_seen_at as string | null) ?? null,
   }
 }
 
@@ -868,4 +881,51 @@ export async function recordResidentFieldOutcome(
   })
 
   return updated
+}
+
+/**
+ * Supervisor action: record that a supervisor has opened / reviewed a
+ * ready-to-close case. Sets supervisor_seen_at the FIRST time only (we never
+ * clear or overwrite it) so the "new closure review" alert stops once the
+ * supervisor has seen the case — persisted on the shared row, not local browser
+ * state. Best-effort: if migration 036 has not been applied yet the column is
+ * absent (Postgres 42703) and we degrade silently so the queue still works.
+ *
+ * Returns true when a first-seen timestamp was written, false when it was
+ * already seen, the column is missing, or the write failed.
+ */
+export async function markSupervisorSeen(caseId: string): Promise<boolean> {
+  const client = requireClient()
+  const now = new Date().toISOString()
+  // Only stamp the first time: the .is('supervisor_seen_at', null) filter makes
+  // this idempotent and preserves the original first-seen time on repeat opens.
+  const { data, error } = await client
+    .from(RESIDENT_REQUESTS_TABLE)
+    .update({ supervisor_seen_at: now })
+    .eq('case_id', caseId)
+    .is('supervisor_seen_at', null)
+    .select('case_id')
+
+  if (error) {
+    // Column not present yet (migration 036 not applied) — don't break the UI.
+    if (isUndefinedColumnError(error)) {
+      console.warn('supervisor_seen_at not available yet (apply migration 036).')
+      return false
+    }
+    console.error('Failed to mark case as seen by supervisor:', error)
+    return false
+  }
+
+  const seenNow = Array.isArray(data) && data.length > 0
+  if (seenNow) {
+    // Audit the first supervisor view (no status change, no resident email).
+    await addWorkflowEvent({
+      case_id: caseId,
+      event_type: 'resident_request_supervisor_seen',
+      event_label: 'Supervisor opened case for closure review',
+      actor_type: 'staff',
+      notes: 'First supervisor view of a ready-to-close case (closure-review queue).',
+    }).catch((err: unknown) => console.error('Failed to record supervisor-seen event:', err))
+  }
+  return seenNow
 }
