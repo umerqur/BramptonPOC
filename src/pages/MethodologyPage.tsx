@@ -46,12 +46,12 @@ const aiCards = [
     'Uses embeddings and reranking to surface comparable public benchmark cases for reference. It supports review context only and does not decide outcomes.',
   ],
   [
-    'Synthetic Demand',
-    'Uses CTGAN to generate synthetic planning demand from a public 311 benchmark. It does not create or claim real Brampton records.',
+    'Synthetic Demand Engine',
+    'Uses CTGAN, a neural network with a generator and discriminator, to learn the structure of public 311 service demand and generate statistically plausible synthetic cases. The model preserves key patterns such as complaint mix, volume distribution, geography, timing, and closure behaviour, so simulations are grounded in real service dynamics without claiming the records are real Brampton data.',
   ],
   [
-    'Queue Simulation',
-    'Uses ABM to run synthetic demand through district queues, officer capacity, supervisor review, and closure pressure for capacity planning.',
+    'Graph Based ABM Simulation',
+    'Runs synthetic demand through a graph based agent simulation of district queues, officer capacity, supervisor review, field activity, and closure pressure. Shocks propagate through the system so staff can see where overload starts, how it spreads, and which mitigation response reduces delay or backlog.',
   ],
   [
     'Rules Based Workflow Support',
@@ -146,6 +146,12 @@ export default function MethodologyPage() {
               <Card key={title} title={title} detail={detail} />
             ))}
           </div>
+          <p className="mt-4 text-xs leading-relaxed text-ink-subtle">
+            <span className="font-semibold text-ink-muted">Validation:</span> Synthetic scenarios are checked using
+            statistical fidelity tests such as distribution match, correlation preservation, category balance, and
+            operational KPI alignment. The goal is not to invent real records. The goal is to create realistic stress
+            conditions for planning and decision support.
+          </p>
         </Section>
 
         {/* Section 4: How stress testing works */}
