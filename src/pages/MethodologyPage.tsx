@@ -59,12 +59,14 @@ const aiCards = [
   ],
 ] as const
 
-// 4. How stress testing works — synthetic demand, scenario shocks, queue ABM.
+// 4. How stress testing works — CTGAN synthetic demand, scenario shocks, a graph
+// based ABM, and the overload/mitigation view. Framed as a graph based stress
+// simulation, not a simple queue model.
 const stressCards = [
-  ['Synthetic 311 demand', 'Creates planning scenarios from a public 311 benchmark.'],
-  ['Scenario shock testing', 'Shows what happens when demand rises or capacity drops.'],
-  ['Queue based ABM', 'Runs demand through district queues, officer capacity, supervisor review, and closure pressure.'],
-  ['Stress Testing tab', 'Shows backlog risk, stale case risk, red zones, and prevention actions.'],
+  ['CTGAN synthetic demand', 'Trains a generator and discriminator on public 311 benchmark patterns to create statistically plausible planning demand without claiming the records are real Brampton operational data.'],
+  ['Scenario shock testing', 'Applies stress conditions such as demand spikes, staffing drops, supervisor bottlenecks, weather events, construction pressure, or parking and noise surges.'],
+  ['Graph based ABM', 'Runs synthetic demand through a graph of districts, officer capacity, field activity, supervisor review, closure pressure, and service queues.'],
+  ['Overload and mitigation view', 'Shows where pressure starts, how it propagates, which districts or complaint types become overloaded, and which prevention actions reduce delay or backlog.'],
 ] as const
 
 // 5. What it produces — compact output pills.
@@ -157,7 +159,7 @@ export default function MethodologyPage() {
         {/* Section 4: How stress testing works */}
         <Section
           title="How stress testing works"
-          lead="Synthetic demand and a queue based simulation show workload pressure before it becomes backlog, stale cases, or delayed closure updates."
+          lead="Synthetic demand is generated from a public 311 benchmark, then passed through a graph based agent simulation to show how operational pressure builds, spreads, and can be mitigated before it becomes backlog, stale cases, or delayed closure updates."
         >
           <FlowCards items={stressCards} />
           <p className="mt-4 text-xs leading-relaxed text-ink-subtle">
