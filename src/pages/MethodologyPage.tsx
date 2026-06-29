@@ -15,12 +15,15 @@ const workflowSteps = [
   ['7', 'Resident update', 'Approved response is sent to the resident.'],
 ] as const
 
+// The moving parts of the operations model, in plain business terms. Each is a
+// real part of the operation the simulation tracks — named for what it is, not
+// for the code behind it.
 const abmAgents = [
-  ['ComplaintAgent', 'A synthetic service request moving through the system.'],
-  ['OfficerUnitAgent', 'Available field capacity, measured in officer minutes.'],
-  ['DistrictAgent', 'A geographic area receiving and holding demand.'],
-  ['SupervisorQueueAgent', 'Closure responses waiting for human approval.'],
-  ['ResidentUpdateAgent', 'The approved update sent back to residents.'],
+  ['Service request', 'A complaint moving through the system, from intake to closure.'],
+  ['Field capacity', 'The officer time available to work cases each day.'],
+  ['District demand', 'A district receiving and holding incoming requests.'],
+  ['Supervisor review', 'Closure responses waiting for human approval.'],
+  ['Resident update', 'The approved update sent back to the resident.'],
 ] as const
 
 const abmRules = [
@@ -33,11 +36,11 @@ const abmRules = [
 ] as const
 
 const couplingFlow = [
-  'Historical 311 records',
+  'Public 311 benchmark',
   'Synthetic demand generator',
-  'Synthetic complaint agents',
+  'Synthetic service requests',
   'District and officer capacity model',
-  'Supervisor queue',
+  'Supervisor review',
   'Planning outputs',
 ] as const
 
@@ -239,46 +242,53 @@ export default function MethodologyPage() {
               </p>
             </div>
 
-            {/* CTGAN + ABM explainers */}
+            {/* The two building blocks — business-friendly first, with the
+                technical method name kept as a small secondary tag. */}
             <div className="grid gap-5 lg:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md bg-accent-100 px-2 py-0.5 text-xs font-semibold text-accent-800">
-                    CTGAN
-                  </span>
+                <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold text-navy-900">Synthetic demand generator</h3>
+                  <span className="rounded-md bg-accent-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-800">
+                    Method: CTGAN
+                  </span>
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-                  CTGAN is a neural network architecture for synthetic tabular data. In this POC it learns statistical
-                  patterns from 3.4M New York City 311 public records from the past 12 months — such as complaint type,
-                  district, timing, backlog pressure, and closure patterns. It can generate realistic synthetic service
-                  request scenarios that look statistically similar to historical demand, without claiming to be real
-                  Brampton records.
+                  This learns the patterns in the public 311 benchmark — complaint type mix, district pressure, timing,
+                  and closure patterns — and uses them to create realistic synthetic demand scenarios. The scenarios look
+                  statistically similar to real demand, but they are synthetic and never claim to be real Brampton
+                  records.
+                </p>
+                <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+                  The method behind it (CTGAN) is a model for generating synthetic data — included here for transparency.
                 </p>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md bg-accent-100 px-2 py-0.5 text-xs font-semibold text-accent-800">
-                    ABM
-                  </span>
+                <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold text-navy-900">Explainable operations model</h3>
+                  <span className="rounded-md bg-accent-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-800">
+                    Method: ABM
+                  </span>
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-                  An agent based model is a rules based simulation where each part of the operation is represented as an
-                  agent. The rules are visible, so staff can understand why backlog, supervisor pressure, or district
-                  overload appears.
+                  This runs the synthetic demand through the real parts of the operation, using clear, visible rules. Staff
+                  can see why backlog, supervisor pressure, or district pressure appears — nothing is hidden in a black
+                  box. The parts it tracks:
                 </p>
                 <ul className="mt-4 space-y-1.5">
                   {abmAgents.map(([name, desc]) => (
                     <li key={name} className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                      <span className="rounded bg-white px-1.5 py-0.5 font-mono font-semibold text-navy-800 ring-1 ring-inset ring-slate-200">
+                      <span className="rounded bg-white px-1.5 py-0.5 font-semibold text-navy-800 ring-1 ring-inset ring-slate-200">
                         {name}
                       </span>
                       <span className="text-ink-muted">{desc}</span>
                     </li>
                   ))}
                 </ul>
+                <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+                  The method behind it (an agent based model, or ABM) simply means each part of the operation follows its
+                  own visible rules.
+                </p>
               </div>
             </div>
 
