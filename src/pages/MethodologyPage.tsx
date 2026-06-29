@@ -57,6 +57,46 @@ const whyItMatters = [
   ['For analytics and research', 'Transparent assumptions, reproducible simulation logic, and explainable outputs.'],
 ] as const
 
+// The full stress-testing lineage, business-facing title + plain description
+// first, with the technical table/view name kept small in a `tech` note.
+const stressLineage = [
+  [
+    'Public 311 benchmark cases',
+    'Real municipal complaint records used for POC benchmarking. These are public New York City 311 records, not Brampton operational data.',
+    'municipal_complaints',
+  ],
+  [
+    'Rules based synthetic patrol log generator',
+    'A transparent, rules based generator estimates likely field activity, officer workload, supervisor review needs, and closure effort for each case. The estimates are synthetic — not a record of real patrol work.',
+    'generate_synthetic_patrol_logs.py',
+  ],
+  [
+    'Synthetic patrol logs',
+    'The estimated field activity is stored as synthetic patrol logs. They are synthetic and rules based, not real Brampton patrol history.',
+    'synthetic_patrol_logs (Supabase)',
+  ],
+  [
+    'Aggregate workload views',
+    'The logs are rolled up into workload signals by district, officer unit, and complaint type — estimated hours, supervisor review counts, and coverage.',
+    'v_synthetic_patrol_workload_by_* views',
+  ],
+  [
+    'Scenario simulation',
+    'A scenario layer creates scenario adjusted demand and pressure outputs, running the workload through a district by district capacity model to see where queues build.',
+    'CTGAN + ABM · ctgan_abm_* views',
+  ],
+  [
+    'Red zone analysis',
+    'The Stress Testing tab reads the current baseline, the projected trajectory, the worst case red zones, and the failure drivers behind them.',
+    'Stress Testing tab',
+  ],
+  [
+    'Supervisor prevention actions',
+    'Each red zone comes with a recommended action — where to move review or field capacity before backlog compounds. Staff remain responsible for review and action.',
+    'Recommended actions',
+  ],
+] as const
+
 const governanceCards = [
   ['Public source data', 'Built on public NYC 311 service request records, not Brampton operational data.'],
   ['Labelled scenarios', 'Synthetic demand scenarios are clearly labelled as simulation, never real records.'],
@@ -130,12 +170,55 @@ export default function MethodologyPage() {
               AI Simulation &amp; Risk Modelling
             </h2>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-navy-100">
-              The POC can move beyond dashboards into a simulation layer. It uses AI generated demand scenarios and an
-              explainable operations model to test where service pressure could create bottlenecks before they happen.
+              The POC moves beyond dashboards into a simulation layer. It tests where service pressure could create
+              bottlenecks before they happen, and reports a current baseline, a projected trajectory, the worst case red
+              zones, the failure drivers behind them, and the recommended prevention actions. This is planning simulation
+              and decision support only — not live Brampton operational data, and not real Brampton patrol history. Staff
+              remain responsible for review and action.
             </p>
           </div>
 
           <div className="space-y-8 px-6 py-8 sm:px-8">
+            {/* How the stress testing data is created — business-friendly lineage,
+                staff language first with technical names kept small. */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
+              <h3 className="text-2xl font-bold tracking-tight text-navy-900 sm:text-3xl">
+                How the stress testing data is created
+              </h3>
+              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-muted">
+                Each stage builds on the one before it, from real benchmark complaints to a recommended supervisor
+                action. The numbers are an estimate for planning — they describe where pressure could build, not what
+                has happened.
+              </p>
+              <ol className="mt-6 space-y-3">
+                {stressLineage.map(([title, detail, tech], i) => (
+                  <li key={title} className="flex gap-4">
+                    <div className="flex flex-col items-center">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-navy-900 text-sm font-semibold text-white">
+                        {i + 1}
+                      </span>
+                      {i < stressLineage.length - 1 && <span aria-hidden className="mt-1 w-px flex-1 bg-slate-200" />}
+                    </div>
+                    <div className="flex-1 pb-2">
+                      <h4 className="text-sm font-semibold text-navy-900">{title}</h4>
+                      <p className="mt-1 text-sm leading-relaxed text-ink-muted">{detail}</p>
+                      <span className="mt-1.5 inline-flex items-center gap-1.5 rounded bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-ink-subtle ring-1 ring-inset ring-slate-200">
+                        {tech}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm leading-relaxed text-amber-900">
+                <span className="font-semibold">What this is, and is not: </span>
+                the public 311 benchmark cases are real municipal complaint records used for POC benchmarking. The patrol
+                logs are synthetic and rules based — they estimate likely field activity, officer workload, supervisor
+                review needs, and closure effort. This is not live Brampton operational data and not real Brampton patrol
+                history. It is planning simulation and decision support only, and staff remain responsible for review and
+                action.
+              </div>
+            </div>
+
             {/* CTGAN + ABM explainers */}
             <div className="grid gap-5 lg:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">

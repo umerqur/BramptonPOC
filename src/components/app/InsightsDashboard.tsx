@@ -55,6 +55,16 @@ import {
   type CtganDistrictPressureRow,
   type CtganComplaintTypePressureRow,
 } from '../../services/ctganAbmStress'
+import { getWorkloadByDistrict, type DistrictWorkload } from '../../services/stressTesting'
+import {
+  buildStressModel,
+  pressureTier,
+  RED_ZONE_THRESHOLD,
+  type ScenarioCard,
+  type RedZoneDistrict,
+  type StressModel,
+  type Trajectory,
+} from './stressModel'
 
 // Insights — operational workload intelligence over a public 311 benchmark
 // service-request dataset. Tabs: Overview (map, KPIs, charts), Case Explorer
@@ -1180,7 +1190,6 @@ const ctStr = (v: unknown, fallback = '—'): string => {
   return s.length ? s : fallback
 }
 
-const ctDate = (v: unknown): string => formatPlainDate(v == null ? null : String(v)) ?? '—'
 
 // Required, fixed POC labelling reused across the stress-testing visuals.
 const POC_BENCHMARK_NOTE = 'Public 311 benchmark data for POC modelling. Not live Brampton operational data.'
@@ -1239,9 +1248,6 @@ function SimulationLab() {
     [dailyRows],
   )
 
-  // Backlog interpretation for the capacity-bottleneck callout: does the backlog
-  // clear by the end of the horizon, or is officer/supervisor capacity binding?
-  const backlogBinding = finalBacklog > 0 && peakBacklog > 0
   const districtCount = districtRows.length
 
   // --- Methodology answers from this run -------------------------------------
@@ -1322,66 +1328,101 @@ function SimulationLab() {
   }, [dailyRows])
   const backlogShare = generatedCases > 0 ? finalBacklog / generatedCases : null
 
+  // Synthetic patrol workload per district — optional enrichment for the red-zone
+  // analysis (officer units, review-flagged count). A load failure just omits it.
+  const patrolDistricts = useLive<DistrictWorkload[]>(getWorkloadByDistrict)
+
+  // The interpreted stress reading: baseline, trajectory, worst-case scenarios,
+  // and per-district red-zone analysis. Derived only from this run's loaded rows.
+  const model = useMemo<StressModel>(
+    () =>
+      buildStressModel({
+        districtRows,
+        dailyRows,
+        complaintRows,
+        runSummary: latestRun.data ?? null,
+        patrolByDistrict: patrolDistricts.data ?? undefined,
+      }),
+    [districtRows, dailyRows, complaintRows, latestRun.data, patrolDistricts.data],
+  )
+
   return (
     <div className="mt-6 space-y-6">
-      {/* 1. Run interpretation — concise headline + how to read this run. */}
-      <section className="card overflow-hidden">
-        <div className="border-b border-slate-200 bg-navy-900 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-white">Run interpretation</h2>
-            <span className="inline-flex items-center rounded-full bg-sky-400/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-200 ring-1 ring-inset ring-sky-400/30">
-              Planning simulation
-            </span>
-          </div>
-          {anyLoading ? (
-            <p className="mt-1.5 text-xs text-navy-100">Connecting to CTGAN ABM outputs…</p>
-          ) : showPending ? (
-            <p className="mt-1.5 text-xs text-navy-100">The latest CTGAN ABM run is pending load.</p>
-          ) : (
-            <p className="mt-1.5 max-w-3xl text-xs leading-relaxed text-navy-100">
-              {ctStr(latestRun.data?.scenario_name)} · run {ctStr(latestRun.data?.run_id)} ·{' '}
-              {ctDate(latestRun.data?.run_date)}. Synthetic 311 demand run through {fmtInt(districtCount)} district queues
-              over {fmtInt(simulatedDays)} days. Decision support only — not live Brampton operational data, never an
-              enforcement decision.
-            </p>
-          )}
-        </div>
-
-        {!anyLoading && !showPending && (
-          <div className="px-5 py-4">
-            <div
-              className={`rounded-lg border px-4 py-3 text-xs leading-relaxed ${
-                backlogBinding
-                  ? 'border-amber-200 bg-amber-50/70 text-amber-900'
-                  : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
-              }`}
-            >
-              <span className="font-semibold">Reading this run: </span>
-              {backlogBinding ? (
-                <>
-                  capacity is binding. Backlog persists to the end of the horizon (final {fmtInt(finalBacklog)}, peak{' '}
-                  {fmtInt(peakBacklog)}) and the supervisor queue peaks at {fmtInt(peakSupervisorQueue)} — added field or
-                  review capacity is where the simulation relieves pressure.
-                </>
-              ) : (
-                <>
-                  modeled capacity keeps pace. Backlog clears within the horizon (final {fmtInt(finalBacklog)}) under the
-                  generated demand.
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* 2. 3D simulation pressure map — the command-centre centrepiece. */}
-      <SimulationPressureMap
-        districtRows={districtRows}
-        peakSupervisorQueue={peakSupervisorQueue}
+      {/* 1. Stress test summary — the operational headline. Answers, in one band:
+            where the workload breaks, why, and what to do. */}
+      <StressTestSummary
+        model={model}
         loading={anyLoading}
+        showPending={showPending}
+        scenarioName={ctStr(latestRun.data?.scenario_name)}
+        simulatedDays={simulatedDays}
+        districtCount={districtCount}
       />
 
-      {/* 3. ABM flow diagram — the four-stage model, shown even with no data loaded. */}
+      {/* 2. 3D scenario pressure map + interpretation panel (what changed / why it
+            matters / what to do next). The map is no longer the whole story. */}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <SimulationPressureMap
+          districtRows={districtRows}
+          peakSupervisorQueue={peakSupervisorQueue}
+          loading={anyLoading}
+        />
+        <MapInterpretationPanel model={model} loading={anyLoading} showPending={showPending} />
+      </div>
+
+      {/* 3. Worst case scenarios — the four named stresses, each interpreted. */}
+      <CtganSection
+        title="Worst case scenarios"
+        subtitle="Four stresses applied to the current baseline. Pressure is a 0–100 reading; a district enters the red zone at 70+."
+      >
+        {showPending || model.scenarios.length === 0 ? (
+          <CtganPendingNote />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {model.scenarios.map((s) => (
+              <ScenarioCardView key={s.key} scenario={s} isWorst={model.worstScenario?.key === s.key} />
+            ))}
+          </div>
+        )}
+      </CtganSection>
+
+      {/* 4. Red zone analysis — names and explains each highly stressed district. */}
+      <CtganSection
+        title="Red zone analysis"
+        subtitle="Districts that break first. For each: current baseline pressure, worst-case scenario pressure, the bottleneck behind it, and the recommended action."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : model.redZoneDistricts.length === 0 ? (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900">
+            No districts reach the red zone under the modeled scenarios. Pressure stays in the manageable-to-watch band
+            across the benchmark workload.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {model.redZoneDistricts.map((d) => (
+              <RedZoneDistrictCard key={d.districtNumber} district={d} />
+            ))}
+          </div>
+        )}
+      </CtganSection>
+
+      {/* 5. Methodology zone — the technical model behind the readings above.
+            Framework / CTGAN / ABM wording lives here, not in the staff-facing
+            sections at the top of the tab. */}
+      <div className="flex items-center gap-3 pt-2">
+        <span className="h-px flex-1 bg-slate-200" />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">
+          Methodology &amp; model details
+        </span>
+        <span className="h-px flex-1 bg-slate-200" />
+      </div>
+      <p className="-mt-3 max-w-3xl text-xs leading-relaxed text-ink-subtle">
+        The readings above are interpreted from a planning simulation: public 311 benchmark demand is run through a
+        district-by-district capacity model. The model, its inputs, and the raw run measures are below.
+      </p>
+
+      {/* ABM flow diagram — the four-stage model, shown even with no data loaded. */}
       <section className="card overflow-hidden">
         <div className="border-b border-slate-200 px-5 py-4">
           <h3 className="text-sm font-semibold text-navy-900">ABM flow diagram</h3>
@@ -2085,6 +2126,386 @@ function SimCard({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
       <div className={`mt-1.5 truncate text-2xl font-bold tabular-nums ${s.value}`}>{value}</div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Stress Testing — staff-facing interpretation views
+//
+// These render the interpreted reading from stressModel (baseline, trajectory,
+// worst-case scenarios, red-zone analysis). Staff language only — baseline,
+// scenario, pressure, red zone, bottleneck, recommended action.
+// ---------------------------------------------------------------------------
+
+// Shared pressure-tier styling (manageable / watch / red zone).
+const TIER_STYLE: Record<
+  ReturnType<typeof pressureTier>,
+  { label: string; chip: string; bar: string; text: string }
+> = {
+  manageable: {
+    label: 'Manageable',
+    chip: 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200',
+    bar: 'bg-emerald-500',
+    text: 'text-emerald-700',
+  },
+  watch: {
+    label: 'Watch',
+    chip: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200',
+    bar: 'bg-amber-500',
+    text: 'text-amber-700',
+  },
+  red: {
+    label: 'Red zone',
+    chip: 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200',
+    bar: 'bg-rose-500',
+    text: 'text-rose-700',
+  },
+}
+
+const TRAJECTORY_META: Record<Trajectory, { label: string; arrow: string; text: string; helper: string }> = {
+  rising: { label: 'Rising', arrow: '↑', text: 'text-rose-700', helper: 'Backlog climbs across the horizon if nothing changes' },
+  stable: { label: 'Stable', arrow: '→', text: 'text-amber-700', helper: 'Backlog holds roughly level across the horizon' },
+  easing: { label: 'Easing', arrow: '↓', text: 'text-emerald-700', helper: 'Backlog trends down across the horizon' },
+}
+
+/** A compact 0–100 pressure score with its tier colour and a thin gauge bar. */
+function PressureScore({ score, size = 'md' }: { score: number; size?: 'md' | 'lg' }) {
+  const tier = TIER_STYLE[pressureTier(score)]
+  return (
+    <div>
+      <div className="flex items-baseline gap-1.5">
+        <span className={`font-bold tabular-nums ${tier.text} ${size === 'lg' ? 'text-3xl' : 'text-2xl'}`}>
+          {Math.round(score)}
+        </span>
+        <span className="text-xs text-ink-subtle">/ 100</span>
+      </div>
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${tier.bar}`} style={{ width: `${Math.max(2, Math.min(100, score))}%` }} />
+      </div>
+    </div>
+  )
+}
+
+/** One labelled tile in the stress test summary band. */
+function SummaryItem({
+  label,
+  children,
+  accent,
+}: {
+  label: string
+  children: React.ReactNode
+  accent?: boolean
+}) {
+  return (
+    <div className={`rounded-xl border p-4 ${accent ? 'border-rose-200 bg-rose-50/40' : 'border-slate-200 bg-white'}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
+      <div className="mt-1.5 text-sm leading-relaxed text-navy-900">{children}</div>
+    </div>
+  )
+}
+
+/**
+ * Stress test summary — the top band. Six plain readings that answer where the
+ * workload breaks, why, and what to do: Current baseline, Trajectory, Worst case,
+ * Red zone districts, Failure driver, Prevention action.
+ */
+function StressTestSummary({
+  model,
+  loading,
+  showPending,
+  scenarioName,
+  simulatedDays,
+  districtCount,
+}: {
+  model: StressModel
+  loading: boolean
+  showPending: boolean
+  scenarioName: string
+  simulatedDays: number
+  districtCount: number
+}) {
+  const traj = TRAJECTORY_META[model.trajectory]
+  const redNums = model.redZoneDistricts.slice(0, 6).map((d) => d.districtNumber)
+  return (
+    <section className="card overflow-hidden">
+      <div className="border-b border-slate-200 bg-navy-900 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-base font-semibold text-white">Stress test summary</h2>
+          <span className="inline-flex items-center rounded-full bg-sky-400/20 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-200 ring-1 ring-inset ring-sky-400/30">
+            Planning simulation
+          </span>
+        </div>
+        {loading ? (
+          <p className="mt-1.5 text-xs text-navy-100">Loading the latest scenario…</p>
+        ) : showPending || !model.hasData ? (
+          <p className="mt-1.5 text-xs text-navy-100">The latest scenario is pending load.</p>
+        ) : (
+          <p className="mt-1.5 max-w-3xl text-xs leading-relaxed text-navy-100">
+            Where the workload breaks, why, and what to do — read from the latest scenario across {fmtInt(districtCount)}{' '}
+            districts over {fmtInt(simulatedDays)} days. Decision support only, not live Brampton operational data.
+          </p>
+        )}
+      </div>
+
+      <div className="px-5 py-5">
+        {loading ? (
+          <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">
+            Loading stress test summary…
+          </div>
+        ) : showPending || !model.hasData ? (
+          <CtganPendingNote />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <SummaryItem label="Current baseline">
+              <PressureScore score={model.baselinePressure} />
+              <p className="mt-1.5 text-[11px] text-ink-subtle">Current benchmark workload pressure</p>
+            </SummaryItem>
+
+            <SummaryItem label="Trajectory">
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-2xl font-bold ${traj.text}`}>{traj.arrow}</span>
+                <span className={`text-lg font-semibold ${traj.text}`}>{traj.label}</span>
+              </div>
+              <p className="mt-1.5 text-[11px] text-ink-subtle">{traj.helper} if no intervention.</p>
+            </SummaryItem>
+
+            <SummaryItem label="Worst case" accent>
+              <PressureScore score={model.worstCasePressure} />
+              <p className="mt-1.5 text-[11px] text-ink-subtle">
+                {model.worstScenario ? model.worstScenario.name : 'Stress scenario'} — the highest-pressure scenario
+              </p>
+            </SummaryItem>
+
+            <SummaryItem label="Red zone districts" accent={model.redZoneCount > 0}>
+              <span className="text-2xl font-bold tabular-nums text-navy-900">{fmtInt(model.redZoneCount)}</span>
+              <p className="mt-1.5 text-[11px] text-ink-subtle">
+                {redNums.length > 0 ? (
+                  <>Districts {redNums.join(', ')}{model.redZoneCount > redNums.length ? ' and more' : ''}</>
+                ) : (
+                  'No districts reach the red zone'
+                )}
+              </p>
+            </SummaryItem>
+
+            <SummaryItem label="Failure driver">
+              <span className="text-base font-semibold text-navy-900">{model.failureDriver}</span>
+              <p className="mt-1.5 text-[11px] text-ink-subtle">The bottleneck that breaks first under stress</p>
+            </SummaryItem>
+
+            <SummaryItem label="Prevention action">
+              <p className="text-[13px] leading-relaxed text-navy-900">{model.preventionAction}</p>
+            </SummaryItem>
+          </div>
+        )}
+        {!loading && !showPending && model.hasData && (
+          <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+            Baseline is the current benchmark workload. Trajectory is the projected direction with no intervention. Worst
+            case is the stress scenario result. The prevention action is the recommended step to avoid the red zone.
+            {scenarioName ? ` Scenario: ${scenarioName}.` : ''}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Map interpretation panel — sits beside the 3D scenario pressure map and reads
+ * it for staff: what changed, why it matters, what to do next. The red zones are
+ * not only visual; this panel names and explains them.
+ */
+function MapInterpretationPanel({
+  model,
+  loading,
+  showPending,
+}: {
+  model: StressModel
+  loading: boolean
+  showPending: boolean
+}) {
+  return (
+    <section className="card flex flex-col overflow-hidden">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <h3 className="text-sm font-semibold text-navy-900">What the map is telling you</h3>
+        <p className="mt-1 text-xs text-ink-subtle">Reading the scenario pressure, not just rendering it.</p>
+      </div>
+      <div className="flex-1 px-5 py-4">
+        {loading ? (
+          <div className="animate-pulse rounded-md bg-slate-100/70 py-10 text-center text-sm text-ink-subtle">
+            Loading interpretation…
+          </div>
+        ) : showPending || !model.hasData ? (
+          <CtganPendingNote />
+        ) : (
+          <div className="space-y-4">
+            <InterpretationBlock label="What changed" tone="neutral">
+              {model.whatChanged}
+            </InterpretationBlock>
+            <InterpretationBlock label="Why it matters" tone="warn">
+              {model.whyItMatters}
+            </InterpretationBlock>
+            <InterpretationBlock label="What to do next" tone="action">
+              {model.whatToDoNext}
+            </InterpretationBlock>
+
+            {/* Pressure tier legend so the map colours read consistently. */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-[11px] text-ink-subtle">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" /> Manageable
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" /> Watch
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-500" /> Red zone ({RED_ZONE_THRESHOLD}+)
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+const INTERP_TONE: Record<'neutral' | 'warn' | 'action', { border: string; label: string }> = {
+  neutral: { border: 'border-l-slate-300', label: 'text-slate-600' },
+  warn: { border: 'border-l-amber-400', label: 'text-amber-700' },
+  action: { border: 'border-l-teal-500', label: 'text-teal-700' },
+}
+
+function InterpretationBlock({
+  label,
+  tone,
+  children,
+}: {
+  label: string
+  tone: 'neutral' | 'warn' | 'action'
+  children: React.ReactNode
+}) {
+  const t = INTERP_TONE[tone]
+  return (
+    <div className={`border-l-2 pl-3 ${t.border}`}>
+      <div className={`text-[10px] font-semibold uppercase tracking-wider ${t.label}`}>{label}</div>
+      <p className="mt-1 text-xs leading-relaxed text-ink-muted">{children}</p>
+    </div>
+  )
+}
+
+/** One worst-case scenario card: name, pressure score, districts affected, why, what to do. */
+function ScenarioCardView({ scenario, isWorst }: { scenario: ScenarioCard; isWorst: boolean }) {
+  const tier = TIER_STYLE[pressureTier(scenario.pressure)]
+  return (
+    <div className={`rounded-xl border p-4 ${isWorst ? 'border-rose-300 bg-rose-50/30 ring-1 ring-rose-200' : 'border-slate-200 bg-white'}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-semibold text-navy-900">{scenario.name}</h4>
+            {isWorst && (
+              <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-rose-800">
+                Worst case
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 text-[11px] text-ink-subtle">Bottleneck: {scenario.bottleneck}</div>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${tier.chip}`}>{tier.label}</span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Pressure score</div>
+          <div className="mt-1">
+            <PressureScore score={scenario.pressure} />
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Districts affected</div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-navy-900">{fmtInt(scenario.districtsAffected)}</div>
+          {scenario.affectedDistrictNumbers.length > 0 && (
+            <div className="text-[11px] text-ink-subtle">Districts {scenario.affectedDistrictNumbers.join(', ')}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Why it happens</div>
+          <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{scenario.why}</p>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-teal-700">What to do</div>
+          <p className="mt-0.5 text-xs leading-relaxed text-navy-900">{scenario.action}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** One red-zone district: number, current vs scenario pressure, change, top types, bottleneck, mitigation. */
+function RedZoneDistrictCard({ district }: { district: RedZoneDistrict }) {
+  const tier = TIER_STYLE[pressureTier(district.scenarioPressure)]
+  const changeUp = district.change > 0
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-base font-bold text-white">
+            {district.districtNumber}
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-semibold text-navy-900">{district.label}</h4>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${tier.chip}`}>{tier.label}</span>
+            </div>
+            <div className="mt-0.5 text-[11px] text-ink-subtle">
+              Main bottleneck: <span className="font-medium text-ink-muted">{district.bottleneck}</span>
+              {district.officerUnits != null && district.officerUnits > 0 && (
+                <> · {fmtInt(district.officerUnits)} officer units</>
+              )}
+              {district.reviewFlagged != null && district.reviewFlagged > 0 && (
+                <> · {fmtInt(district.reviewFlagged)} review-flagged</>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Current → scenario pressure with the change. */}
+        <div className="flex items-center gap-3 text-right">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Current</div>
+            <div className="text-lg font-bold tabular-nums text-navy-900">{district.currentPressure}</div>
+          </div>
+          <span className="text-ink-subtle">→</span>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Scenario</div>
+            <div className={`text-lg font-bold tabular-nums ${tier.text}`}>{district.scenarioPressure}</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Change</div>
+            <div className={`text-lg font-bold tabular-nums ${changeUp ? 'text-rose-700' : 'text-emerald-700'}`}>
+              {changeUp ? '+' : ''}
+              {district.change}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {district.topComplaintTypes.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Top complaint types:</span>
+          {district.topComplaintTypes.map((t) => (
+            <span key={t} className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-ink-muted">
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 rounded-lg border border-teal-100 bg-teal-50/50 px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-teal-700">Recommended mitigation</div>
+        <p className="mt-0.5 text-xs leading-relaxed text-navy-900">{district.mitigation}</p>
+      </div>
     </div>
   )
 }
