@@ -26,6 +26,7 @@ export function QueueCard({
   decision,
   actions,
   footer,
+  accent,
 }: {
   caseId: string
   pills?: ReactNode
@@ -35,9 +36,13 @@ export function QueueCard({
   decision?: ReactNode
   actions?: ReactNode
   footer?: ReactNode
+  /** Subtle left-border accent. `new` marks a fresh, not-yet-triaged intake so it
+   *  stands out in a mixed list — a quiet cue, never an aggressive highlight. */
+  accent?: 'new'
 }) {
+  const accentClass = accent === 'new' ? 'border-l-2 border-l-teal-400' : ''
   return (
-    <div className="card p-4">
+    <div className={`card p-4 ${accentClass}`}>
       {/* Top row: case id + status/priority pills, with the date right-aligned. */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">

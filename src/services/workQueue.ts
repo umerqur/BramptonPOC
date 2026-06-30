@@ -145,6 +145,40 @@ export function needsOfficerAssignment(row: ResidentRequestRow): boolean {
   return isActiveResident(row) && row.status !== 'closed' && !row.assigned_officer_name
 }
 
+// ---------------------------------------------------------------------------
+// Supervisor workflow buckets — New → Active → Ready to close
+// ---------------------------------------------------------------------------
+//
+// The Staff Workbench groups active cases into three plain supervisor buckets.
+// The live resident model uses a 5-value status enum
+// (submitted/received/assigned/in_review/closed) plus the field_visit_completed
+// flag, but we recognize the broader municipal status vocabulary too so the
+// buckets stay correct if upstream statuses ever expand. These are workflow
+// groupings only — never an automated enforcement decision.
+
+/** Newly submitted intakes that have not been triaged or assigned yet. */
+export const NEW_STATUSES = ['new', 'submitted', 'unassigned', 'intake_received', 'received']
+/** Cases being worked: assigned, under review, waiting on officer action, or investigating. */
+export const ACTIVE_STATUSES = ['needs_review', 'in_progress', 'assigned', 'under_review', 'investigating', 'in_review']
+/** Field outcome recorded, waiting on supervisor closure approval. */
+export const CLOSURE_STATUSES = ['closure_ready', 'ready_for_closure', 'pending_closure_approval']
+
+export type SupervisorBucket = 'new' | 'active' | 'closure'
+
+/**
+ * Classify a normalized work row into the supervisor workflow buckets:
+ * New → Active → Ready to close. Closure readiness (a recorded field outcome)
+ * takes precedence, then active/assigned work, else a new untriaged intake. The
+ * derived flags are the source of truth; the status-string fallbacks keep the
+ * mapping correct for the broader status vocabulary.
+ */
+export function classifySupervisorBucket(row: WorkQueueRow): SupervisorBucket {
+  const status = (row.status ?? '').toLowerCase()
+  if (row.ready_for_closure || CLOSURE_STATUSES.includes(status)) return 'closure'
+  if (row.in_progress || ACTIVE_STATUSES.includes(status)) return 'active'
+  return 'new'
+}
+
 /** Whole days since an ISO timestamp, or null when unparseable. */
 function ageDays(iso: string | null): number | null {
   if (!iso) return null

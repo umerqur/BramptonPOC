@@ -22,6 +22,7 @@ import {
   sortAllActiveWork,
   isActiveResident,
   needsOfficerAssignment,
+  classifySupervisorBucket,
   REVIEW_PRIORITY_EXPLAINER,
   REVIEW_PRIORITY_FACTORS,
   type WorkQueueRow,
@@ -29,30 +30,34 @@ import {
 } from '../../services/workQueue'
 import { QueueCard, DecisionStrip, Pill, FitPill } from '../../components/app/QueueCard'
 
-// Priority Queue — the supervisor's review surface. The supervisor's main job is
-// closure approval, so the queue LEADS with "Ready to close" and lands there by
-// default. Live resident service requests (public.resident_service_requests)
-// that need staff action, grouped by where they sit in the workflow:
+// Priority Queue — the supervisor's review surface. Tabs are ordered left to
+// right by supervisor-action priority, so the queue LEADS with "Ready to close"
+// and lands there by default. Live resident service requests
+// (public.resident_service_requests) grouped by where they sit in the workflow:
 //   Ready to close → field outcome recorded, waiting for closure approval
-//   Needs review   → intakes that still need an officer assignment
-//   In progress    → assigned / under review
+//   New            → newly submitted intakes, not yet triaged or assigned
+//   Active         → assigned, under review, waiting on officer action, investigating
 //   All            → every active case, closure work surfaced on top
 //
-// "New" and "Active" were renamed because both sounded like open work. Closed
-// historical cases and NYC open benchmark cases live in Intelligence Command
-// (Case Explorer / Open Cases), not here. Review priority is deterministic
-// decision support — the detail sits behind "How priority works".
+// "New" surfaces fresh resident intakes immediately on submission with a subtle
+// pulsing badge. "Active" combines the old "Needs review" + "In progress" buckets
+// into one being-worked group. Closed historical cases and NYC open benchmark
+// cases live in Intelligence Command (Case Explorer / Open Cases), not here.
+// Review priority is deterministic decision support — the detail sits behind
+// "How the queue is sorted".
 
 type WorkTab = 'closure' | 'new' | 'active' | 'all'
 
 const WORK_TAB_LABELS: Record<WorkTab, string> = {
   closure: 'Ready to close',
-  new: 'Needs review',
-  active: 'In progress',
+  new: 'New',
+  active: 'Active',
   all: 'All',
 }
 
-// Leftmost / default tab is closure approval — the supervisor's primary job.
+// Ordered by supervisor-action priority: closure approval is the most urgent
+// supervisor-specific action, so it leads and is the default landing tab; then
+// fresh intakes (New), then everything being worked (Active), then All.
 const TAB_ORDER: WorkTab[] = ['closure', 'new', 'active', 'all']
 
 const STATUS_STYLES: Record<string, string> = {
@@ -121,7 +126,8 @@ export default function AppStaffInboxPage() {
   // Active resident requests only — closed cases belong in Case Explorer.
   const residentActive = useMemo(() => resident.rows.filter(isActiveResident), [resident.rows])
 
-  // Needs review = intakes that still need an officer assignment.
+  // New = newly submitted intakes that still need triage / officer assignment.
+  // Rendered with the rich assign cards, so it works off the resident rows.
   const residentNeedsAssignment = useMemo(
     () => residentActive.filter(needsOfficerAssignment),
     [residentActive],
@@ -132,15 +138,16 @@ export default function AppStaffInboxPage() {
     [residentActive, attachmentsByCase],
   )
 
-  // In progress = assigned / under review. Ready to close = field outcome
-  // recorded, waiting on closure approval — sorted so unseen and highest-priority
-  // closures surface first. All = every active case, closure work on top.
+  // Active = assigned / under review / being worked. Ready to close = field
+  // outcome recorded, waiting on closure approval — sorted so unseen and
+  // highest-priority closures surface first. All = every active case, closure
+  // work on top. Buckets share one classifier (classifySupervisorBucket).
   const assignedInProgress = useMemo(
-    () => sortByReviewPriority(residentWorkRows.filter((r) => r.in_progress)),
+    () => sortByReviewPriority(residentWorkRows.filter((r) => classifySupervisorBucket(r) === 'active')),
     [residentWorkRows],
   )
   const readyForClosure = useMemo(
-    () => sortReadyForClosure(residentWorkRows.filter((r) => r.ready_for_closure)),
+    () => sortReadyForClosure(residentWorkRows.filter((r) => classifySupervisorBucket(r) === 'closure')),
     [residentWorkRows],
   )
   const allWork = useMemo(() => sortAllActiveWork(residentWorkRows), [residentWorkRows])
@@ -212,7 +219,7 @@ export default function AppStaffInboxPage() {
         <div className="max-w-2xl">
           <div className="section-eyebrow">Staff workbench</div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-semibold tracking-tight text-navy-900">Priority Queue</h1>
-          <p className="mt-2 text-ink-muted">Cases that need staff review, assignment, or closure approval.</p>
+          <p className="mt-2 text-ink-muted">Review closure approvals, new intakes, and active enforcement files.</p>
         </div>
         <button onClick={load} className="btn-secondary text-sm py-2 px-4" disabled={loading}>
           {loading ? 'Refreshing…' : 'Refresh'}
@@ -229,8 +236,16 @@ export default function AppStaffInboxPage() {
             key={t}
             label={WORK_TAB_LABELS[t]}
             count={counts[t]}
-            // A red, pulsing alert badge on "Ready to close" for unseen closures.
-            alertCount={t === 'closure' ? unseenClosureCount : 0}
+            // Subtle pulsing badges: a mature teal "N new" on the New tab when
+            // fresh intakes exist, and a rose "N unseen" on Ready to close for
+            // closure approvals no supervisor has opened yet.
+            badge={
+              t === 'new' && counts.new > 0
+                ? { label: `${counts.new} new`, tone: 'new' }
+                : t === 'closure' && unseenClosureCount > 0
+                  ? { label: `${unseenClosureCount} unseen`, tone: 'alert' }
+                  : null
+            }
             active={tab === t}
             onClick={() => setTab(t)}
           />
@@ -256,9 +271,9 @@ export default function AppStaffInboxPage() {
             residentError={resident.error}
             emptyLabel={
               tab === 'active'
-                ? 'No cases in progress right now.'
+                ? 'No active files right now.'
                 : tab === 'all'
-                  ? 'No active cases right now.'
+                  ? 'No cases in the queue right now.'
                   : 'No cases ready to close right now.'
             }
             onOpen={openWorkRow}
@@ -276,13 +291,13 @@ export default function AppStaffInboxPage() {
 // Review-priority explainer
 // ---------------------------------------------------------------------------
 
-/** A small, low-friction "How priority works" link near the tabs — the full
+/** A small, low-friction "How the queue is sorted" link near the tabs — the full
  *  decision-support explanation lives behind it, not in a hero card. */
 function HowPriorityWorks() {
   return (
     <details className="group mt-3 text-xs">
       <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-ink-subtle hover:text-navy-900">
-        How priority works
+        How the queue is sorted
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="h-3.5 w-3.5 transition-transform group-open:rotate-180">
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -342,11 +357,18 @@ function NormalizedListView({
   )
 }
 
-/** Single state label per row — New / Assigned / Closure ready (active rows only). */
+/** Single state label per row — New / Assigned / Closure ready (active rows only).
+ *  Uses the shared supervisor-bucket classifier so the card label always matches
+ *  the tab a row sits under. */
 function workRowState(row: WorkQueueRow): { label: string; style: string } {
-  if (row.ready_for_closure) return { label: 'Closure ready', style: STATUS_STYLES.in_review }
-  if (row.in_progress) return { label: 'Assigned', style: STATUS_STYLES.assigned }
-  return { label: 'New', style: STATUS_STYLES.received }
+  switch (classifySupervisorBucket(row)) {
+    case 'closure':
+      return { label: 'Closure ready', style: STATUS_STYLES.in_review }
+    case 'active':
+      return { label: 'Assigned', style: STATUS_STYLES.assigned }
+    default:
+      return { label: 'New', style: STATUS_STYLES.received }
+  }
 }
 
 /**
@@ -367,6 +389,7 @@ function WorkRowCard({
   const state = workRowState(row)
   const showPriority = row.priority_tier === 'High' || row.priority_tier === 'Medium'
   const isClosure = row.ready_for_closure
+  const isNew = classifySupervisorBucket(row) === 'new'
   const isUnseen = row.unseen_by_supervisor
   const decisionTone = isClosure ? 'emerald' : 'amber'
   const decisionText = isClosure
@@ -377,6 +400,7 @@ function WorkRowCard({
   return (
     <QueueCard
       caseId={row.case_id}
+      accent={isNew ? 'new' : undefined}
       pills={
         <>
           <Pill className={state.style}>{state.label}</Pill>
@@ -464,17 +488,45 @@ function SourceWarning({ label, error }: { label: string; error: string }) {
   )
 }
 
+/** A subtle pulsing tab badge. `new` is a mature teal (fresh resident intakes);
+ *  `alert` is a rose urgency cue (unseen closure approvals). Only the small dot
+ *  pulses — never the whole tab — to keep it professional for a supervisor demo. */
+type TabBadge = { label: string; tone: 'new' | 'alert' }
+
+function TabPulseBadge({ label, tone }: TabBadge) {
+  const styles =
+    tone === 'new'
+      ? { wrap: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200', ping: 'bg-teal-400', dot: 'bg-teal-600' }
+      : { wrap: 'bg-rose-600 text-white', ping: 'bg-white', dot: 'bg-white' }
+  const title =
+    tone === 'new'
+      ? `${label} resident intake${label.startsWith('1 ') ? '' : 's'} awaiting triage`
+      : 'Closure approvals unseen by a supervisor'
+  return (
+    <span
+      className={`ml-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${styles.wrap}`}
+      title={title}
+    >
+      <span className="relative flex h-1.5 w-1.5">
+        <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${styles.ping}`} />
+        <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${styles.dot}`} />
+      </span>
+      {label}
+    </span>
+  )
+}
+
 function TabButton({
   label,
   count,
-  alertCount = 0,
+  badge,
   active,
   onClick,
 }: {
   label: string
   count: number | null
-  /** Unseen / urgent items — shown as a small red pulsing badge after the count. */
-  alertCount?: number
+  /** Optional subtle pulsing badge (fresh intakes / unseen closures). */
+  badge?: TabBadge | null
   active: boolean
   onClick: () => void
 }) {
@@ -492,18 +544,7 @@ function TabButton({
     >
       {label}
       {count != null && <span className="ml-1 text-xs font-semibold text-teal-700">{count}</span>}
-      {alertCount > 0 && (
-        <span
-          className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-rose-600 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white"
-          title={`${alertCount} new closure review${alertCount === 1 ? '' : 's'} unseen by a supervisor`}
-        >
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
-          </span>
-          {alertCount} new
-        </span>
-      )}
+      {badge && <TabPulseBadge label={badge.label} tone={badge.tone} />}
     </button>
   )
 }
@@ -553,6 +594,7 @@ function InboxCard({
   return (
     <QueueCard
       caseId={row.case_id}
+      accent="new"
       pills={
         <>
           <Pill className={STATUS_STYLES[row.status] ?? 'bg-slate-100 text-slate-700'}>
