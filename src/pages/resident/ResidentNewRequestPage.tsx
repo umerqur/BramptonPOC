@@ -7,11 +7,14 @@ import {
   RESIDENT_DEMO_NOTICE,
   ACCEPTED_ATTACHMENT_HINT,
   ACCEPTED_ATTACHMENT_INPUT,
-  MAX_ATTACHMENT_BYTES,
-  isAcceptedAttachmentType,
   submitResidentRequest,
   type ResidentRequestInput,
 } from '../../services/residentRequests'
+import {
+  attachmentRejectionMessage,
+  partitionAttachments,
+  validateResidentRequestForm,
+} from '../../lib/residentRequestValidation'
 
 type FormState = {
   requestType: string
@@ -703,19 +706,9 @@ export default function ResidentNewRequestPage() {
 
   function handleSelectFiles(fileList: FileList | null) {
     const incoming = Array.from(fileList ?? [])
-    const accepted: File[] = []
-    const rejected: string[] = []
-    for (const f of incoming) {
-      if (!isAcceptedAttachmentType(f)) rejected.push(`${f.name} not supported`)
-      else if (f.size > MAX_ATTACHMENT_BYTES) rejected.push(`${f.name} over 10 MB`)
-      else accepted.push(f)
-    }
+    const { accepted, rejected } = partitionAttachments(incoming)
     setForm((prev) => ({ ...prev, files: accepted }))
-    setFileError(
-      rejected.length > 0
-        ? `These files were not added: ${rejected.join('; ')}. Accepted: ${ACCEPTED_ATTACHMENT_HINT}.`
-        : null,
-    )
+    setFileError(attachmentRejectionMessage(rejected))
     if (status.kind === 'error') setStatus({ kind: 'idle' })
   }
 
@@ -723,26 +716,9 @@ export default function ResidentNewRequestPage() {
     setForm((prev) => ({ ...prev, files: prev.files.filter((_, i) => i !== index) }))
   }
 
-  function validate(): string | null {
-    if (!form.requestType) return 'Please choose a service request type.'
-    if (!form.happeningNow) return 'Please tell us whether this is happening now.'
-    if (!form.description.trim()) return 'Please describe the issue so staff can review the request.'
-    if (form.description.trim().length < 10) return 'Please provide a little more detail about the issue.'
-    if (!form.addressType) return 'Please choose a type of address.'
-    if (!form.location.trim()) return 'Please provide the address or nearest intersection.'
-    if (!form.city.trim()) return 'Please provide a city.'
-    if (!form.province.trim()) return 'Please provide a province.'
-    if (!form.firstName.trim()) return 'Please enter your first name.'
-    if (!form.lastName.trim()) return 'Please enter your last name.'
-    if (!form.email.trim()) return 'Please enter a contact email address.'
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Please enter a valid email address.'
-    if (!form.methodOfContact) return 'Please choose a method of contact.'
-    return null
-  }
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    const problem = validate()
+    const problem = validateResidentRequestForm(form)
     if (problem) {
       setFormError(problem)
       return

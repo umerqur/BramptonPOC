@@ -13,6 +13,18 @@ dist-ssr
 *.local
 *.tsbuildinfo
 
+# Test / E2E artifacts
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
+coverage
+
+# Local environment files (never commit real secrets; .env.example is tracked)
+.env
+.env.*
+!.env.example
+
 # Local data exports
 # Raw and processed municipal data files are generated locally and should not be committed.
 data/raw/**/*.csv
