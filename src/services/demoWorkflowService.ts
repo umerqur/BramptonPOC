@@ -201,8 +201,8 @@ function buildContext(input: ResidentComplaintInput, category: DemoCategory): En
   // there is no Supabase per-location complaint-history query, and the previous
   // synthetic BR-2025-* records made demo data look like real Brampton records.
   // Leave these empty so the UI shows an honest "no verified records" state and
-  // never displays a fake record id. (Semantic context still comes from the real
-  // Cohere/Qdrant "Similar benchmark references" retrieval shown separately.)
+  // never displays a fake record id. (Related operational context comes from the
+  // structured "Similar Case Intelligence" panel shown separately.)
   return {
     complaintHistory: [],
     patrolLogs:

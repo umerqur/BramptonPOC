@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../../lib/workflowStore'
 import { useDemoCase } from '../../lib/useDemoCase'
@@ -18,8 +18,8 @@ import {
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
-import SimilarHistoricalCasesCard from '../../components/app/SimilarHistoricalCasesCard'
-import { useSimilarCases } from '../../components/app/useSimilarCases'
+import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
+import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
 import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
@@ -46,18 +46,33 @@ export default function AppCaseWorkbenchPage() {
   const navigate = useNavigate()
   const [flash, setFlash] = useState<string | null>(null)
 
-  // Optional, on-demand staff support tools. The similar-cases search is lifted
-  // here so the top "Decision support tools" strip and the card lower on the page
-  // share one search. Decision logic is collapsed by default and opened from the
-  // strip.
-  const similar = useSimilarCases(c)
+  // Optional staff support tools. Similar Case Intelligence is structured
+  // (computed from the case features, no embeddings), so the top "Decision
+  // support tools" strip just scrolls to it. Decision logic is collapsed by
+  // default and opened from the strip.
   const similarRef = useRef<HTMLElement>(null)
   const logicRef = useRef<HTMLElement>(null)
   const fieldRef = useRef<HTMLDivElement>(null)
   const [logicOpen, setLogicOpen] = useState(false)
 
+  // Structured operational features for Similar Case Intelligence.
+  const similarFeatures = useMemo<CaseFeatures | null>(() => {
+    if (!c) return null
+    return featuresFromCase({
+      requestType: c.normalized.complaint_type ?? c.triage.category,
+      serviceCategory: c.triage.category,
+      district: c.normalized.ward_or_area ?? c.input.location ?? null,
+      priority: (c.priorityOverride ?? c.triage.recommendedPriority) as PriorityBand,
+      createdAt: c.normalized.submitted_at ?? c.createdAt,
+      status: c.normalized.status ?? c.stage,
+      fieldVisitCompleted: Boolean(c.fieldAction),
+      assignedOfficerName: c.assignedOfficer ?? null,
+      isClosed: c.stage === 'closed',
+      description: c.input.description,
+    })
+  }, [c])
+
   function findSimilar() {
-    similar.runSearch()
     requestAnimationFrame(() => similarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }
   function viewLogic() {
@@ -381,13 +396,13 @@ export default function AppCaseWorkbenchPage() {
                 </ul>
               )}
               <p className="mt-1.5 text-[11px] text-ink-subtle">
-                Verified records for this location only. AI-supported semantic matches appear under “Similar benchmark
-                references” below.
+                Verified records for this location only. Structured operational matches appear under “Similar Case
+                Intelligence” below.
               </p>
             </Sub>
           </CollapsibleCard>
 
-          <SimilarHistoricalCasesCard c={c} controller={similar} sectionRef={similarRef} />
+          <SimilarCaseIntelligencePanel features={similarFeatures} sectionRef={similarRef} />
         </div>
 
         {/* Right: confidence gate + staff actions */}

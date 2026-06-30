@@ -11,6 +11,8 @@ import { residentRowToCase } from '../../services/residentCaseBridge'
 import { sanitizeResidentDescription } from '../../lib/residentDescription'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 import OfficerCaseAssistant, { type OfficerFieldDraft } from '../../components/app/OfficerCaseAssistant'
+import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
+import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
 import type { DemoCase, EnforcementAction, ServiceMethod } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
@@ -113,6 +115,23 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
   // Decision support derived deterministically from the request (no automated
   // enforcement decision) — routing recommendation, classification, priority.
   const support = useMemo(() => (row ? residentRowToCase(row) : null), [row])
+
+  // Structured operational features for Similar Case Intelligence (no embeddings).
+  const similarFeatures = useMemo<CaseFeatures | null>(() => {
+    if (!row || !support) return null
+    return featuresFromCase({
+      requestType: row.request_type,
+      serviceCategory: support.triage.category,
+      district: support.normalized.ward_or_area ?? row.city ?? null,
+      priority: support.triage.recommendedPriority as PriorityBand,
+      createdAt: row.created_at,
+      status: STATUS_LABELS[row.status] ?? row.status,
+      fieldVisitCompleted: row.field_visit_completed,
+      assignedOfficerName: row.assigned_officer_name,
+      isClosed: row.status === 'closed',
+      description: sanitizeResidentDescription(row.description),
+    })
+  }, [row, support])
 
   if (row === undefined) {
     return <div className="container-page py-10 text-sm text-ink-subtle">Loading case…</div>
@@ -275,6 +294,8 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
               <Detail label="Priority" value={priority} />
             </dl>
           </details>
+
+          <SimilarCaseIntelligencePanel features={similarFeatures} />
         </div>
       </div>
     </div>
@@ -600,6 +621,23 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
   const c = cases.find((x) => x.id === caseId)
   const [justRecorded, setJustRecorded] = useState(false)
 
+  // Structured operational features for Similar Case Intelligence (no embeddings).
+  const similarFeatures = useMemo<CaseFeatures | null>(() => {
+    if (!c) return null
+    return featuresFromCase({
+      requestType: c.normalized.complaint_type ?? c.triage.category,
+      serviceCategory: c.triage.category,
+      district: c.normalized.ward_or_area ?? c.input.location ?? null,
+      priority: (c.priorityOverride ?? c.triage.recommendedPriority) as PriorityBand,
+      createdAt: c.normalized.submitted_at ?? c.createdAt,
+      status: c.normalized.status ?? c.stage,
+      fieldVisitCompleted: Boolean(c.fieldAction),
+      assignedOfficerName: c.assignedOfficer ?? null,
+      isClosed: c.stage === 'closed',
+      description: c.input.description,
+    })
+  }, [c])
+
   if (!c) {
     return (
       <div className="container-page py-10">
@@ -704,6 +742,8 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
               <Detail label="Priority" value={c.priorityOverride ?? c.triage.recommendedPriority} />
             </dl>
           </details>
+
+          <SimilarCaseIntelligencePanel features={similarFeatures} />
         </div>
       </div>
     </div>

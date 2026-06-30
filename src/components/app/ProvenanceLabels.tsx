@@ -11,12 +11,16 @@
 //
 // They are presentational only.
 
-export type ProvenanceKind = 'ai-retrieval' | 'rules-closure' | 'human-approved'
+export type ProvenanceKind = 'ai-retrieval' | 'structured-match' | 'rules-closure' | 'human-approved'
 
 const PROVENANCE_LABELS: Record<ProvenanceKind, { label: string; cls: string }> = {
   'ai-retrieval': {
     label: 'Semantic retrieval',
     cls: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
+  },
+  'structured-match': {
+    label: 'Structured match · CTGAN + ABM',
+    cls: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200',
   },
   'rules-closure': {
     label: 'Rules based closure template',
