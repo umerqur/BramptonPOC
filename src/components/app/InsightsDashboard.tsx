@@ -185,7 +185,7 @@ export function InsightsSourceBanner() {
   return (
     <section className="mt-6 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
       <div className="grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-2">
-        <SourceLine label="Data source" value="Public 311 benchmark service requests" />
+        <SourceLine label="Data source" value="Public NYC 311 service requests" />
         <SourceLine label="Records loaded" value={records} />
         <SourceLine label="Date range" value={range} />
         <SourceLine label="Status" value={status} emphasis={error ? 'error' : 'ok'} />
@@ -1192,7 +1192,7 @@ const ctStr = (v: unknown, fallback = '—'): string => {
 
 
 // Required, fixed POC labelling reused across the stress-testing visuals.
-const POC_BENCHMARK_NOTE = 'Public 311 benchmark data for POC modelling. Not live Brampton operational data.'
+const POC_BENCHMARK_NOTE = 'NYC 311 public data for POC modelling. Not live Brampton operational data.'
 
 // The ABM views emit "Council District N" — real benchmark council-district
 // geography (a POC stand-in for Brampton wards). Only the scenario VALUES are

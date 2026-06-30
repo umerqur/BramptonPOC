@@ -741,7 +741,7 @@ function SelectedAreaPanel({
       )}
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-        Live NYC 311 benchmark data — relative to the selected geography level and metric.
+        Live NYC 311 public data — relative to the selected geography level and metric.
       </p>
     </div>
   )

@@ -20,7 +20,7 @@ import type { DeckMetricAdapter } from './NYCWorkload3DDeck'
 const NYCWorkload3DDeck = lazy(() => import('./NYCWorkload3DDeck'))
 
 // Required, fixed labelling for the POC map.
-const POC_DISCLAIMER = 'Public 311 benchmark data for POC modelling. Not live Brampton operational data.'
+const POC_DISCLAIMER = 'NYC 311 public data for POC modelling. Not live Brampton operational data.'
 
 /** The four selectable ABM pressure metrics. Case load is the default. */
 type SimMetric = 'case_load' | 'backlog' | 'stale_risk' | 'supervisor_queue'

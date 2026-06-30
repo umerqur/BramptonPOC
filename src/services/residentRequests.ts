@@ -182,6 +182,13 @@ export type ResidentRequestRow = {
   // supervisor opened / reviewed this case for closure; null while a ready-to-
   // close case is still unseen by a supervisor.
   supervisor_seen_at: string | null
+  // Temporary NYC 311 alignment fields (migration 037). Map this Brampton-style
+  // intake onto the NYC 311 district / complaint family / location key so it can
+  // flow through the same queue, hotspot, similar-case, and stress-testing logic.
+  nyc311_district: string | null
+  nyc311_complaint_type: string | null
+  nyc311_location_key: string | null
+  nyc311_alignment_version: string | null
 }
 
 /** What an officer records as the field outcome for an assigned request. */
@@ -271,6 +278,80 @@ function randomSuffix(length = 4): string {
     }
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// NYC 311 alignment (temporary POC mapping)
+//
+// The POC runs on the public NYC 311 dataset. Resident intake records are
+// Brampton-style demo submissions, so each new intake is mapped to an NYC 311
+// district (and complaint family + a stable location key) so it can flow through
+// the same queue, hotspot, similar-case, and stress-testing logic as the NYC 311
+// data. Mapping is DETERMINISTIC — the same address, postal code, and complaint
+// type always map to the same NYC 311 district, so a complaint never drifts
+// between districts across demos, while different inputs spread across the five
+// boroughs. In a Brampton deployment this would be replaced with Brampton wards,
+// enforcement zones, patrol areas, or another approved operational geography.
+// The resident never sees or selects this; it is assigned silently on submission.
+const NYC311_DISTRICTS = ['Bronx', 'Brooklyn', 'Manhattan', 'Queens', 'Staten Island'] as const
+
+export type Nyc311District = (typeof NYC311_DISTRICTS)[number]
+
+export function assignNyc311District(input: {
+  location?: string | null
+  postalCode?: string | null
+  requestType?: string | null
+}): Nyc311District {
+  const source = [
+    input.location ?? '',
+    input.postalCode ?? '',
+    input.requestType ?? '',
+  ]
+    .join('|')
+    .trim()
+    .toLowerCase()
+
+  if (!source) return NYC311_DISTRICTS[0]
+
+  let hash = 0
+  for (let i = 0; i < source.length; i++) {
+    hash = (hash * 31 + source.charCodeAt(i)) >>> 0
+  }
+
+  return NYC311_DISTRICTS[hash % NYC311_DISTRICTS.length]
+}
+
+export function mapToNyc311ComplaintType(requestType: string): string {
+  const value = requestType.trim().toLowerCase()
+
+  if (value.includes('parking')) return 'Blocked Driveway'
+  if (value.includes('noise')) return 'Noise'
+  if (value.includes('dump')) return 'Illegal Dumping'
+  if (value.includes('yard')) return 'Dirty Condition'
+  if (value.includes('property')) return 'Building Condition'
+  if (value.includes('zoning')) return 'Building Use'
+
+  return 'General Enforcement'
+}
+
+export function makeNyc311LocationKey(input: {
+  location?: string | null
+  postalCode?: string | null
+}): string {
+  const source = [
+    input.location ?? '',
+    input.postalCode ?? '',
+  ]
+    .join('|')
+    .trim()
+    .toLowerCase()
+
+  let hash = 0
+  for (let i = 0; i < source.length; i++) {
+    hash = (hash * 31 + source.charCodeAt(i)) >>> 0
+  }
+
+  return hash.toString(16).padStart(8, '0').slice(0, 12)
 }
 
 /** Generate a demo case id, e.g. RSR-20260611-7K4Q. */
@@ -392,6 +473,41 @@ async function uploadResidentAttachments(
   return { uploaded, failed }
 }
 
+// Drop the migration-037 NYC 311 alignment columns from an insert payload, so a
+// database where migration 037 has not been applied yet still accepts the row.
+function stripNyc311AlignmentColumns<T extends Record<string, unknown>>(row: T): Omit<
+  T,
+  'nyc311_district' | 'nyc311_complaint_type' | 'nyc311_location_key' | 'nyc311_alignment_version'
+> {
+  const legacyRow: Record<string, unknown> = { ...row }
+  delete legacyRow.nyc311_district
+  delete legacyRow.nyc311_complaint_type
+  delete legacyRow.nyc311_location_key
+  delete legacyRow.nyc311_alignment_version
+  return legacyRow as Omit<
+    T,
+    'nyc311_district' | 'nyc311_complaint_type' | 'nyc311_location_key' | 'nyc311_alignment_version'
+  >
+}
+
+// Insert a resident request, retrying without the NYC 311 alignment columns if
+// they are missing (migration 037 not applied yet). Returns the insert error
+// (or undefined/null on success) so the caller can handle case-id collisions.
+async function insertResidentRequestWithAlignmentFallback(
+  client: NonNullable<typeof supabase>,
+  row: Record<string, unknown>,
+  caseId: string,
+): Promise<unknown> {
+  let { error } = await client.from(RESIDENT_REQUESTS_TABLE).insert({ ...row, case_id: caseId })
+
+  if (error && isUndefinedColumnError(error)) {
+    const legacyRow = stripNyc311AlignmentColumns(row)
+    ;({ error } = await client.from(RESIDENT_REQUESTS_TABLE).insert({ ...legacyRow, case_id: caseId }))
+  }
+
+  return error
+}
+
 /**
  * Submit a resident service request (public / anonymous). Inserts a demo row
  * with a generated case id, then sends the confirmation email. The insert is
@@ -441,17 +557,31 @@ export async function submitResidentRequest(input: ResidentRequestInput): Promis
     method_of_contact: input.methodOfContact.trim() || null,
     status: 'submitted' as const,
     is_demo: true,
+    // Temporary NYC 311 alignment — assigned silently, never shown to or chosen
+    // by the resident. Deterministic so the same intake always maps the same way.
+    nyc311_district: assignNyc311District({
+      location: input.location,
+      postalCode: input.concernPostalCode || input.contactPostalCode,
+      requestType: input.requestType,
+    }),
+    nyc311_complaint_type: mapToNyc311ComplaintType(input.requestType),
+    nyc311_location_key: makeNyc311LocationKey({
+      location: input.location,
+      postalCode: input.concernPostalCode || input.contactPostalCode,
+    }),
+    nyc311_alignment_version: 'nyc311_alignment_v1',
   }
 
   let caseId = generateCaseId()
   // Anon has no SELECT policy, so we deliberately do NOT chain .select() here —
-  // we already know the case id we generated.
-  let { error } = await client.from(RESIDENT_REQUESTS_TABLE).insert({ ...row, case_id: caseId })
+  // we already know the case id we generated. The insert is backward compatible:
+  // if migration 037's NYC 311 columns are not applied yet, it retries without them.
+  let error = await insertResidentRequestWithAlignmentFallback(client, row, caseId)
 
   // Retry once on a unique-violation (Postgres 23505) with a fresh case id.
   if (error && (error as { code?: string }).code === '23505') {
     caseId = generateCaseId()
-    ;({ error } = await client.from(RESIDENT_REQUESTS_TABLE).insert({ ...row, case_id: caseId }))
+    error = await insertResidentRequestWithAlignmentFallback(client, row, caseId)
   }
 
   if (error) throw error
@@ -519,13 +649,22 @@ const RESIDENT_REQUEST_ENFORCEMENT_TIER = `${RESIDENT_REQUEST_ASSIGNMENT_COLUMNS
 // Column added by migration 036 (supervisor closure-review "seen" state).
 const RESIDENT_REQUEST_SUPERVISOR_COLUMN = 'supervisor_seen_at'
 
-const RESIDENT_REQUEST_COLUMNS = `${RESIDENT_REQUEST_ENFORCEMENT_TIER}, ${RESIDENT_REQUEST_SUPERVISOR_COLUMN}`
+const RESIDENT_REQUEST_SUPERVISOR_TIER = `${RESIDENT_REQUEST_ENFORCEMENT_TIER}, ${RESIDENT_REQUEST_SUPERVISOR_COLUMN}`
+
+// Columns added by migration 037 (temporary NYC 311 alignment).
+const RESIDENT_REQUEST_NYC311_COLUMNS =
+  'nyc311_district, nyc311_complaint_type, nyc311_location_key, nyc311_alignment_version'
+
+const RESIDENT_REQUEST_COLUMNS =
+  `${RESIDENT_REQUEST_ENFORCEMENT_TIER}, ${RESIDENT_REQUEST_SUPERVISOR_COLUMN}, ${RESIDENT_REQUEST_NYC311_COLUMNS}`
 
 // Ordered richest → oldest for graceful degradation when a migration is missing.
 // Each tier drops only the columns from the migration above it, so a not-yet-
-// applied later migration never wipes the columns from earlier ones.
+// applied later migration never wipes the columns from earlier ones (e.g. a DB
+// with 036 but not 037 still reads supervisor_seen_at via the supervisor tier).
 const RESIDENT_COLUMN_TIERS = [
   RESIDENT_REQUEST_COLUMNS,
+  RESIDENT_REQUEST_SUPERVISOR_TIER,
   RESIDENT_REQUEST_ENFORCEMENT_TIER,
   RESIDENT_REQUEST_ASSIGNMENT_COLUMNS,
   RESIDENT_REQUEST_BASE_COLUMNS,
@@ -574,6 +713,10 @@ function withAssignmentDefaults(row: Record<string, unknown>): ResidentRequestRo
     field_follow_up_required: (row.field_follow_up_required as boolean | undefined) ?? false,
     field_outcome_recorded_at: (row.field_outcome_recorded_at as string | null) ?? null,
     supervisor_seen_at: (row.supervisor_seen_at as string | null) ?? null,
+    nyc311_district: (row.nyc311_district as string | null) ?? null,
+    nyc311_complaint_type: (row.nyc311_complaint_type as string | null) ?? null,
+    nyc311_location_key: (row.nyc311_location_key as string | null) ?? null,
+    nyc311_alignment_version: (row.nyc311_alignment_version as string | null) ?? null,
   }
 }
 

@@ -78,7 +78,7 @@ export default function LandingPage() {
         </div>
 
         <p className="mt-8 text-center text-xs text-ink-subtle">
-          Demo only. Analytics use a 3.4M record NYC 311 public benchmark dataset. Resident submissions are demo data.
+          Demo only. Analytics use a 3.4M record NYC 311 public dataset. Resident submissions are demo data.
         </p>
       </section>
     </div>

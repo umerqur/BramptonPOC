@@ -16,7 +16,7 @@ import NYCWorkloadMapPanel from '../../components/app/NYCWorkloadMapPanel'
 // section has been removed from the active staff workflow.
 
 const QUEUE_DISCLAIMER =
-  'NYC 311 benchmark data. Transparent statistical scoring, decision support only. Not Brampton operational data. Not automated enforcement.'
+  'NYC 311 public data. Transparent statistical scoring, decision support only. Not Brampton operational data. Not automated enforcement.'
 
 const EXAMPLE_DRIVERS = [
   'Older than similar cases',
@@ -68,7 +68,7 @@ export default function AppWorkloadInsightsPage() {
       <section className="mt-8">
         <h2 className="text-lg font-semibold tracking-tight text-navy-900">Statistical Queue Insights</h2>
         <p className="mt-1 max-w-3xl text-sm text-ink-muted">
-          Transparent statistical scoring over NYC 311 benchmark data to help staff identify which complaint files
+          Transparent statistical scoring over NYC 311 public data to help staff identify which complaint files
           may need review first.
         </p>
 
@@ -198,7 +198,7 @@ export default function AppWorkloadInsightsPage() {
         </section>
 
         <p className="mt-4 max-w-3xl text-[11px] leading-relaxed text-ink-subtle">
-          NYC 311 benchmark data is used for decision support only — it is not Brampton operational data.
+          NYC 311 public data is used for decision support only — it is not Brampton operational data.
         </p>
       </section>
 
