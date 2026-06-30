@@ -4,6 +4,24 @@
 // what the guardrails are. Deeper technical notes live behind one collapsed
 // "View technical details" disclosure, never on the visible page.
 
+import {
+  OPERATIONAL_PRESSURE_WEIGHTS,
+  OPERATIONAL_PRESSURE_WATCH_THRESHOLD,
+  OPERATIONAL_PRESSURE_RED_THRESHOLD,
+  OPERATIONAL_PRESSURE_FORMULA,
+  CHANNEL_LABELS,
+} from '../services/municipalPressureModel'
+
+// Operational Pressure Model — channel legend, read alongside the real weights
+// from the service so this page can never drift from the model it describes.
+const pressureChannelLegend: ReadonlyArray<readonly [keyof typeof OPERATIONAL_PRESSURE_WEIGHTS, string]> = [
+  ['C', 'Complaint category pressure — the demand mix / dominant category load.'],
+  ['L', 'District hotspot pressure — the relative case load of the area.'],
+  ['R', 'Repeat pressure — persistent / recurring aged load.'],
+  ['Q', 'Queue & capacity pressure — open backlog versus throughput capacity.'],
+  ['S', 'Severity / safety pressure — overload flag plus workload intensity.'],
+]
+
 const heroBadges = [
   'Decision support',
   'Human approval',
@@ -201,6 +219,71 @@ export default function MethodologyPage() {
             <p className="mt-4 text-sm font-medium leading-relaxed text-navy-50">
               The POC is decision support. Staff remain responsible for review, action, and any enforcement decision.
             </p>
+          </div>
+        </Section>
+
+        {/* Operational Pressure Model — the derived planning lens behind the
+            Pressure propagation panel. Numbers read from the service constants. */}
+        <Section
+          title="Operational Pressure Model"
+          lead="A derived, planning-only scoring lens over the stress-testing outputs. It combines five weighted operational signals into one pressure score and flags watch and red zones — never a forecast, never an enforcement rule."
+        >
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="text-sm font-semibold text-navy-900">Pressure score</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
+                For each district <span className="italic">i</span> at time <span className="italic">t</span>, the five
+                normalized channels are combined into a single pressure score in [0, 1]:
+              </p>
+              <code className="mt-3 block rounded-lg bg-slate-100 px-3 py-2 text-xs text-navy-900">
+                P<sub>i,t</sub> = α<sub>C</sub>·C<sub>i,t</sub> + α<sub>L</sub>·L<sub>i,t</sub> + α<sub>R</sub>·R
+                <sub>i,t</sub> + α<sub>Q</sub>·Q<sub>i,t</sub> + α<sub>S</sub>·S<sub>i,t</sub>
+              </code>
+              <p className="mt-1.5 text-xs text-ink-subtle">{OPERATIONAL_PRESSURE_FORMULA}</p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {pressureChannelLegend.map(([key, detail]) => (
+                <div key={key} className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-navy-900 text-[11px] font-semibold text-white">
+                      {key}
+                    </span>
+                    <h3 className="text-sm font-semibold text-navy-900">{CHANNEL_LABELS[key]}</h3>
+                    <span className="ml-auto text-xs font-medium tabular-nums text-ink-subtle">
+                      α<sub>{key}</sub> = {OPERATIONAL_PRESSURE_WEIGHTS[key].toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">{detail}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-5">
+                <h3 className="text-sm font-semibold text-navy-900">Pressure model watch</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
+                  A district enters <span className="font-semibold">watch</span> at P ≥{' '}
+                  <span className="tabular-nums">{OPERATIONAL_PRESSURE_WATCH_THRESHOLD}</span> — early pressure worth a
+                  closer look.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-rose-200 bg-rose-50/40 p-5">
+                <h3 className="text-sm font-semibold text-navy-900">Red zones</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
+                  A district enters a <span className="font-semibold">red zone</span> at P ≥{' '}
+                  <span className="tabular-nums">{OPERATIONAL_PRESSURE_RED_THRESHOLD}</span> — sustained pressure that
+                  warrants a planning response.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <p className="text-sm leading-relaxed text-ink-muted">
+                These are POC planning weights. They are not official City SLA thresholds. They are not enforcement
+                decision rules. They can be recalibrated when Brampton operational data is available.
+              </p>
+            </div>
           </div>
         </Section>
 

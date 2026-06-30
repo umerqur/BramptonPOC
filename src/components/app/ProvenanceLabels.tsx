@@ -19,7 +19,7 @@ const PROVENANCE_LABELS: Record<ProvenanceKind, { label: string; cls: string }> 
     cls: 'bg-accent-50 text-accent-800 ring-1 ring-inset ring-accent-200',
   },
   'structured-match': {
-    label: 'Structured match · CTGAN + ABM',
+    label: 'Structured operational match',
     cls: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200',
   },
   'rules-closure': {

@@ -9,8 +9,8 @@
 // workflow stage, field-visit and assignment pattern, case age, and time
 // context — with optional text overlap kept only as a small secondary signal.
 //
-// Candidate pool: a curated set of CTGAN-style synthetic benchmark cases
-// (statistically plausible feature combinations) carrying ABM scenario behavior
+// Candidate pool: a set of curated structured benchmark cases
+// (statistically plausible feature combinations) carrying operational scenario tags
 // (how similar cases behaved under workload, staffing, weather, construction,
 // event-parking, or supervisor-bottleneck pressure). It is labelled, in-repo
 // decision-support reference data — never live enforcement data.
@@ -28,7 +28,7 @@ export type TimeOfDay = 'Morning' | 'Afternoon' | 'Evening' | 'Overnight'
 export type DayType = 'Weekday' | 'Weekend'
 export type AssignmentPattern = 'Single officer' | 'Reassigned' | 'Unassigned'
 
-// ABM scenario behavior tags. The first four mirror the stress-lab scenario keys
+// Operational scenario tags. The first four mirror the stress-lab scenario keys
 // (src/components/app/stressModel.ts); the operational flavors (construction
 // corridor, event parking, weather event) extend them for richer field context.
 export type AbmScenario =
@@ -60,7 +60,7 @@ export type CaseFeatures = {
   text: string
 }
 
-/** A curated CTGAN-synthetic benchmark case with ABM scenario behavior + lessons. */
+/** A curated structured benchmark case with operational scenario tags + lessons. */
 export type BenchmarkCase = CaseFeatures & {
   caseId: string
   abmScenario: AbmScenario
@@ -428,7 +428,7 @@ function dayType(iso: string | null): DayType {
 }
 
 // ---------------------------------------------------------------------------
-// CTGAN-synthetic benchmark pool with ABM scenario behavior.
+// Structured benchmark pool with operational scenario tags.
 //
 // Statistically plausible feature combinations across the by-law categories,
 // each labelled with how the cohort behaved under an ABM pressure scenario, plus

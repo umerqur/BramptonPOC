@@ -57,6 +57,18 @@ import {
 } from '../../services/ctganAbmStress'
 import { getWorkloadByDistrict, type DistrictWorkload } from '../../services/stressTesting'
 import {
+  scoreDistricts,
+  recommendMitigation,
+  CHANNEL_LABELS,
+  OPERATIONAL_PRESSURE_WEIGHTS,
+  OPERATIONAL_PRESSURE_WATCH_THRESHOLD,
+  OPERATIONAL_PRESSURE_RED_THRESHOLD,
+  OPERATIONAL_PRESSURE_FORMULA,
+  OPERATIONAL_PRESSURE_MODEL_NAME,
+  type PressureZone,
+  type PressureChannels,
+} from '../../services/municipalPressureModel'
+import {
   buildStressModel,
   pressureTier,
   RED_ZONE_THRESHOLD,
@@ -1407,6 +1419,29 @@ function SimulationLab() {
         )}
       </CtganSection>
 
+      {/* 4b. Pressure propagation — the Operational Pressure Model lens over the
+            latest run: source pressure → channels → operational dependency chain →
+            mitigation. A derived planning view; not causal proof, not enforcement. */}
+      <CtganSection
+        title="Pressure propagation"
+        subtitle="The Operational Pressure Model scores the run's districts, then traces the operational dependency chain from the highest-pressure source through to the recommended mitigation. A derived planning lens — not causal proof, not enforcement decisioning."
+      >
+        {showPending ? (
+          <CtganPendingNote />
+        ) : (
+          <PressurePropagation
+            daily={dailyRows}
+            districtRows={districtRows}
+            complaintRows={complaintRows}
+            finalBacklog={finalBacklog}
+            supervisorPeak={peakSupervisorQueue}
+            endStale={dailyRows.length ? dailyRows[dailyRows.length - 1].stale_cases : 0}
+            redZoneCount={districtRows.filter((d) => d.overload_flag === 1).length}
+            loading={anyLoading}
+          />
+        )}
+      </CtganSection>
+
       {/* 5. Methodology zone — the technical model behind the readings above.
             Framework / CTGAN / ABM wording lives here, not in the staff-facing
             sections at the top of the tab. */}
@@ -2126,6 +2161,288 @@ function SimCard({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
       <div className={`mt-1.5 truncate text-2xl font-bold tabular-nums ${s.value}`}>{value}</div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Pressure propagation — a DERIVED operational-pressure view.
+//
+// It scores the latest run's districts with the Operational Pressure Model
+// (see services/municipalPressureModel.ts), then lays the result out as the
+// operational dependency chain the ABM encodes: source pressure -> pathway (the
+// five pressure channels) -> affected district -> affected complaint type ->
+// officer queue -> supervisor review -> stale backlog -> mitigation. Edges are
+// operational dependencies, NOT causal proof; this is not a learned causal graph.
+// Not live Brampton data; enforcement decisions stay human reviewed.
+// ---------------------------------------------------------------------------
+
+const ZONE_STATUS: Record<PressureZone, SimStatus> = { red: 'critical', watch: 'watch', normal: 'good' }
+const ZONE_LABEL: Record<PressureZone, string> = { red: 'Red zone', watch: 'Watch', normal: 'Normal' }
+
+type PressureStage = { key: string; step: string; label: string; value: string; detail: string; status: SimStatus }
+
+function PressurePropagation({
+  daily,
+  districtRows,
+  complaintRows,
+  finalBacklog,
+  supervisorPeak,
+  endStale,
+  redZoneCount,
+  loading,
+}: {
+  daily: CtganDailyMetricRow[]
+  districtRows: CtganDistrictPressureRow[]
+  complaintRows: CtganComplaintTypePressureRow[]
+  finalBacklog: number
+  supervisorPeak: number
+  endStale: number
+  redZoneCount: number
+  loading: boolean
+}) {
+  const model = useMemo(() => {
+    if (districtRows.length === 0 && complaintRows.length === 0) return null
+    const scored = scoreDistricts(districtRows, complaintRows)
+    const source = scored[0] ?? null
+    const pressureRedCount = scored.filter((s) => s.zone === 'red').length
+    const pressureWatchCount = scored.filter((s) => s.zone === 'watch').length
+    const topComplaint = [...complaintRows].sort((a, b) => b.total_cases - a.total_cases)[0] ?? null
+    const demandTotal = complaintRows.reduce((n, c) => n + c.total_cases, 0)
+    const peakBacklog = daily.reduce((m, r) => Math.max(m, r.backlog), 0) || finalBacklog
+    const peakStale = daily.reduce((m, r) => Math.max(m, r.stale_cases), 0) || endStale
+    const supervisorShare = peakBacklog > 0 ? supervisorPeak / peakBacklog : 0
+    const mitigation = recommendMitigation(source, supervisorShare, pressureRedCount)
+
+    const stages: PressureStage[] = [
+      {
+        key: 'district',
+        step: 'Affected district',
+        label: source?.district_or_area ?? '—',
+        value: source ? fmtInt(source.backlog) : '—',
+        detail: source ? `${ZONE_LABEL[source.zone]} · lead channel ${CHANNEL_LABELS[source.dominantChannel]}` : 'Highest-pressure district',
+        status: source ? ZONE_STATUS[source.zone] : 'neutral',
+      },
+      {
+        key: 'complaint',
+        step: 'Affected complaint type',
+        label: topComplaint?.complaint_type ?? '—',
+        value: topComplaint ? fmtInt(topComplaint.total_cases) : '—',
+        detail:
+          demandTotal > 0 && topComplaint
+            ? `${fmtPct(topComplaint.total_cases, demandTotal)} of simulated demand — dominant category`
+            : 'Top demand driver',
+        status: 'watch',
+      },
+      {
+        key: 'officer',
+        step: 'Officer queue effect',
+        label: 'Field queue',
+        value: fmtInt(peakBacklog),
+        detail: 'Peak open field queue — officer daily minutes are the binding constraint',
+        status: 'watch',
+      },
+      {
+        key: 'supervisor',
+        step: 'Supervisor review effect',
+        label: 'Review queue',
+        value: fmtInt(supervisorPeak),
+        detail:
+          supervisorShare >= 0.4
+            ? 'Peak sign-off queue — a major share of work waits on review'
+            : 'Peak cases awaiting supervisor sign-off',
+        status: supervisorShare >= 0.5 ? 'critical' : supervisorShare >= 0.2 ? 'watch' : 'neutral',
+      },
+      {
+        key: 'stale',
+        step: 'Stale backlog effect',
+        label: 'Aged cases',
+        value: fmtInt(Math.max(peakStale, endStale)),
+        detail: 'Cases aged past the stale threshold as the queue holds',
+        status: endStale > 0 ? 'watch' : 'neutral',
+      },
+      {
+        key: 'final',
+        step: 'Final backlog impact',
+        label: 'End-of-run backlog',
+        value: fmtInt(finalBacklog),
+        detail: redZoneCount > 0 ? `${fmtInt(redZoneCount)} district(s) end overloaded (ABM flag)` : 'Open queue remaining at end of run',
+        status: redZoneCount > 0 ? 'critical' : 'watch',
+      },
+    ]
+
+    return { scored, source, pressureRedCount, pressureWatchCount, mitigation, stages }
+  }, [daily, districtRows, complaintRows, finalBacklog, supervisorPeak, endStale, redZoneCount])
+
+  if (loading) {
+    return (
+      <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
+        Deriving pressure propagation…
+      </div>
+    )
+  }
+  if (!model || !model.source) return <CtganPendingNote />
+
+  const src = model.source
+
+  return (
+    <div>
+      {/* Source pressure — the highest-P entity, with its zone + score. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <div className={`rounded-xl border p-4 ${SIM_CARD_STATUS[ZONE_STATUS[src.zone]].container}`}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Source pressure</span>
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                src.zone === 'red'
+                  ? 'bg-rose-100 text-rose-700'
+                  : src.zone === 'watch'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-emerald-100 text-emerald-700'
+              }`}
+            >
+              {ZONE_LABEL[src.zone]}
+            </span>
+          </div>
+          <div className="mt-1.5 truncate text-sm font-semibold text-navy-900" title={src.district_or_area}>
+            {src.district_or_area}
+          </div>
+          <div className={`mt-0.5 text-2xl font-bold tabular-nums ${SIM_CARD_STATUS[ZONE_STATUS[src.zone]].value}`}>
+            P = {src.pressure.toFixed(2)}
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+            Lead channel: {CHANNEL_LABELS[src.dominantChannel]} — the signal contributing most to this district&rsquo;s
+            pressure.
+          </p>
+        </div>
+
+        {/* Pressure pathway — the five weighted channels behind P. */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Pressure pathway</span>
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-ink-muted">{OPERATIONAL_PRESSURE_FORMULA}</code>
+          </div>
+          <div className="mt-2.5">
+            <PressureChannelBars channels={src.channels} />
+          </div>
+        </div>
+      </div>
+
+      {/* Reconciliation — ABM direct flags vs. pressure-model derived zones. */}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">ABM overload flags</div>
+          <div className="mt-1 text-xl font-bold tabular-nums text-navy-900">
+            {fmtInt(redZoneCount)} <span className="text-sm font-medium text-ink-subtle">district(s)</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+            Direct simulation output — districts the ABM flagged with overload_flag = 1.
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Pressure model watch / red zones</div>
+          <div className="mt-1 text-xl font-bold tabular-nums text-navy-900">
+            {fmtInt(model.pressureWatchCount)} <span className="text-sm font-medium text-ink-subtle">watch</span>
+            <span className="mx-1.5 text-ink-subtle">·</span>
+            {fmtInt(model.pressureRedCount)} <span className="text-sm font-medium text-ink-subtle">red</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+            Derived pressure interpretation — the Operational Pressure Model&rsquo;s reading (watch ≥{' '}
+            {OPERATIONAL_PRESSURE_WATCH_THRESHOLD}, red ≥ {OPERATIONAL_PRESSURE_RED_THRESHOLD}).
+          </p>
+        </div>
+      </div>
+
+      {/* Propagation chain — operational dependencies between stages. */}
+      <ol className="mt-4 flex flex-col gap-2 lg:flex-row lg:items-stretch lg:gap-1">
+        {model.stages.flatMap((s, i) => {
+          const card = <PressureStageCard key={s.key} stage={s} index={i + 1} />
+          return i < model.stages.length - 1 ? [card, <PressureArrow key={`${s.key}-arrow`} />] : [card]
+        })}
+      </ol>
+
+      {/* Recommended mitigation — the chain's terminal node. */}
+      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-semibold text-white">
+            ✓
+          </span>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">Recommended mitigation</div>
+        </div>
+        <div className="mt-1.5 text-sm font-semibold text-emerald-900">{model.mitigation.title}</div>
+        <p className="mt-1 text-xs leading-relaxed text-emerald-900/80">{model.mitigation.body}</p>
+      </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+        Derived planning model ({OPERATIONAL_PRESSURE_MODEL_NAME}) based on the latest CTGAN plus ABM run. Shows operational
+        pressure propagation, not causal proof. Channel edges are operational dependencies, not learned causality. Public
+        311 benchmark synthetic demand — capacity planning and decision support only, not live Brampton data, and never an
+        enforcement decision; enforcement decisions remain human reviewed.
+      </p>
+    </div>
+  )
+}
+
+/** Horizontal weighted-contribution bars for the five Operational Pressure Model channels. */
+function PressureChannelBars({ channels }: { channels: PressureChannels }) {
+  const rows = (Object.keys(channels) as (keyof PressureChannels)[]).map((k) => ({
+    k,
+    label: CHANNEL_LABELS[k],
+    value: channels[k],
+    contrib: OPERATIONAL_PRESSURE_WEIGHTS[k] * channels[k],
+  }))
+  const max = Math.max(0.0001, ...rows.map((r) => r.contrib))
+  return (
+    <ul className="space-y-1.5">
+      {rows.map((r) => (
+        <li key={r.k} className="flex items-center gap-2">
+          <span className="w-28 shrink-0 text-[10px] uppercase tracking-wider text-ink-subtle">{r.label}</span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-accent-500" style={{ width: `${Math.max(2, (r.contrib / max) * 100)}%` }} />
+          </div>
+          <span className="w-10 shrink-0 text-right text-[10px] tabular-nums text-ink-subtle">{r.value.toFixed(2)}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** One stage card in the propagation chain (status-tinted). */
+function PressureStageCard({ stage, index }: { stage: PressureStage; index: number }) {
+  const s = SIM_CARD_STATUS[stage.status]
+  return (
+    <div className={`flex min-w-0 flex-1 flex-col rounded-xl border p-3 ${s.container}`}>
+      <div className="flex items-center gap-1.5">
+        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-navy-900 text-[9px] font-semibold text-white">
+          {index}
+        </span>
+        <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{stage.step}</span>
+      </div>
+      <div className="mt-1.5 truncate text-sm font-semibold text-navy-900" title={stage.label}>
+        {stage.label}
+      </div>
+      <div className={`mt-0.5 text-xl font-bold tabular-nums ${s.value}`}>{stage.value}</div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{stage.detail}</p>
+    </div>
+  )
+}
+
+/** Connector between chain stages — points down on mobile, right on desktop. */
+function PressureArrow() {
+  return (
+    <div className="flex shrink-0 items-center justify-center px-1 text-slate-400" aria-hidden>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-4 w-4 rotate-90 lg:rotate-0"
+      >
+        <path d="M5 12h14" />
+        <path d="M13 6l6 6-6 6" />
+      </svg>
     </div>
   )
 }
