@@ -25,12 +25,12 @@ export default function AppInsightsPage() {
           Workload Intelligence
         </h1>
         <p className="mt-2 text-ink-muted">
-          Benchmark view of service request volume, backlog, closure pressure, and field activity patterns. Uses public
-          311 benchmark data for the demo, not Brampton operational data.
+          A view of service request volume, backlog, closure pressure, and field activity patterns. Uses NYC 311 public
+          data for the demo, not Brampton operational data.
         </p>
       </div>
 
-      {/* Data source banner — the public 311 benchmark dataset behind the dashboard. */}
+      {/* Data source banner — the public NYC 311 dataset behind the dashboard. */}
       <InsightsSourceBanner />
 
       <InsightsDashboard />

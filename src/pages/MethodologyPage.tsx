@@ -42,8 +42,8 @@ const aiCards = [
     'Case scoped AI assistant for officers. Helps prepare site checks, evidence notes, field summaries, and supervisor handoff. Staff decide all actions. Uses LPU (Language Processing Unit) inference to reduce latency and runtime cost compared with GPU based serving for supported language model workloads.',
   ],
   [
-    'Similar Case Retrieval',
-    'Uses embeddings and reranking to surface comparable public benchmark cases for reference. It supports review context only and does not decide outcomes.',
+    'Similar Case Intelligence',
+    'Surfaces comparable cases using structured operational similarity — service category, NYC 311 district, priority and risk band, closure pattern, and field-visit or assignment pattern — with description keyword overlap as only a small secondary signal. It supports review context only and does not decide outcomes.',
   ],
   [
     'Synthetic Demand Engine',
@@ -222,6 +222,12 @@ export default function MethodologyPage() {
             </svg>
           </summary>
           <div className="mt-3 space-y-2 text-sm leading-relaxed text-ink-muted">
+            <p>
+              During the POC, new resident intake records are automatically mapped to an NYC 311 district so they can
+              flow through the same queue, hotspot, similar case, and stress testing logic as the public NYC 311
+              dataset. In a Brampton deployment, this would be replaced with Brampton wards, enforcement zones, patrol
+              areas, or another approved operational geography.
+            </p>
             <p>
               The synthetic demand generator (CTGAN) learns patterns in the public 311 benchmark, including complaint
               mix, district pressure, timing, and closure patterns. It produces synthetic planning demand that is

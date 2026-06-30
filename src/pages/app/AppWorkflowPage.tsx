@@ -311,7 +311,7 @@ export default function AppWorkflowPage() {
         <SectionHeading
           eyebrow="Aging"
           title="Aging & longest-open cases"
-          description="Open cases that have been waiting longest. Aging is judged relative to the most recent submission in this benchmark dataset, not wall-clock time."
+          description="Open cases that have been waiting longest. Aging is judged relative to the most recent submission in this NYC 311 public dataset, not wall-clock time."
         />
         {aging.error ? (
           <SectionError className="mt-5" label="aging cases" error={aging.error} />
