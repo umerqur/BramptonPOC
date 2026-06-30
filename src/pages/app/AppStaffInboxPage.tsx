@@ -152,12 +152,6 @@ export default function AppStaffInboxPage() {
   )
   const allWork = useMemo(() => sortAllActiveWork(residentWorkRows), [residentWorkRows])
 
-  // Ready-to-close cases a supervisor has not opened yet — drives the urgent badge.
-  const unseenClosureCount = useMemo(
-    () => readyForClosure.filter((r) => r.unseen_by_supervisor).length,
-    [readyForClosure],
-  )
-
   const counts: Record<WorkTab, number> = useMemo(
     () => ({
       closure: readyForClosure.length,
@@ -236,16 +230,6 @@ export default function AppStaffInboxPage() {
             key={t}
             label={WORK_TAB_LABELS[t]}
             count={counts[t]}
-            // Subtle pulsing badges: a mature teal "N new" on the New tab when
-            // fresh intakes exist, and a rose "N unseen" on Ready to close for
-            // closure approvals no supervisor has opened yet.
-            badge={
-              t === 'new' && counts.new > 0
-                ? { label: `${counts.new} new`, tone: 'new' }
-                : t === 'closure' && unseenClosureCount > 0
-                  ? { label: `${unseenClosureCount} unseen`, tone: 'alert' }
-                  : null
-            }
             active={tab === t}
             onClick={() => setTab(t)}
           />
@@ -488,45 +472,14 @@ function SourceWarning({ label, error }: { label: string; error: string }) {
   )
 }
 
-/** A subtle pulsing tab badge. `new` is a mature teal (fresh resident intakes);
- *  `alert` is a rose urgency cue (unseen closure approvals). Only the small dot
- *  pulses — never the whole tab — to keep it professional for a supervisor demo. */
-type TabBadge = { label: string; tone: 'new' | 'alert' }
-
-function TabPulseBadge({ label, tone }: TabBadge) {
-  const styles =
-    tone === 'new'
-      ? { wrap: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200', ping: 'bg-teal-400', dot: 'bg-teal-600' }
-      : { wrap: 'bg-rose-600 text-white', ping: 'bg-white', dot: 'bg-white' }
-  const title =
-    tone === 'new'
-      ? `${label} resident intake${label.startsWith('1 ') ? '' : 's'} awaiting triage`
-      : 'Closure approvals unseen by a supervisor'
-  return (
-    <span
-      className={`ml-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${styles.wrap}`}
-      title={title}
-    >
-      <span className="relative flex h-1.5 w-1.5">
-        <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${styles.ping}`} />
-        <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${styles.dot}`} />
-      </span>
-      {label}
-    </span>
-  )
-}
-
 function TabButton({
   label,
   count,
-  badge,
   active,
   onClick,
 }: {
   label: string
   count: number | null
-  /** Optional subtle pulsing badge (fresh intakes / unseen closures). */
-  badge?: TabBadge | null
   active: boolean
   onClick: () => void
 }) {
@@ -543,8 +496,17 @@ function TabButton({
       }`}
     >
       {label}
-      {count != null && <span className="ml-1 text-xs font-semibold text-teal-700">{count}</span>}
-      {badge && <TabPulseBadge label={badge.label} tone={badge.tone} />}
+      {/* Quiet count badge — a small rounded chip, not a marketing pill. The
+       *  selected-tab underline stays the primary visual indicator. */}
+      {count != null && (
+        <span
+          className={`ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${
+            active ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-500'
+          }`}
+        >
+          {count}
+        </span>
+      )}
     </button>
   )
 }
