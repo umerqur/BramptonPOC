@@ -3,6 +3,10 @@
 // SVG with baked-in text — so the workflow and simulation diagrams scale cleanly
 // from wide desktop down to portrait mobile.
 
+// Read the real Operational Pressure Model weights/thresholds so the published
+// methodology can never drift from the model the Simulation Lab actually uses.
+import { OPERATIONAL_PRESSURE_WEIGHTS, OPERATIONAL_PRESSURE_WATCH_THRESHOLD, OPERATIONAL_PRESSURE_RED_THRESHOLD } from '../services/municipalPressureModel'
+
 const heroBadges = ['Decision support', 'Human approval', '3.4M NYC 311 records', 'Capacity planning']
 
 const workflowSteps = [
@@ -48,6 +52,16 @@ const simulationOutputs = [
   'Complaint type pressure',
   'Staff capacity needed',
   'Supervisor review pressure',
+] as const
+
+// The five weighted pressure channels of the Operational Pressure Model — the
+// derived scoring layer behind the Pressure propagation view.
+const pressureChannels = [
+  ['C', 'Complaint category pressure', 'How much one complaint category dominates demand.'],
+  ['L', 'Location or district hotspot pressure', 'How concentrated the case load is in an area.'],
+  ['R', 'Repeat or stale case pressure', 'Persistent or aged cases that keep weighing on the queue.'],
+  ['Q', 'Queue and capacity pressure', 'Open backlog measured against available throughput.'],
+  ['S', 'Severity or safety pressure', 'Overloaded areas and higher workload intensity.'],
 ] as const
 
 const whyItMatters = [
@@ -239,6 +253,84 @@ export default function MethodologyPage() {
                     {output}
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Operational Pressure Model */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-6 sm:p-8">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-md bg-accent-100 px-2 py-0.5 text-xs font-semibold text-accent-800">Planning model</span>
+                <h3 className="text-sm font-semibold text-navy-900">Operational Pressure Model</h3>
+              </div>
+              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+                The Operational Pressure Model is a derived planning model that combines complaint category pressure,
+                location pressure, repeat or stale case pressure, queue pressure, and severity pressure into one
+                operational pressure score.
+              </p>
+
+              {/* Formula */}
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <code className="whitespace-nowrap text-sm text-navy-900">
+                  P<sub>i,t</sub> = α<sub>C</sub>·C<sub>i,t</sub> + α<sub>L</sub>·L<sub>i,t</sub> + α<sub>R</sub>·R
+                  <sub>i,t</sub> + α<sub>Q</sub>·Q<sub>i,t</sub> + α<sub>S</sub>·S<sub>i,t</sub>
+                </code>
+              </div>
+
+              {/* Channel legend */}
+              <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+                {pressureChannels.map(([sym, name, desc]) => (
+                  <li key={sym} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-navy-900 text-xs font-bold text-white">
+                      {sym}
+                    </span>
+                    <span>
+                      <span className="block text-sm font-semibold text-navy-900">{name}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-ink-muted">{desc}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              {/* POC weights + thresholds — the actual model constants */}
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-xs font-semibold text-navy-900">POC planning weights and thresholds</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(
+                    [
+                      ['αC', OPERATIONAL_PRESSURE_WEIGHTS.C],
+                      ['αL', OPERATIONAL_PRESSURE_WEIGHTS.L],
+                      ['αR', OPERATIONAL_PRESSURE_WEIGHTS.R],
+                      ['αQ', OPERATIONAL_PRESSURE_WEIGHTS.Q],
+                      ['αS', OPERATIONAL_PRESSURE_WEIGHTS.S],
+                    ] as const
+                  ).map(([sym, w]) => (
+                    <span
+                      key={sym}
+                      className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-navy-800"
+                    >
+                      {sym} = {w.toFixed(2)}
+                    </span>
+                  ))}
+                  <span className="inline-flex items-center rounded-md bg-amber-100 px-2 py-1 font-mono text-xs text-amber-900">
+                    watch ≥ {OPERATIONAL_PRESSURE_WATCH_THRESHOLD.toFixed(2)}
+                  </span>
+                  <span className="inline-flex items-center rounded-md bg-rose-100 px-2 py-1 font-mono text-xs text-rose-900">
+                    red ≥ {OPERATIONAL_PRESSURE_RED_THRESHOLD.toFixed(2)}
+                  </span>
+                </div>
+                <p className="mt-2.5 text-xs leading-relaxed text-ink-muted">
+                  These are POC planning weights. They are not official City SLA thresholds, and they are not enforcement
+                  decision rules. They can be recalibrated when Brampton operational data is available.
+                </p>
+              </div>
+
+              {/* Honesty note */}
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+                <p className="text-xs leading-relaxed text-amber-900">
+                  This is a derived planning model based on CTGAN plus ABM outputs. It shows operational pressure
+                  propagation, not causal proof. It is not live Brampton operational data, and it is not enforcement
+                  decisioning. Every enforcement decision stays with authorized staff.
+                </p>
               </div>
             </div>
 

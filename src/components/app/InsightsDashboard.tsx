@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import NYCWorkloadMapPanel from './NYCWorkloadMapPanel'
+import NYCWorkloadMapPanel, { type AreaUnit } from './NYCWorkloadMapPanel'
+import type { AreaMetricValue, MapMetric } from './mapMetrics'
+import {
+  getNYCCouncilDistrictBoundariesCached,
+  type NYCCouncilDistrictBoundary,
+} from '../../services/municipalServiceRequests'
+
+// The 3D pressure map (deck.gl) is heavy — lazy-load it like NYCWorkloadMapPanel does.
+const SimulationPressureDeck = lazy(() => import('./NYCWorkload3DDeck'))
 import {
   getInsightsKpis,
   getInsightsComplaintTypeVolume,
@@ -44,14 +52,27 @@ import {
   type OpenQueueSummary,
 } from '../../services/caseExplorer'
 import {
-  getCtganLatestRunSummary,
-  getCtganScenarioSummary,
-  getCtganDailySummary,
-  getCtganDistrictPressure,
-  getCtganComplaintTypePressure,
-  type CtganDistrictPressureRow,
-  type CtganComplaintTypePressureRow,
+  getCtganScenarioOptions,
+  getCtganDailyByScenario,
+  getCtganDistrictPressureByScenario,
+  getCtganComplaintTypePressureByScenario,
+  type CtganScenarioOption,
+  type CtganDailyRow,
+  type CtganDistrictScenarioRow,
+  type CtganComplaintScenarioRow,
 } from '../../services/ctganAbmStress'
+import {
+  scoreDistricts,
+  recommendMitigation,
+  CHANNEL_LABELS,
+  OPERATIONAL_PRESSURE_WEIGHTS,
+  OPERATIONAL_PRESSURE_FORMULA,
+  OPERATIONAL_PRESSURE_MODEL_NAME,
+  OPERATIONAL_PRESSURE_WATCH_THRESHOLD,
+  OPERATIONAL_PRESSURE_RED_THRESHOLD,
+  type PressureChannels,
+  type PressureZone,
+} from '../../services/municipalPressureModel'
 
 // Insights — operational workload intelligence over a public 311 benchmark
 // service-request dataset. Tabs: Overview (map, KPIs, charts), Case Explorer
@@ -1173,25 +1194,10 @@ function DepartmentWorkload({ onExplore }: { onExplore: (f: CaseExplorerFilters)
 // support only, not live Brampton operational data and not enforcement
 // decisioning.
 
-// Officer effort is modeled in hours in the views; the ABM's binding constraint
-// is expressed in minutes, so convert at the edge.
-const MINUTES_PER_HOUR = 60
-
 // Shown verbatim wherever a CTGAN ABM view is empty or missing. Deliberately
 // calm, non-technical language for a pending load — never an error/failure tone.
 const CTGAN_PENDING_MESSAGE =
   'CTGAN ABM outputs are ready for loading. Schema alignment is complete. Data loading is pending manual approval.'
-
-const ctNum = (v: unknown): number => {
-  const n = typeof v === 'string' ? Number(v) : (v as number)
-  return Number.isFinite(n) ? n : 0
-}
-
-const ctStr = (v: unknown, fallback = '—'): string => {
-  if (v == null) return fallback
-  const s = String(v).trim()
-  return s.length ? s : fallback
-}
 
 const ctDate = (v: unknown): string => formatPlainDate(v == null ? null : String(v)) ?? '—'
 
@@ -1202,47 +1208,101 @@ const ctDate = (v: unknown): string => formatPlainDate(v == null ? null : String
  * calm "pending manual approval" state. Planning simulation only; never an
  * enforcement decision and never live Brampton operational data.
  */
+// Friendly labels for the calibrated scenario IDs.
+const SCENARIO_LABELS: Record<string, string> = {
+  baseline_calibrated: 'Baseline',
+  rainstorm_pothole_mud_tracking: 'Rainstorm road condition surge',
+  construction_corridor: 'Construction corridor',
+  event_parking_noise: 'Event parking and noise',
+  staff_capacity_drop: 'Staff capacity drop',
+  supervisor_review_bottleneck: 'Supervisor review bottleneck',
+}
+
+function scenarioLabel(o: CtganScenarioOption): string {
+  return SCENARIO_LABELS[o.scenario_id] ?? o.name ?? o.scenario_id
+}
+
 function SimulationLab() {
-  const latestRun = useLive<Record<string, unknown> | null>(getCtganLatestRunSummary)
-  const scenarios = useLive<Record<string, unknown>[]>(getCtganScenarioSummary)
-  const daily = useLive<{ day: string; total_cases: number }[]>(getCtganDailySummary)
-  const districts = useLive<CtganDistrictPressureRow[]>(getCtganDistrictPressure)
-  const complaintTypes = useLive<CtganComplaintTypePressureRow[]>(getCtganComplaintTypePressure)
+  const options = useLive<CtganScenarioOption[]>(getCtganScenarioOptions)
+  const optionRows = useMemo(() => options.data ?? [], [options.data])
 
-  const scenarioRows = useMemo(() => scenarios.data ?? [], [scenarios.data])
-  const dailyRows = useMemo(() => daily.data ?? [], [daily.data])
-  const districtRows = useMemo(() => districts.data ?? [], [districts.data])
-  const complaintRows = useMemo(() => complaintTypes.data ?? [], [complaintTypes.data])
+  // Selected scenario — default to the calibrated baseline once options load.
+  const [scenarioId, setScenarioId] = useState<string>('')
+  useEffect(() => {
+    if (scenarioId || optionRows.length === 0) return
+    const def = optionRows.find((o) => o.scenario_id === 'baseline_calibrated') ?? optionRows[0]
+    setScenarioId(def.scenario_id)
+  }, [optionRows, scenarioId])
 
-  const anyLoading =
-    latestRun.loading || scenarios.loading || daily.loading || districts.loading || complaintTypes.loading
+  // Per-scenario data bundle, reloaded whenever the scenario changes.
+  const [daily, setDaily] = useState<CtganDailyRow[]>([])
+  const [districtRows, setDistrictRows] = useState<CtganDistrictScenarioRow[]>([])
+  const [complaintRows, setComplaintRows] = useState<CtganComplaintScenarioRow[]>([])
+  const [bundleLoading, setBundleLoading] = useState(false)
+  const [bundleError, setBundleError] = useState<string | null>(null)
 
-  // With nothing loaded, every view is empty (or missing) and we fall to the
-  // calm pending state rather than showing scary database-failure language.
-  const hasData =
-    latestRun.data != null ||
-    scenarioRows.length > 0 ||
-    dailyRows.length > 0 ||
-    districtRows.length > 0 ||
-    complaintRows.length > 0
-  const showPending = !anyLoading && !hasData
+  useEffect(() => {
+    if (!scenarioId) return
+    let active = true
+    setBundleLoading(true)
+    setBundleError(null)
+    Promise.all([
+      getCtganDailyByScenario(scenarioId),
+      getCtganDistrictPressureByScenario(scenarioId),
+      getCtganComplaintTypePressureByScenario(scenarioId),
+    ])
+      .then(([d, di, c]) => {
+        if (!active) return
+        setDaily(d)
+        setDistrictRows(di)
+        setComplaintRows(c)
+        setBundleLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        console.error('CTGAN scenario load failed:', err)
+        setBundleError(errorMessage(err))
+        setBundleLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [scenarioId])
 
-  // Derived headline measures — only meaningful once data is present.
-  const totalGenerated = ctNum(latestRun.data?.generated_cases)
-  const simulatedDays = dailyRows.length
-  const totalDailyDemand = useMemo(() => dailyRows.reduce((a, r) => a + r.total_cases, 0), [dailyRows])
-  const peakDay = useMemo(
-    () =>
-      dailyRows.reduce<{ day: string; total_cases: number } | null>(
-        (best, r) => (best == null || r.total_cases > best.total_cases ? r : best),
-        null,
-      ),
-    [dailyRows],
+  const selectedOption = useMemo(
+    () => optionRows.find((o) => o.scenario_id === scenarioId) ?? null,
+    [optionRows, scenarioId],
   )
-  const districtCount = districtRows.length
-  const totalDistrictCases = useMemo(() => districtRows.reduce((a, r) => a + r.total_cases, 0), [districtRows])
-  const totalEstimatedHours = useMemo(() => districtRows.reduce((a, r) => a + r.estimated_hours, 0), [districtRows])
-  const totalOfficerMinutes = totalEstimatedHours * MINUTES_PER_HOUR
+
+  // Day slider — defaults to the last simulated day (end of run) per scenario.
+  const [dayIdx, setDayIdx] = useState(0)
+  useEffect(() => {
+    setDayIdx(daily.length > 0 ? daily.length - 1 : 0)
+  }, [daily])
+  const dayCount = daily.length
+  const clampedDay = Math.min(dayIdx, Math.max(0, dayCount - 1))
+  const selectedDay = daily[clampedDay] ?? null
+
+  // Scenario-level (end-of-run) measures.
+  const redZoneCount = useMemo(() => districtRows.filter((d) => d.overload_flag === 1).length, [districtRows])
+  const finalBacklog = selectedOption?.final_backlog ?? (dayCount ? daily[dayCount - 1].backlog : 0)
+  const supervisorPeak = useMemo(
+    () => daily.reduce((m, r) => Math.max(m, r.supervisor_queue_size), 0),
+    [daily],
+  )
+  const endStale = dayCount ? daily[dayCount - 1].stale_cases : 0
+  const maxBacklog = useMemo(() => daily.reduce((m, r) => Math.max(m, r.backlog), 0) || 1, [daily])
+  const topDistricts = useMemo(
+    () => [...districtRows].sort((a, b) => b.backlog - a.backlog).slice(0, 10),
+    [districtRows],
+  )
+  const topComplaints = useMemo(
+    () => [...complaintRows].sort((a, b) => b.total_cases - a.total_cases).slice(0, 10),
+    [complaintRows],
+  )
+
+  const showPending = !options.loading && optionRows.length === 0
+  const redStatus: SimStatus = redZoneCount === 0 ? 'good' : redZoneCount <= 20 ? 'watch' : 'critical'
 
   return (
     <div className="mt-6 space-y-6">
@@ -1275,31 +1335,6 @@ function SimulationLab() {
             )}
           </div>
         </div>
-
-        <div className="px-5 py-4">
-          {anyLoading ? (
-            <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
-              Connecting to CTGAN ABM outputs…
-            </div>
-          ) : showPending ? (
-            <CtganPendingNote />
-          ) : (
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-ink-subtle">
-              <span>
-                <span className="font-semibold text-navy-900">Scenario:</span> {ctStr(latestRun.data?.scenario_name)}
-              </span>
-              <span>
-                <span className="font-semibold text-navy-900">Latest run:</span> {ctStr(latestRun.data?.run_id)}
-              </span>
-              <span>
-                <span className="font-semibold text-navy-900">Run date:</span> {ctDate(latestRun.data?.run_date)}
-              </span>
-              <span>
-                <span className="font-semibold text-navy-900">Scenarios:</span> {fmtInt(scenarioRows.length)}
-              </span>
-            </div>
-          )}
-        </div>
       </section>
 
       {/* Framework cards — the four-stage model, shown even with no data loaded. */}
@@ -1326,124 +1361,339 @@ function SimulationLab() {
         />
       </div>
 
-      {/* 1. CTGAN demand generation — run + daily summary measures. */}
-      <CtganSection
-        title="CTGAN demand generation"
-        subtitle="Synthetic demand generated for the latest run, used as the ABM's arrival stream. Planning estimate, not a forecast."
-      >
-        {showPending ? (
+      {showPending ? (
+        <CtganSection title="Scenario selector" subtitle="Pick a calibrated scenario to explore its capacity-constrained queue pressure.">
           <CtganPendingNote />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <SimCard label="Generated cases" value={fmtInt(totalGenerated)} helper="Synthetic demand in the latest run" />
-            <SimCard label="Simulated days" value={fmtInt(simulatedDays)} helper="Days in the demand horizon" />
-            <SimCard label="Total daily demand" value={fmtInt(totalDailyDemand)} helper="Sum of cases across simulated days" />
-            <SimCard
-              label="Peak demand day"
-              value={peakDay ? ctDate(peakDay.day) : '—'}
-              helper={peakDay ? `${fmtInt(peakDay.total_cases)} cases on the peak day` : 'No daily rows yet'}
+        </CtganSection>
+      ) : (
+        <>
+          {/* Scenario selector + day slider — no in-browser re-simulation. */}
+          <CtganSection
+            title="Scenario selector"
+            subtitle="Pick a calibrated scenario and scrub the simulated day. Scenario dropdown and day slider only — synthetic demand is precomputed; nothing re-runs in the browser."
+          >
+            <div className="grid gap-5 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Scenario</span>
+                <select
+                  value={scenarioId}
+                  onChange={(e) => setScenarioId(e.target.value)}
+                  className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                >
+                  {optionRows.map((o) => (
+                    <option key={o.scenario_id} value={o.scenario_id}>
+                      {scenarioLabel(o)}
+                    </option>
+                  ))}
+                </select>
+                {selectedOption?.description && (
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">{selectedOption.description}</p>
+                )}
+              </label>
+              <div className="block">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Simulated day</span>
+                  <span className="text-xs font-medium text-navy-900">
+                    {selectedDay ? `Day ${clampedDay + 1} of ${dayCount} (${ctDate(selectedDay.day)})` : '—'}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={Math.max(1, dayCount)}
+                  value={clampedDay + 1}
+                  onChange={(e) => setDayIdx(Number(e.target.value) - 1)}
+                  disabled={dayCount === 0}
+                  className="mt-3 w-full accent-sky-600 disabled:opacity-40"
+                />
+                <p className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
+                  The day slider changes the daily cards and trajectory only. District pressure below is end-of-run data.
+                </p>
+              </div>
+            </div>
+            {bundleError && (
+              <p className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
+                Could not load scenario data: {bundleError}
+              </p>
+            )}
+          </CtganSection>
+
+          {/* Scenario summary — end-of-run measures for the selected scenario. */}
+          <CtganSection
+            title="Scenario summary"
+            subtitle="End-of-run capacity-constrained queue pressure for the selected scenario. Planning estimate, not a forecast."
+          >
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <SimCard label="Final backlog" value={fmtInt(finalBacklog)} helper="Open queue at the end of the run" status="watch" />
+              <SimCard
+                label="Red zone districts"
+                value={`${fmtInt(redZoneCount)} / ${fmtInt(districtRows.length)}`}
+                helper="Districts flagged overloaded (overload_flag = 1)"
+                status={redStatus}
+              />
+              <SimCard label="Supervisor queue peak" value={fmtInt(supervisorPeak)} helper="Highest review queue across the run" />
+              <SimCard label="Stale cases (end)" value={fmtInt(endStale)} helper="Cases aged past the stale threshold at run end" />
+            </div>
+          </CtganSection>
+
+          {/* Pressure propagation — derived operational pressure chain,
+              scored by the Operational Pressure Model. */}
+          <CtganSection
+            title="Pressure propagation"
+            subtitle="How workload pressure moves through districts, complaint types, officer capacity, supervisor review, stale cases, and backlog under the selected scenario."
+          >
+            <PressurePropagation
+              daily={daily}
+              districtRows={districtRows}
+              complaintRows={complaintRows}
+              finalBacklog={finalBacklog}
+              supervisorPeak={supervisorPeak}
+              endStale={endStale}
+              redZoneCount={redZoneCount}
+              loading={bundleLoading}
             />
-          </div>
-        )}
-      </CtganSection>
+          </CtganSection>
 
-      {/* 2. ABM district queue simulation — queue totals. */}
-      <CtganSection
-        title="ABM district queue simulation"
-        subtitle="Generated demand routed into per-district intake queues and advanced by the agent-based model."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <SimCard label="Districts simulated" value={fmtInt(districtCount)} helper="Distinct district queues modeled" />
-            <SimCard label="Cases queued" value={fmtInt(totalDistrictCases)} helper="Total cases routed into district queues" />
-            <SimCard label="Estimated field hours" value={fmtInt(totalEstimatedHours)} helper="Modeled officer effort across districts" />
-            <SimCard
-              label="Avg cases / district"
-              value={districtCount ? fmtInt(totalDistrictCases / districtCount) : '—'}
-              helper="Mean queue load per district"
-            />
-          </div>
-        )}
-      </CtganSection>
+          {/* Selected-day cards + backlog trajectory (day slider). */}
+          <CtganSection
+            title="Selected day — operational pressure"
+            subtitle="Daily queue pressure on the chosen simulated day. These cards and the trajectory update with the day slider."
+          >
+            {bundleLoading ? (
+              <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
+                Loading scenario daily trajectory…
+              </div>
+            ) : selectedDay ? (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <SimCard label="Backlog" value={fmtInt(selectedDay.backlog)} helper={`Open queue on day ${clampedDay + 1}`} />
+                  <SimCard label="Stale cases" value={fmtInt(selectedDay.stale_cases)} helper="Aged cases still waiting" />
+                  <SimCard label="Supervisor queue" value={fmtInt(selectedDay.supervisor_queue_size)} helper="Cases awaiting review that day" />
+                  <SimCard label="Processed (cumulative)" value={fmtInt(selectedDay.processed)} helper="Cases worked through this day" />
+                </div>
+                <div className="mt-4">
+                  <div className="flex h-16 items-end gap-0.5">
+                    {daily.map((r, i) => (
+                      <button
+                        key={r.day}
+                        type="button"
+                        onClick={() => setDayIdx(i)}
+                        title={`Day ${i + 1} (${ctDate(r.day)}): ${fmtInt(r.backlog)} backlog`}
+                        aria-label={`Select day ${i + 1}`}
+                        className="flex-1 rounded-t transition-colors"
+                        style={{
+                          height: `${Math.max(3, (r.backlog / maxBacklog) * 100)}%`,
+                          backgroundColor: i === clampedDay ? '#0f172a' : '#bae6fd',
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-ink-subtle">
+                    Backlog trajectory across {dayCount} days — selected day highlighted. Click a bar to jump to that day.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <CtganPendingNote />
+            )}
+          </CtganSection>
 
-      {/* 3. Officer daily minutes — the constrained resource. */}
-      <CtganSection
-        title="Officer daily minutes — the constrained resource"
-        subtitle="Each officer has a fixed budget of working minutes per day. When demand exceeds available minutes, cases queue rather than disappear — the model's binding constraint."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <SimCard label="Officer-minutes demanded" value={fmtInt(totalOfficerMinutes)} helper="Modeled effort converted to minutes (hours × 60)" />
-            <SimCard label="Equivalent field hours" value={fmtInt(totalEstimatedHours)} helper="Total constrained effort across the run" />
-            <SimCard
-              label="Per simulated day"
-              value={simulatedDays ? fmtInt(totalOfficerMinutes / simulatedDays) : '—'}
-              helper="Average officer-minutes of demand per day"
-            />
-          </div>
-        )}
-      </CtganSection>
+          {/* 3D district pressure map — updates by scenario, not by day. */}
+          <CtganSection
+            title="District pressure map"
+            subtitle="End-of-run district queue pressure for the selected scenario, shaded by open backlog. The map updates by scenario, not by day — district data is end-of-run, not daily."
+          >
+            <SimulationPressureMap districtRows={districtRows} loading={bundleLoading} />
+          </CtganSection>
 
-      {/* 4. Supervisor review queue — the second bottleneck. */}
-      <CtganSection
-        title="Supervisor review queue bottleneck"
-        subtitle="Cases that require sign-off enter a supervisor review queue after field work. Limited review capacity makes this a second bottleneck where backlog can build even when field minutes are available."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <SimCard label="Cases entering review" value={fmtInt(totalDistrictCases)} helper="Cases routed through the modeled review stage" />
-            <SimCard label="Review effort (hours)" value={fmtInt(totalEstimatedHours)} helper="Effort competing for supervisor capacity" />
-            <SimCard label="Stage" value="Post-field" helper="Review queue forms after officer field work" />
-          </div>
-        )}
-      </CtganSection>
+          {/* Top districts by queue pressure — with red-zone flags. */}
+          <CtganSection
+            title="Top districts by queue pressure"
+            subtitle="Highest end-of-run backlog districts for the selected scenario. A red zone is an overloaded district (overload_flag = 1)."
+          >
+            <TopDistrictsTable rows={topDistricts} loading={bundleLoading} />
+          </CtganSection>
 
-      {/* 5. District pressure */}
-      <CtganSection
-        title="District pressure"
-        subtitle="Where simulated demand concentrates by district or area. Planning estimate, not performance scoring."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <CtganPressureTable
-            firstColLabel="District / area"
-            rows={districtRows.map((r) => ({ label: r.district_or_area, total_cases: r.total_cases, estimated_hours: r.estimated_hours }))}
-          />
-        )}
-      </CtganSection>
+          {/* Top complaint type pressure. */}
+          <CtganSection
+            title="Top complaint type pressure"
+            subtitle="Which complaint types drive the most simulated workload in the selected scenario."
+          >
+            {bundleLoading ? (
+              <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
+                Loading complaint-type pressure…
+              </div>
+            ) : (
+              <CtganPressureTable
+                firstColLabel="Complaint type"
+                rows={topComplaints.map((r) => ({ label: r.complaint_type, total_cases: r.total_cases, estimated_hours: r.estimated_hours }))}
+              />
+            )}
+          </CtganSection>
+        </>
+      )}
 
-      {/* 6. Complaint type pressure */}
-      <CtganSection
-        title="Complaint type pressure"
-        subtitle="Which complaint types drive the most simulated workload across the run."
-      >
-        {showPending ? (
-          <CtganPendingNote />
-        ) : (
-          <CtganPressureTable
-            firstColLabel="Complaint type"
-            rows={complaintRows.map((r) => ({ label: r.complaint_type, total_cases: r.total_cases, estimated_hours: r.estimated_hours }))}
-          />
-        )}
-      </CtganSection>
-
-      {/* 7. Clear note — planning simulation only, not enforcement decisioning. */}
+      {/* Clear note — planning simulation only, not enforcement decisioning. */}
       <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
         <div className="text-sm font-semibold text-navy-900">Planning simulation only — not enforcement decisioning</div>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-subtle">
           This framework uses CTGAN-generated synthetic demand from public 311 benchmark patterns and an agent-based
-          model to stress test capacity, backlog, and review sequencing. It is decision support for staffing and
-          planning conversations. It does not use live Brampton operational data, does not score officers, does not
-          automate enforcement, and is never used to make enforcement decisions.
+          model to stress test capacity, backlog, and review sequencing — operational pressure and queue pressure under
+          capacity-constrained queue pressure. It is decision support for staffing and planning conversations. It does
+          not use live Brampton operational data, does not score officers, does not automate enforcement, and is never
+          used to make enforcement decisions.
         </p>
       </section>
+    </div>
+  )
+}
+
+// The 3D district pressure map for a selected scenario. Reuses the deck.gl
+// workload deck, joining CTGAN end-of-run district backlog onto NYC council
+// district geometry (by district number). Falls back to a ranked red-zone list
+// if geometry is unavailable or nothing joins — never a blank or fake map.
+function SimulationPressureMap({ districtRows, loading }: { districtRows: CtganDistrictScenarioRow[]; loading: boolean }) {
+  const units = useLive<NYCCouncilDistrictBoundary[]>(getNYCCouncilDistrictBoundariesCached)
+  const unitList = useMemo<AreaUnit[]>(
+    () =>
+      (units.data ?? []).map((d) => ({
+        id: String(d.id),
+        key: String(d.council_district),
+        label: `District ${d.council_district}`,
+        short: d.short_label,
+        geometry: d.geojson_geometry,
+      })),
+    [units.data],
+  )
+  const unitKeys = useMemo(() => new Set(unitList.map((u) => u.key)), [unitList])
+  const values = useMemo<AreaMetricValue[]>(
+    () =>
+      districtRows.map((r) => {
+        const m = r.district_or_area.match(/\d+/)
+        const key = m ? String(Number(m[0])) : r.district_or_area
+        return {
+          key,
+          label: r.district_or_area,
+          value: r.backlog,
+          open_backlog: r.backlog,
+          total_requests: r.total_cases,
+          high_priority_open: r.stale_cases,
+        }
+      }),
+    [districtRows],
+  )
+  const matched = useMemo(() => values.filter((v) => unitKeys.has(v.key)), [values, unitKeys])
+  const maxVal = useMemo(() => matched.reduce((m, v) => Math.max(m, v.open_backlog ?? 0), 0), [matched])
+
+  if (loading || units.loading) {
+    return (
+      <div className="flex h-[320px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 text-sm text-ink-subtle sm:h-[440px]">
+        Loading district pressure map…
+      </div>
+    )
+  }
+
+  // Honest fallback — no geometry or nothing joined: show the ranked red-zone list.
+  if (unitList.length === 0 || matched.length === 0) {
+    return (
+      <TopDistrictsTable
+        rows={[...districtRows].sort((a, b) => b.backlog - a.backlog).slice(0, 10)}
+        loading={false}
+        note="3D map geometry is unavailable, so district pressure is shown as a ranked list."
+      />
+    )
+  }
+
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-[320px] w-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 text-sm text-ink-subtle sm:h-[440px]">
+          Loading 3D pressure view…
+        </div>
+      }
+    >
+      <SimulationPressureDeck
+        units={unitList}
+        values={values}
+        metric={'open_backlog' as MapMetric}
+        min={0}
+        max={Math.max(1, maxVal)}
+        unitLabel="council district"
+        activeKey={null}
+        mode="district"
+        onHover={() => {}}
+        onSelect={() => {}}
+      />
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-subtle">
+        Shaded by end-of-run open backlog per council district. Public 311 benchmark synthetic demand — capacity
+        planning and decision support only, not live Brampton data and not enforcement decisioning.
+      </p>
+    </Suspense>
+  )
+}
+
+// Ranked districts table with red-zone flags (overload_flag = 1). Also used as
+// the SimulationPressureMap fallback.
+function TopDistrictsTable({
+  rows,
+  loading,
+  note,
+}: {
+  rows: CtganDistrictScenarioRow[]
+  loading?: boolean
+  note?: string
+}) {
+  if (loading) {
+    return (
+      <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
+        Loading districts…
+      </div>
+    )
+  }
+  if (rows.length === 0) return <CtganPendingNote />
+  const maxBacklog = rows.reduce((m, r) => Math.max(m, r.backlog), 0) || 1
+  return (
+    <div className="overflow-x-auto">
+      {note && <p className="mb-2 text-[11px] leading-relaxed text-ink-subtle">{note}</p>}
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-ink-subtle">
+            <th className="py-2 pr-3 font-semibold">District / area</th>
+            <th className="py-2 pr-3 text-right font-semibold">Backlog</th>
+            <th className="py-2 pr-3 text-right font-semibold">Stale</th>
+            <th className="hidden py-2 pr-3 font-semibold sm:table-cell">Queue pressure</th>
+            <th className="py-2 font-semibold">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.district_or_area} className="border-b border-slate-100 last:border-0">
+              <td className="py-2 pr-3 text-navy-900">{r.district_or_area}</td>
+              <td className="py-2 pr-3 text-right tabular-nums text-navy-900">{fmtInt(r.backlog)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums text-ink-subtle">{fmtInt(r.stale_cases)}</td>
+              <td className="hidden py-2 pr-3 sm:table-cell">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-full rounded-full ${r.overload_flag === 1 ? 'bg-rose-500' : 'bg-sky-500'}`}
+                    style={{ width: `${Math.max(2, Math.min(100, (r.backlog / maxBacklog) * 100))}%` }}
+                  />
+                </div>
+              </td>
+              <td className="py-2">
+                {r.overload_flag === 1 ? (
+                  <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                    Red zone
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                    OK
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -1555,6 +1805,288 @@ function SimCard({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{label}</div>
       <div className={`mt-1.5 truncate text-2xl font-bold tabular-nums ${s.value}`}>{value}</div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{helper}</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Pressure propagation — a DERIVED operational-pressure view.
+//
+// It scores the selected scenario's districts with the Operational Pressure
+// Model (see services/municipalPressureModel.ts), then lays the result
+// out as the operational dependency chain the ABM encodes: source pressure ->
+// pathway (the five pressure channels) -> affected district -> affected complaint
+// type -> officer queue -> supervisor review -> stale backlog -> mitigation.
+// Edges are operational dependencies, NOT causal proof; this is not a learned
+// causal graph. Not live Brampton data; enforcement decisions stay human reviewed.
+// ---------------------------------------------------------------------------
+
+const ZONE_STATUS: Record<PressureZone, SimStatus> = { red: 'critical', watch: 'watch', normal: 'good' }
+const ZONE_LABEL: Record<PressureZone, string> = { red: 'Red zone', watch: 'Watch', normal: 'Normal' }
+
+type PressureStage = { key: string; step: string; label: string; value: string; detail: string; status: SimStatus }
+
+function PressurePropagation({
+  daily,
+  districtRows,
+  complaintRows,
+  finalBacklog,
+  supervisorPeak,
+  endStale,
+  redZoneCount,
+  loading,
+}: {
+  daily: CtganDailyRow[]
+  districtRows: CtganDistrictScenarioRow[]
+  complaintRows: CtganComplaintScenarioRow[]
+  finalBacklog: number
+  supervisorPeak: number
+  endStale: number
+  redZoneCount: number
+  loading: boolean
+}) {
+  const model = useMemo(() => {
+    if (districtRows.length === 0 && complaintRows.length === 0) return null
+    const scored = scoreDistricts(districtRows, complaintRows)
+    const source = scored[0] ?? null
+    const mopmRed = scored.filter((s) => s.zone === 'red').length
+    const mopmWatch = scored.filter((s) => s.zone === 'watch').length
+    const topComplaint = [...complaintRows].sort((a, b) => b.total_cases - a.total_cases)[0] ?? null
+    const demandTotal = complaintRows.reduce((n, c) => n + c.total_cases, 0)
+    const peakBacklog = daily.reduce((m, r) => Math.max(m, r.backlog), 0) || finalBacklog
+    const peakStale = daily.reduce((m, r) => Math.max(m, r.stale_cases), 0) || endStale
+    const supervisorShare = peakBacklog > 0 ? supervisorPeak / peakBacklog : 0
+    const mitigation = recommendMitigation(source, supervisorShare, mopmRed)
+
+    const stages: PressureStage[] = [
+      {
+        key: 'district',
+        step: 'Affected district',
+        label: source?.district_or_area ?? '—',
+        value: source ? fmtInt(source.backlog) : '—',
+        detail: source ? `${ZONE_LABEL[source.zone]} · lead channel ${CHANNEL_LABELS[source.dominantChannel]}` : 'Highest-pressure district',
+        status: source ? ZONE_STATUS[source.zone] : 'neutral',
+      },
+      {
+        key: 'complaint',
+        step: 'Affected complaint type',
+        label: topComplaint?.complaint_type ?? '—',
+        value: topComplaint ? fmtInt(topComplaint.total_cases) : '—',
+        detail:
+          demandTotal > 0 && topComplaint
+            ? `${fmtPct(topComplaint.total_cases, demandTotal)} of simulated demand — dominant category`
+            : 'Top CTGAN demand driver',
+        status: 'watch',
+      },
+      {
+        key: 'officer',
+        step: 'Officer queue effect',
+        label: 'Field queue',
+        value: fmtInt(peakBacklog),
+        detail: 'Peak open field queue — officer daily minutes are the binding constraint',
+        status: 'watch',
+      },
+      {
+        key: 'supervisor',
+        step: 'Supervisor review effect',
+        label: 'Review queue',
+        value: fmtInt(supervisorPeak),
+        detail:
+          supervisorShare >= 0.4
+            ? 'Peak sign-off queue — a major share of work waits on review'
+            : 'Peak cases awaiting supervisor sign-off',
+        status: supervisorShare >= 0.5 ? 'critical' : supervisorShare >= 0.2 ? 'watch' : 'neutral',
+      },
+      {
+        key: 'stale',
+        step: 'Stale backlog effect',
+        label: 'Aged cases',
+        value: fmtInt(Math.max(peakStale, endStale)),
+        detail: 'Cases aged past the stale threshold as the queue holds',
+        status: endStale > 0 ? 'watch' : 'neutral',
+      },
+      {
+        key: 'final',
+        step: 'Final backlog impact',
+        label: 'End-of-run backlog',
+        value: fmtInt(finalBacklog),
+        detail: redZoneCount > 0 ? `${fmtInt(redZoneCount)} district(s) end overloaded (ABM flag)` : 'Open queue remaining at end of run',
+        status: redZoneCount > 0 ? 'critical' : 'watch',
+      },
+    ]
+
+    return { scored, source, mopmRed, mopmWatch, mitigation, stages }
+  }, [daily, districtRows, complaintRows, finalBacklog, supervisorPeak, endStale, redZoneCount])
+
+  if (loading) {
+    return (
+      <div className="animate-pulse rounded-md bg-slate-100/70 py-4 text-center text-sm text-ink-subtle">
+        Deriving pressure propagation…
+      </div>
+    )
+  }
+  if (!model || !model.source) return <CtganPendingNote />
+
+  const src = model.source
+
+  return (
+    <div>
+      {/* Source pressure — the highest-P entity, with its zone + score. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <div className={`rounded-xl border p-4 ${SIM_CARD_STATUS[ZONE_STATUS[src.zone]].container}`}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Source pressure</span>
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                src.zone === 'red'
+                  ? 'bg-rose-100 text-rose-700'
+                  : src.zone === 'watch'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-emerald-100 text-emerald-700'
+              }`}
+            >
+              {ZONE_LABEL[src.zone]}
+            </span>
+          </div>
+          <div className="mt-1.5 truncate text-sm font-semibold text-navy-900" title={src.district_or_area}>
+            {src.district_or_area}
+          </div>
+          <div className={`mt-0.5 text-2xl font-bold tabular-nums ${SIM_CARD_STATUS[ZONE_STATUS[src.zone]].value}`}>
+            P = {src.pressure.toFixed(2)}
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+            Lead channel: {CHANNEL_LABELS[src.dominantChannel]} — the signal contributing most to this district&rsquo;s
+            pressure.
+          </p>
+        </div>
+
+        {/* Pressure pathway — the five weighted channels behind P. */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Pressure pathway</span>
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-ink-muted">{OPERATIONAL_PRESSURE_FORMULA}</code>
+          </div>
+          <div className="mt-2.5">
+            <PressureChannelBars channels={src.channels} />
+          </div>
+        </div>
+      </div>
+
+      {/* Reconciliation — ABM direct flags vs. pressure-model derived zones. */}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">ABM overload flags</div>
+          <div className="mt-1 text-xl font-bold tabular-nums text-navy-900">
+            {fmtInt(redZoneCount)} <span className="text-sm font-medium text-ink-subtle">district(s)</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+            Direct simulation output — districts the ABM flagged with overload_flag = 1.
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Pressure model watch / red zones</div>
+          <div className="mt-1 text-xl font-bold tabular-nums text-navy-900">
+            {fmtInt(model.mopmWatch)} <span className="text-sm font-medium text-ink-subtle">watch</span>
+            <span className="mx-1.5 text-ink-subtle">·</span>
+            {fmtInt(model.mopmRed)} <span className="text-sm font-medium text-ink-subtle">red</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">
+            Derived pressure interpretation — the Operational Pressure Model&rsquo;s reading (watch ≥{' '}
+            {OPERATIONAL_PRESSURE_WATCH_THRESHOLD}, red ≥ {OPERATIONAL_PRESSURE_RED_THRESHOLD}).
+          </p>
+        </div>
+      </div>
+
+      {/* Propagation chain — operational dependencies between stages. */}
+      <ol className="mt-4 flex flex-col gap-2 lg:flex-row lg:items-stretch lg:gap-1">
+        {model.stages.flatMap((s, i) => {
+          const card = <PressureStageCard key={s.key} stage={s} index={i + 1} />
+          return i < model.stages.length - 1 ? [card, <PressureArrow key={`${s.key}-arrow`} />] : [card]
+        })}
+      </ol>
+
+      {/* Recommended mitigation — the chain's terminal node. */}
+      <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-semibold text-white">
+            ✓
+          </span>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">Recommended mitigation</div>
+        </div>
+        <div className="mt-1.5 text-sm font-semibold text-emerald-900">{model.mitigation.title}</div>
+        <p className="mt-1 text-xs leading-relaxed text-emerald-900/80">{model.mitigation.body}</p>
+      </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
+        Derived planning model ({OPERATIONAL_PRESSURE_MODEL_NAME}) based on CTGAN plus ABM outputs. Shows operational pressure propagation, not
+        causal proof. Channel edges are operational dependencies, not learned causality. Public 311 benchmark synthetic
+        demand — capacity planning and decision support only, not live Brampton data, and never an enforcement decision;
+        enforcement decisions remain human reviewed.
+      </p>
+    </div>
+  )
+}
+
+/** Horizontal weighted-contribution bars for the five Operational Pressure Model channels. */
+function PressureChannelBars({ channels }: { channels: PressureChannels }) {
+  const rows = (Object.keys(channels) as (keyof PressureChannels)[]).map((k) => ({
+    k,
+    label: CHANNEL_LABELS[k],
+    value: channels[k],
+    contrib: OPERATIONAL_PRESSURE_WEIGHTS[k] * channels[k],
+  }))
+  const max = Math.max(0.0001, ...rows.map((r) => r.contrib))
+  return (
+    <ul className="space-y-1.5">
+      {rows.map((r) => (
+        <li key={r.k} className="flex items-center gap-2">
+          <span className="w-28 shrink-0 text-[10px] uppercase tracking-wider text-ink-subtle">{r.label}</span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-accent-500" style={{ width: `${Math.max(2, (r.contrib / max) * 100)}%` }} />
+          </div>
+          <span className="w-10 shrink-0 text-right text-[10px] tabular-nums text-ink-subtle">{r.value.toFixed(2)}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** One stage card in the propagation chain (status-tinted). */
+function PressureStageCard({ stage, index }: { stage: PressureStage; index: number }) {
+  const s = SIM_CARD_STATUS[stage.status]
+  return (
+    <div className={`flex min-w-0 flex-1 flex-col rounded-xl border p-3 ${s.container}`}>
+      <div className="flex items-center gap-1.5">
+        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-navy-900 text-[9px] font-semibold text-white">
+          {index}
+        </span>
+        <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{stage.step}</span>
+      </div>
+      <div className="mt-1.5 truncate text-sm font-semibold text-navy-900" title={stage.label}>
+        {stage.label}
+      </div>
+      <div className={`mt-0.5 text-xl font-bold tabular-nums ${s.value}`}>{stage.value}</div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-subtle">{stage.detail}</p>
+    </div>
+  )
+}
+
+/** Connector between chain stages — points down on mobile, right on desktop. */
+function PressureArrow() {
+  return (
+    <div className="flex shrink-0 items-center justify-center px-1 text-slate-400" aria-hidden>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-4 w-4 rotate-90 lg:rotate-0"
+      >
+        <path d="M5 12h14" />
+        <path d="M13 6l6 6-6 6" />
+      </svg>
     </div>
   )
 }
