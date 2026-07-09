@@ -787,9 +787,14 @@ export default function ResidentNewRequestPage() {
       })
     } catch (err) {
       console.error('Resident request submission failed:', err)
+      const detail =
+        (err as { message?: string } | null)?.message ??
+        (typeof err === 'string' ? err : null)
       setStatus({
         kind: 'error',
-        message: 'We could not submit the request. Please try again, or open the form in a signed out browser window.',
+        message: detail
+          ? `We could not submit the request. Please try again. (${detail})`
+          : 'We could not submit the request. Please try again.',
       })
     }
   }
