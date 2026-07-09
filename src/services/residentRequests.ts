@@ -670,9 +670,41 @@ const RESIDENT_COLUMN_TIERS = [
   RESIDENT_REQUEST_BASE_COLUMNS,
 ] as const
 
-/** Postgres "undefined_column" — a referenced migration has not been applied yet. */
+type SupabaseColumnError = {
+  code?: string
+  message?: string
+  details?: string
+  hint?: string
+}
+
+/**
+ * Missing-column error — a referenced migration has not been applied yet.
+ * Postgres reports these as 42703 (undefined_column); Supabase PostgREST
+ * reports them as PGRST204 ("Could not find the '<col>' column ... in the
+ * schema cache"), so both codes (and the message text as a last resort)
+ * must be treated as "column missing" for the fallbacks to run.
+ */
 function isUndefinedColumnError(err: unknown): boolean {
-  return (err as { code?: string } | null)?.code === '42703'
+  const error = err as SupabaseColumnError | null
+
+  if (error?.code === '42703' || error?.code === 'PGRST204') {
+    return true
+  }
+
+  const text = [
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  return (
+    text.includes('could not find') &&
+    text.includes('column') &&
+    text.includes('schema cache')
+  )
 }
 
 /**
