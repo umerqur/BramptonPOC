@@ -135,6 +135,27 @@ export const STAFF_PROFILES: StaffProfile[] = [
     roleDisplayNames: { supervisor: 'Supervisor Bilal', csr: 'CSR Bilal', officer: 'Officer Bilal' },
   },
   {
+    name: 'Harmanpreet Gill',
+    email: 'harmanpreet.gill@brampton.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Gill', csr: 'CSR Gill', officer: 'Officer Gill' },
+  },
+  {
+    name: 'Vince Chung',
+    email: 'vince.chung@brampton.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Chung', csr: 'CSR Chung', officer: 'Officer Chung' },
+  },
+  {
+    name: 'Kamal Birdi',
+    email: 'kamal.birdi@brampton.ca',
+    allowedRoles: ['supervisor', 'csr', 'officer'],
+    defaultRole: 'supervisor',
+    roleDisplayNames: { supervisor: 'Supervisor Birdi', csr: 'CSR Birdi', officer: 'Officer Birdi' },
+  },
+  {
     // The dedicated demo By-law Officer. This profile can ONLY be an officer.
     name: 'Officer Oakley',
     email: 'oakley.carpentry_worker@yahoo.com',
