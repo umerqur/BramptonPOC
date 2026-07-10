@@ -57,6 +57,10 @@ export type ResidentComplaintInput = {
   submittedAt: string // ISO timestamp
   residentName: string
   residentEmail: string
+  /** Separate first/last name where the source provides them (resident intake
+   *  rows store first_name / last_name); older seeds carry only residentName. */
+  residentFirstName?: string
+  residentLastName?: string
 }
 
 /**

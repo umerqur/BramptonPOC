@@ -20,7 +20,7 @@ import {
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
 import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
-import type { DemoCase, NycBenchmarkSource, Priority } from '../../data/demoWorkflowTypes'
+import type { DemoCase, NycBenchmarkSource, Priority, ResidentComplaintInput } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
 // summary in one place, plus the review-readiness gate. The staff workflow is
@@ -222,6 +222,10 @@ export default function AppCaseWorkbenchPage() {
       <Header cases={cases} activeId={c.id} onPick={setActiveCase} />
 
       <CaseSourceBar c={c} />
+
+      {/* Who filed this — the resident's name and contact email, first thing on
+          the file. NYC benchmark cases carry no resident, so nothing renders. */}
+      <ResidentContactCard input={c.input} />
 
       {/* Primary decision support: the single next best action, why, and a staff
           control. Deterministic and stage-aware — staff confirm and can override. */}
@@ -709,6 +713,57 @@ const SOURCE_BADGE_STYLES: Record<DemoCase['source']['kind'], string> = {
   resident: 'bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200',
   nyc_open: 'bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200',
   historical: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200',
+}
+
+/**
+ * Resident contact — first name, last name, and the email used to file the
+ * request, shown as the first card on every resident case. Older records that
+ * only carry a combined name fall back to splitting it on the first space.
+ * Renders nothing when there is no resident on file (NYC benchmark cases).
+ */
+function ResidentContactCard({ input }: { input: ResidentComplaintInput }) {
+  const fullName = input.residentName.trim()
+  const email = input.residentEmail.trim()
+  if (!fullName && !email) return null
+  const firstName = input.residentFirstName?.trim() || fullName.split(/\s+/)[0] || ''
+  const lastName = input.residentLastName?.trim() || fullName.split(/\s+/).slice(1).join(' ')
+  const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase() || '?'
+  return (
+    <section className="mt-4 card p-4">
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-navy-50 text-sm font-bold text-navy-800 ring-1 ring-inset ring-navy-200"
+          >
+            {initials}
+          </span>
+          <span className="stat-label">Resident contact</span>
+        </div>
+        <div>
+          <div className="stat-label">First name</div>
+          <div className="text-sm font-semibold text-navy-900">{firstName || '—'}</div>
+        </div>
+        <div>
+          <div className="stat-label">Last name</div>
+          <div className="text-sm font-semibold text-navy-900">{lastName || '—'}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="stat-label">Email used</div>
+          {email ? (
+            <a
+              href={`mailto:${email}`}
+              className="block max-w-full truncate text-sm font-semibold text-accent-700 hover:text-accent-800 hover:underline"
+            >
+              {email}
+            </a>
+          ) : (
+            <div className="text-sm text-ink-subtle">No email on file</div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
 }
 
 /** A clear, source-labelled bar under the workbench header. */

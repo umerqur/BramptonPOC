@@ -141,6 +141,8 @@ export function residentRowToCase(row: ResidentRequestRow): DemoCase {
     submittedAt: row.created_at,
     residentName: row.resident_name,
     residentEmail: row.resident_email,
+    residentFirstName: row.first_name,
+    residentLastName: row.last_name,
   }
   const demoCase = runWorkflow(input, {
     forcedCategory: categoryForRequestType(row.request_type),
