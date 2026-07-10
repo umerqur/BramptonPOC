@@ -79,3 +79,18 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-demo-blink { animation: none; }
 }
+
+/* Continuous unseen-work alert for queue tabs (e.g. the "New" tab when fresh
+   intakes have not been viewed yet). Unlike demo-blink this loops until the
+   user opens the tab — the whole point is that it cannot be missed. The static
+   red badge + dot still carry the signal when reduced motion is preferred. */
+@keyframes queue-tab-alert {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(225, 29, 72, 0.35); }
+}
+.animate-queue-tab-alert {
+  animation: queue-tab-alert 1.3s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-queue-tab-alert { animation: none; }
+}

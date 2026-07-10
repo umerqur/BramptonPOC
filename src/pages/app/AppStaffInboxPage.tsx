@@ -45,6 +45,31 @@ import { QueueCard, DecisionStrip, Pill, FitPill } from '../../components/app/Qu
 // cases live in Intelligence Command (Case Explorer / Open Cases), not here.
 // Review priority is deterministic decision support — the detail sits behind
 // "How the queue is sorted".
+//
+// Tabs render as a segmented control (grey track, solid navy active chip) so the
+// four buckets read as obviously distinct, clickable filters. The "New" tab
+// carries a persistent blinking alert while there are fresh intakes this
+// supervisor has not viewed yet: which intakes have been seen is remembered
+// per user in localStorage, so the alert survives sign-out/sign-in and only
+// settles once the supervisor actually opens the New tab.
+
+// localStorage key (namespaced per signed-in user) for the set of new-intake
+// case ids the supervisor has already viewed on the New tab.
+const NEW_INTAKE_SEEN_KEY = 'brampton-new-intakes-seen-v1'
+
+function newIntakeSeenStorageKey(email: string | null): string {
+  return email ? `${NEW_INTAKE_SEEN_KEY}:${email.trim().toLowerCase()}` : NEW_INTAKE_SEEN_KEY
+}
+
+function readSeenNewIntakes(email: string | null): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(newIntakeSeenStorageKey(email))
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
 
 type WorkTab = 'closure' | 'new' | 'active' | 'all'
 
@@ -86,7 +111,7 @@ const TIER_STYLES: Record<ReviewPriorityTier, string> = {
 type ResidentState = { rows: ResidentRequestRow[]; loading: boolean; error: string | null }
 
 export default function AppStaffInboxPage() {
-  const { ingestResidentCase, role } = useWorkflow()
+  const { ingestResidentCase, role, userEmail } = useWorkflow()
   const navigate = useNavigate()
 
   const [resident, setResident] = useState<ResidentState>({ rows: [], loading: true, error: null })
@@ -132,6 +157,37 @@ export default function AppStaffInboxPage() {
     () => residentActive.filter(needsOfficerAssignment),
     [residentActive],
   )
+
+  // Which new intakes THIS user has already viewed on the New tab — persisted in
+  // localStorage per signed-in email, so the blinking "New" alert survives
+  // sign-out/sign-in and only stops once the tab is actually opened.
+  const [seenNewIds, setSeenNewIds] = useState<Set<string>>(() => readSeenNewIntakes(userEmail))
+  useEffect(() => {
+    setSeenNewIds(readSeenNewIntakes(userEmail))
+  }, [userEmail])
+
+  const unseenNewCount = useMemo(
+    () => residentNeedsAssignment.filter((r) => !seenNewIds.has(r.case_id)).length,
+    [residentNeedsAssignment, seenNewIds],
+  )
+
+  // Viewing the New tab with loaded data counts as "seeing" every intake in it —
+  // persist that and stop the alert. Storing only the CURRENT new-intake ids also
+  // prunes ids that have since been assigned/closed, so the set stays small.
+  useEffect(() => {
+    if (tab !== 'new' || resident.loading || resident.error) return
+    setSeenNewIds((prev) => {
+      const ids = residentNeedsAssignment.map((r) => r.case_id)
+      if (ids.every((id) => prev.has(id))) return prev
+      const next = new Set(ids)
+      try {
+        window.localStorage.setItem(newIntakeSeenStorageKey(userEmail), JSON.stringify([...next]))
+      } catch {
+        /* ignore unavailable storage — the alert just re-arms next visit */
+      }
+      return next
+    })
+  }, [tab, resident.loading, resident.error, residentNeedsAssignment, userEmail])
 
   const residentWorkRows = useMemo(
     () => residentActive.map((r) => mapResidentToWorkRow(r, attachmentsByCase[r.case_id]?.length ?? 0)),
@@ -220,20 +276,25 @@ export default function AppStaffInboxPage() {
         </button>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Priority queue filters"
-        className="mt-6 flex gap-5 overflow-x-auto border-b border-slate-200 sm:gap-8"
-      >
-        {TAB_ORDER.map((t) => (
-          <TabButton
-            key={t}
-            label={WORK_TAB_LABELS[t]}
-            count={counts[t]}
-            active={tab === t}
-            onClick={() => setTab(t)}
-          />
-        ))}
+      {/* Segmented control: a grey track where every tab is visibly a button and
+          the selected one is a solid navy chip — unmistakably distinct states. */}
+      <div className="mt-6 overflow-x-auto">
+        <div
+          role="tablist"
+          aria-label="Priority queue filters"
+          className="inline-flex items-center gap-1 rounded-xl bg-slate-100 p-1 ring-1 ring-inset ring-slate-200"
+        >
+          {TAB_ORDER.map((t) => (
+            <TabButton
+              key={t}
+              label={WORK_TAB_LABELS[t]}
+              count={counts[t]}
+              active={tab === t}
+              alert={t === 'new' && unseenNewCount > 0}
+              onClick={() => setTab(t)}
+            />
+          ))}
+        </div>
       </div>
 
       <HowPriorityWorks />
@@ -472,40 +533,64 @@ function SourceWarning({ label, error }: { label: string; error: string }) {
   )
 }
 
+/**
+ * One segment of the queue's segmented control. The selected tab is a solid navy
+ * chip with white text; unselected tabs are quiet labels on the grey track that
+ * lift to a white chip on hover — so each tab clearly reads as its own button.
+ *
+ * `alert` marks a tab holding work the user has not seen yet (the New tab with
+ * fresh intakes): the segment glows with a looping red blink, the count badge
+ * turns solid red, and a pinging dot sits on its corner. It keeps blinking until
+ * the tab is opened — under reduced motion, the static red badge + dot remain.
+ */
 function TabButton({
   label,
   count,
   active,
+  alert = false,
   onClick,
 }: {
   label: string
   count: number | null
   active: boolean
+  alert?: boolean
   onClick: () => void
 }) {
+  const showAlert = alert && !active
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`relative shrink-0 pb-3 text-sm font-semibold transition ${
+      className={`relative inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${
         active
-          ? 'text-navy-900 after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-teal-600'
-          : 'text-slate-500 hover:text-navy-900'
-      }`}
+          ? 'bg-navy-900 text-white shadow-sm'
+          : 'text-navy-700 hover:bg-white hover:text-navy-900 hover:shadow-sm'
+      } ${showAlert ? 'animate-queue-tab-alert' : ''}`}
     >
       {label}
-      {/* Quiet count badge — a small rounded chip, not a marketing pill. The
-       *  selected-tab underline stays the primary visual indicator. */}
       {count != null && (
         <span
-          className={`ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${
-            active ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-500'
+          className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none tabular-nums ${
+            active
+              ? 'bg-white/20 text-white'
+              : showAlert
+                ? 'bg-rose-600 text-white'
+                : 'bg-slate-200 text-slate-600'
           }`}
         >
           {count}
         </span>
+      )}
+      {showAlert && (
+        <>
+          <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5" aria-hidden>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-600" />
+          </span>
+          <span className="sr-only">— has new items you haven’t viewed</span>
+        </>
       )}
     </button>
   )
