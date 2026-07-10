@@ -32,6 +32,12 @@ export default function ResidentLayout() {
             <Link to="/resident/new-request" className="btn-primary text-sm py-2 px-4">
               File a complaint
             </Link>
+            <Link
+              to="/"
+              className="hidden sm:inline-flex px-3 py-2 rounded-md text-sm font-medium text-ink-muted hover:text-navy-900 hover:bg-slate-50 transition"
+            >
+              Staff sign in
+            </Link>
           </nav>
         </div>
       </header>
@@ -44,6 +50,9 @@ export default function ResidentLayout() {
         <div className="container-page py-6 text-xs text-ink-subtle flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span>© {new Date().getFullYear()} Proactive Enforcement Response — Proof of Concept demo.</span>
           <span>Demo only. Do not enter real personal information.</span>
+          <Link to="/" className="font-medium text-navy-900 hover:underline">
+            City staff? Go to the main site to sign in →
+          </Link>
         </div>
       </footer>
     </div>
