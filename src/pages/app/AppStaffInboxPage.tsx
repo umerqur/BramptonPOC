@@ -437,11 +437,13 @@ function WorkRowCard({
   const isNew = classifySupervisorBucket(row) === 'new'
   const isUnseen = row.unseen_by_supervisor
   const decisionTone = isClosure ? 'emerald' : 'amber'
+  // Assigned rows show the officer as a prominent labeled block (avatar + name),
+  // not buried in strip text; closure rows keep the closure message and name the
+  // officer inline.
   const decisionText = isClosure
-    ? 'Field outcome recorded · Ready for closure approval'
-    : row.in_progress
-      ? `Assigned${row.assigned_to ? ` to ${row.assigned_to}` : ''} · In progress`
-      : 'Needs staff review'
+    ? `Field outcome recorded${row.assigned_to ? ` by ${row.assigned_to}` : ''} · Ready for closure approval`
+    : 'Needs staff review'
+  const showOfficerBlock = !isClosure && row.in_progress && Boolean(row.assigned_to)
   return (
     <QueueCard
       caseId={row.case_id}
@@ -465,13 +467,76 @@ function WorkRowCard({
       }
       title={row.complaint_type || 'Service request'}
       subtitle={row.location || 'Location not provided'}
-      decision={<DecisionStrip tone={decisionTone}>{decisionText}</DecisionStrip>}
+      decision={
+        <DecisionStrip tone={decisionTone}>
+          <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2">
+            {showOfficerBlock && row.assigned_to ? (
+              <OfficerAssignmentBlock name={row.assigned_to} />
+            ) : (
+              <span className="min-w-0">{decisionText}</span>
+            )}
+            {row.resident && <ResidentContactBlock resident={row.resident} />}
+          </div>
+        </DecisionStrip>
+      }
       actions={
         <button onClick={isClosure ? onReviewClosure : onOpen} className="btn-primary text-sm py-1.5 px-3">
           {isClosure ? 'Review closure' : 'Open case'}
         </button>
       }
     />
+  )
+}
+
+/** "First Last" → "FL" (first + last token initials). */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  return `${parts[0].charAt(0)}${parts.length > 1 ? parts[parts.length - 1].charAt(0) : ''}`.toUpperCase()
+}
+
+/**
+ * Prominent assigned-officer display inside the decision strip: initials avatar,
+ * a clear label, and the officer's name at readable size — never tiny strip text.
+ */
+function OfficerAssignmentBlock({ name }: { name: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <span
+        aria-hidden
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-xs font-bold text-indigo-800 ring-1 ring-inset ring-indigo-200"
+      >
+        {initialsOf(name)}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+          Assigned officer
+        </span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-[15px] font-semibold leading-tight text-navy-900">{name}</span>
+          <span className="badge bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200">In progress</span>
+        </span>
+      </span>
+    </div>
+  )
+}
+
+/** Resident name (first + last) and the email the request was filed with. */
+function ResidentContactBlock({ resident }: { resident: ResidentRequestRow }) {
+  const name =
+    [resident.first_name, resident.last_name].filter(Boolean).join(' ').trim() || resident.resident_name?.trim() || ''
+  const email = resident.resident_email?.trim() ?? ''
+  if (!name && !email) return null
+  return (
+    <div className="min-w-0">
+      <span className="block text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">Resident</span>
+      <span className="block truncate text-sm font-semibold text-navy-900">{name || '—'}</span>
+      {email && (
+        <a href={`mailto:${email}`} className="block truncate text-xs font-medium text-accent-700 hover:underline">
+          {email}
+        </a>
+      )}
+    </div>
   )
 }
 
@@ -657,28 +722,33 @@ function InboxCard({
         // The decision row — the actual value of the supervisor queue. Readable
         // 13px text on a soft strip, never tiny muted text.
         <DecisionStrip tone="teal">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span>
-              Routing: <span className="font-semibold text-navy-900">{routing}</span>
-            </span>
-            {recommendedOfficer && (
-              <>
-                <span aria-hidden className="text-ink-subtle">
-                  ·
-                </span>
+          <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span>
-                  Recommended:{' '}
-                  <span className="font-semibold text-navy-900">{officerDisplayName(recommendedOfficer)}</span>
+                  Routing: <span className="font-semibold text-navy-900">{routing}</span>
                 </span>
-                {fitScore != null && <FitPill score={fitScore} />}
-              </>
-            )}
-          </div>
-          {recommendedOfficer && reason && (
-            <div className="mt-0.5">
-              <span className="font-medium">Why:</span> {reason}
+                {recommendedOfficer && (
+                  <>
+                    <span aria-hidden className="text-ink-subtle">
+                      ·
+                    </span>
+                    <span>
+                      Recommended:{' '}
+                      <span className="font-semibold text-navy-900">{officerDisplayName(recommendedOfficer)}</span>
+                    </span>
+                    {fitScore != null && <FitPill score={fitScore} />}
+                  </>
+                )}
+              </div>
+              {recommendedOfficer && reason && (
+                <div className="mt-0.5">
+                  <span className="font-medium">Why:</span> {reason}
+                </div>
+              )}
             </div>
-          )}
+            <ResidentContactBlock resident={row} />
+          </div>
         </DecisionStrip>
       }
       actions={
