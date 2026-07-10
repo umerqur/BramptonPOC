@@ -48,12 +48,13 @@ export default function AppCaseWorkbenchPage() {
 
   // Optional staff support tools. Similar Case Intelligence is structured
   // (computed from the case features, no embeddings), so the top "Decision
-  // support tools" strip just scrolls to it. Decision logic is collapsed by
-  // default and opened from the strip.
+  // support tools" strip just scrolls to it. Every section on this page is
+  // expanded by default — nothing staff need is hidden behind a click; the
+  // toggles only let staff collapse sections they don't need right now.
   const similarRef = useRef<HTMLElement>(null)
   const logicRef = useRef<HTMLElement>(null)
   const fieldRef = useRef<HTMLDivElement>(null)
-  const [logicOpen, setLogicOpen] = useState(false)
+  const [logicOpen, setLogicOpen] = useState(true)
 
   // Structured operational features for Similar Case Intelligence.
   const similarFeatures = useMemo<CaseFeatures | null>(() => {
@@ -272,7 +273,7 @@ export default function AppCaseWorkbenchPage() {
         </div>
       </div>
 
-      {/* Full lifecycle collapsed behind the prominent current stage. */}
+      {/* Full lifecycle, expanded by default, with the current stage badged. */}
       <div className="mt-4">
         <CollapsibleCard title="Workflow steps" headerRight={<StageBadge stage={c.stage} />}>
           <WorkflowStepper stage={c.stage} />
@@ -788,7 +789,7 @@ function NycReviewPriorityPanel({ nyc }: { nyc: NycBenchmarkSource }) {
   )
 }
 
-/** The shared normalized service-request record (collapsible) — same schema for every source. */
+/** The shared normalized service-request record (open by default, collapsible) — same schema for every source. */
 function NormalizedRecordPanel({ c }: { c: DemoCase }) {
   const n = c.normalized
   const closureStatus = c.stage === 'closed' ? 'closed' : n.closure_status
@@ -809,7 +810,7 @@ function NormalizedRecordPanel({ c }: { c: DemoCase }) {
     { label: 'closure_status', value: closureStatus },
   ]
   return (
-    <details className="group card p-0">
+    <details open className="group card p-0">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-4">
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-navy-900">Normalized service request</span>
@@ -848,7 +849,7 @@ const ACTOR_STYLES: Record<string, string> = {
 function ActionLogPanel({ c }: { c: DemoCase }) {
   const events = [...c.audit].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
   return (
-    <details className="group mt-6 card p-0">
+    <details open className="group mt-6 card p-0">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-4">
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-navy-900">Action log</span>
@@ -911,16 +912,17 @@ function Panel({ title, subtitle, children }: { title: string; subtitle?: string
   )
 }
 
-// A card whose body collapses behind its header, keeping lower-priority context
-// out of the way by default. Uncontrolled (own open state) unless `controlledOpen`
-// + `onToggle` are supplied, which lets the top action strip open a specific
-// section and scroll to it.
+// A card whose body can be collapsed behind its header. EXPANDED by default —
+// staff see everything without clicking; the toggle only lets them tuck away
+// sections they don't need right now. Uncontrolled (own open state) unless
+// `controlledOpen` + `onToggle` are supplied, which lets the top action strip
+// open a specific section and scroll to it.
 function CollapsibleCard({
   title,
   subtitle,
   headerRight,
   children,
-  defaultOpen = false,
+  defaultOpen = true,
   controlledOpen,
   onToggle,
   sectionRef,
