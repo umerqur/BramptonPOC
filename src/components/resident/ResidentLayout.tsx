@@ -9,11 +9,11 @@ export default function ResidentLayout() {
     <div className="min-h-screen flex flex-col bg-slate-50">
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
         <div className="container-page flex h-16 items-center justify-between">
-          <Link to="/resident" className="flex items-center gap-2.5">
+          <Link to="/" className="flex items-center gap-2.5" title="Go to the main home page">
             <Logo className="h-7 w-7" />
             <div className="leading-tight">
               <div className="text-sm font-semibold text-navy-900">Resident Services</div>
-              <div className="text-[11px] text-ink-subtle">Proactive enforcement intake · Demo</div>
+              <div className="text-[11px] text-ink-subtle">← Go to main home page</div>
             </div>
           </Link>
 
