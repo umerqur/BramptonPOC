@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import Logo from './Logo'
+import { BUILD_VERSION } from '../lib/buildInfo'
 
 export default function Footer() {
   return (
@@ -8,6 +9,10 @@ export default function Footer() {
         <div className="flex items-center gap-2.5">
           <Logo className="h-5 w-5" />
           <span>© {new Date().getFullYear()} Proactive Enforcement Intelligence POC.</span>
+          {/* Quiet deploy diagnostic: which commit this bundle was built from. */}
+          <span className="font-mono text-[10px] text-ink-subtle/70" title="Deployed build">
+            build {BUILD_VERSION}
+          </span>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
           <Link to="/methodology" className="link-quiet">Methodology</Link>
