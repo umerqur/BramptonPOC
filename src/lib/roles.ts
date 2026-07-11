@@ -56,6 +56,14 @@ export type StaffProfile = {
   allowedRoles: StaffRole[]
   defaultRole: StaffRole
   roleDisplayNames: Partial<Record<StaffRole, string>>
+  /**
+   * Whether this person is an active user of the app. Inactive staff stay in
+   * the list ONLY so historical records (cases previously assigned to them)
+   * still resolve their identity and display names — they are excluded from
+   * every assignable / selectable officer pool and from the officer
+   * recommendation engine, and can never be chosen for new assignments.
+   */
+  active: boolean
 }
 
 /** Normalize an email for identity comparison (trim + lowercase). */
@@ -74,6 +82,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'umer.qureshi@gmail.com',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Qureshi', csr: 'CSR Qureshi', officer: 'Officer Qureshi' },
   },
   {
@@ -81,6 +90,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'umer@neuralforge.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Qureshi', csr: 'CSR Qureshi', officer: 'Officer Qureshi' },
   },
   {
@@ -88,6 +98,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'balraj_m7@hotmail.com',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Mann', csr: 'CSR Mann', officer: 'Officer Mann' },
   },
   {
@@ -95,6 +106,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'ousmaan_ahmed@icloud.com',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Ahmed', csr: 'CSR Ahmed', officer: 'Officer Ahmed' },
   },
   {
@@ -102,6 +114,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'yuri.levin@queensu.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: false,
     roleDisplayNames: { supervisor: 'Supervisor Levin', csr: 'CSR Levin', officer: 'Officer Levin' },
   },
   {
@@ -109,6 +122,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'ceren.kolsarici@queensu.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: false,
     roleDisplayNames: { supervisor: 'Supervisor Ceren', csr: 'CSR Ceren', officer: 'Officer Ceren' },
   },
   {
@@ -116,6 +130,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'stephen.thomas@queensu.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: false,
     roleDisplayNames: { supervisor: 'Supervisor Stephen', csr: 'CSR Stephen', officer: 'Officer Stephen' },
   },
   {
@@ -123,6 +138,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'dean.mckeown@queensu.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: false,
     roleDisplayNames: { supervisor: 'Supervisor Dean', csr: 'CSR Dean', officer: 'Officer Dean' },
   },
   {
@@ -132,6 +148,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'bgahmad@gmail.com',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Bilal', csr: 'CSR Bilal', officer: 'Officer Bilal' },
   },
   {
@@ -139,6 +156,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'harmanpreet.gill@brampton.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Gill', csr: 'CSR Gill', officer: 'Officer Gill' },
   },
   {
@@ -146,6 +164,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'vince.chung@brampton.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Chung', csr: 'CSR Chung', officer: 'Officer Chung' },
   },
   {
@@ -153,6 +172,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'kamal.birdi@brampton.ca',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'supervisor',
+    active: true,
     roleDisplayNames: { supervisor: 'Supervisor Birdi', csr: 'CSR Birdi', officer: 'Officer Birdi' },
   },
   {
@@ -161,6 +181,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'oakley.carpentry_worker@yahoo.com',
     allowedRoles: ['officer'],
     defaultRole: 'officer',
+    active: true,
     roleDisplayNames: { officer: 'Officer Oakley' },
   },
   {
@@ -170,6 +191,7 @@ export const STAFF_PROFILES: StaffProfile[] = [
     email: 'shahzadqu@gmail.com',
     allowedRoles: ['supervisor', 'csr', 'officer'],
     defaultRole: 'officer',
+    active: false,
     roleDisplayNames: { supervisor: 'Supervisor Shaz', csr: 'CSR Shaz', officer: 'Officer Shaz' },
   },
 ]
@@ -229,16 +251,57 @@ export function officerDisplayName(profile: StaffProfile): string {
 }
 
 /**
- * The assignable By-law Officers — the assignable list is generated from all
- * named staff profiles with officer access, deduplicated by officer display
- * name. Two Umer logins share the one "Officer Qureshi" identity, so the first
- * matching login is the canonical assignable identity for that officer name.
+ * Officer identities retired from the demo. A defensive backstop ONLY: the
+ * `active` flag on the staff profile is the source of truth, but stale demo
+ * data (old seeds, fixtures, cached rows) may still carry these names, so no
+ * selectable officer list may ever offer them regardless of where the list
+ * came from.
+ */
+export const INACTIVE_DEMO_OFFICERS = new Set([
+  'officer levin',
+  'officer stephen',
+  'officer dean',
+  'officer ceren',
+  'officer shaz',
+])
+
+/**
+ * Whether an officer identity may be offered in a selection control (assignment
+ * dropdowns, recommendation candidates, dispatch pickers). Requires the profile
+ * to be active AND the display name to not be a retired demo identity.
+ */
+export function isSelectableOfficer(name: string, active: boolean): boolean {
+  return active && !INACTIVE_DEMO_OFFICERS.has(name.trim().toLowerCase())
+}
+
+/**
+ * The shared active-officer filter — the single rule for every surface that
+ * offers officers for NEW assignments (manual selection lists and the
+ * recommendation engine alike): the profile must be an active user with
+ * officer access, and must not be a retired demo identity. Inactive profiles
+ * still exist for rendering historical assignments; they are never returned
+ * here.
+ */
+export function getAssignableOfficers(profiles: StaffProfile[]): StaffProfile[] {
+  return profiles.filter(
+    (profile) =>
+      profile.active === true &&
+      profile.allowedRoles.includes('officer') &&
+      isSelectableOfficer(officerDisplayName(profile), profile.active),
+  )
+}
+
+/**
+ * The assignable By-law Officers — the assignable list is generated from the
+ * ACTIVE named staff profiles with officer access (see getAssignableOfficers),
+ * deduplicated by officer display name. Two Umer logins share the one
+ * "Officer Qureshi" identity, so the first matching login is the canonical
+ * assignable identity for that officer name.
  */
 export function officerProfiles(): StaffProfile[] {
   const seen = new Set<string>()
   const result: StaffProfile[] = []
-  for (const profile of STAFF_PROFILES) {
-    if (!profile.allowedRoles.includes('officer')) continue
+  for (const profile of getAssignableOfficers(STAFF_PROFILES)) {
     const label = officerDisplayName(profile)
     if (seen.has(label)) continue
     seen.add(label)

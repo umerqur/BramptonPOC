@@ -95,6 +95,22 @@ describe('AppOfficerCasePage enforcement action dropdown', () => {
   })
 })
 
+describe('AppOfficerCasePage historical assignments', () => {
+  it('still renders a case whose stored assignment names an inactive officer', async () => {
+    // Old records keep the assigned officer's name as stored data. Inactive
+    // officers are excluded from every selection pool, but a historical
+    // assignment to one must continue to render without errors.
+    vi.mocked(getResidentRequestByCaseId).mockResolvedValue(
+      makeResidentRow({ assigned_officer_name: 'Officer Levin' }),
+    )
+
+    renderPage('RSR-20260709-7BX8')
+    await screen.findByText('Record field outcome')
+
+    expect(screen.getAllByText('Officer Levin').length).toBeGreaterThan(0)
+  })
+})
+
 describe('AppOfficerCasePage field outcome submission', () => {
   it('does not show success when the structured action was not saved', async () => {
     // The save fails with the typed migration-unavailable error — the officer
