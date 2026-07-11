@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { isSupabaseConfigured } from '../../lib/supabase'
 import {
@@ -631,6 +631,159 @@ const DEMO_COMPLAINTS: Array<Partial<FormState>> = [
     location: '9050 Bramalea Rd',
     concernPostalCode: 'L6S 6G7',
   },
+  {
+    requestType: 'Report an Incident of Dumping',
+    happeningNow: 'No',
+    description:
+      'Construction debris including drywall sheets, wood offcuts, and paint cans has been dumped on the vacant lot beside the plaza. The pile has grown over the past two weeks.',
+    addressType: 'Street Address',
+    location: '380 Main St S',
+    concernPostalCode: 'L6Y 1N3',
+  },
+  {
+    requestType: 'Report An Overgrown Lawn Or Prohibited Plants On Private Property',
+    happeningNow: 'No',
+    description:
+      'The grass and weeds at this property are well over knee height and spreading onto the sidewalk. It has not been cut all season and neighbours are worried about pests.',
+    addressType: 'Street Address',
+    location: '18 McMurchy Ave S',
+    concernPostalCode: 'L6Y 1Y2',
+  },
+  {
+    requestType: 'Report Long-term Rental Housing Concern – Unlicensed or Unregistered (e.g. basement apartment)',
+    happeningNow: 'Not sure',
+    description:
+      'A basement unit at this address appears to be rented out with a separate side entrance and multiple tenants coming and going. I could not find it in the rental registry and there are frequently 5 to 6 cars parked at the home.',
+    addressType: 'Street Address',
+    location: '67 Fernforest Dr',
+    concernPostalCode: 'L6R 1B4',
+  },
+  {
+    requestType: 'Report an Abandoned Shopping Cart',
+    happeningNow: 'Yes',
+    description:
+      'A shopping cart from the nearby grocery store has been left tipped over on the boulevard beside the bus stop for at least four days. It is partly blocking the path to the shelter.',
+    addressType: 'Intersection',
+    location: 'Peel Centre Dr & Central Park Dr',
+    concernPostalCode: '',
+  },
+  {
+    requestType: 'Report of Landscaping/Construction/Dumpster Bin and other Materials on City Roadway',
+    happeningNow: 'Yes',
+    description:
+      'A contractor has placed a dumpster bin and stacked lumber in the curb lane in front of a home renovation. Vehicles have to merge into the oncoming lane to get around it and there are no cones or markers.',
+    addressType: 'Street Address',
+    location: '52 Wexford Rd',
+    concernPostalCode: 'L6Z 2S6',
+  },
+  {
+    requestType: 'Request Speed Display Board and Traffic Calming Device',
+    happeningNow: 'Not sure',
+    description:
+      'Vehicles regularly speed past the elementary school during drop off and pick up times. Parents have asked for a speed display board or other calming measures before someone is hurt in the crossing area.',
+    addressType: 'Street Address',
+    location: '425 Great Lakes Dr',
+    concernPostalCode: 'L6R 2Z4',
+  },
+  {
+    requestType: 'Report Curb or Sidewalk Damage',
+    happeningNow: 'No',
+    description:
+      'A sidewalk slab in front of the property has heaved and is raised about 5 cm above the next panel. Two people have tripped on it recently and it is difficult for strollers and wheelchairs.',
+    addressType: 'Street Address',
+    location: '210 Balmoral Dr',
+    concernPostalCode: 'L6T 1V6',
+  },
+  {
+    requestType: 'Report Snow Issues',
+    happeningNow: 'Yes',
+    description:
+      'After last night’s plowing, a heavy windrow of hard packed snow was left across the end of the driveway. It is over half a metre high and an older resident cannot clear it to get their vehicle out.',
+    addressType: 'Street Address',
+    location: '33 Jessie St',
+    concernPostalCode: 'L6Y 1L5',
+  },
+  {
+    requestType: 'Report a Traffic Signal Issue',
+    happeningNow: 'Yes',
+    description:
+      'The pedestrian signal on the northeast corner is not changing to walk even when the button is pressed. People are crossing against traffic during rush hour to get to the transit stop.',
+    addressType: 'Intersection',
+    location: 'Hurontario St & Ray Lawson Blvd',
+    concernPostalCode: '',
+  },
+  {
+    requestType: 'Report an Encampment',
+    happeningNow: 'Yes',
+    description:
+      'Two tents and a tarp shelter have been set up in the wooded area beside the trail, with belongings and a fire pit visible nearby. The site has been growing over the past couple of weeks.',
+    addressType: 'Street Address',
+    location: '150 Central Park Dr',
+    concernPostalCode: 'L6T 2T9',
+  },
+  {
+    requestType: 'Report Improper Storage of Garbage Containers',
+    happeningNow: 'Yes',
+    description:
+      'Several overflowing garbage bins have been left at the curb all week, well past collection day. Bags are stacked beside them on the sidewalk and animals have been tearing them open at night.',
+    addressType: 'Street Address',
+    location: '91 Avondale Blvd',
+    concernPostalCode: 'L6T 1H9',
+  },
+  {
+    requestType: 'Report Damaged Trees',
+    happeningNow: 'Yes',
+    description:
+      'A large city tree on the boulevard has a split limb hanging over the sidewalk after the storm. The branch is still attached but sways in the wind directly above where people walk.',
+    addressType: 'Street Address',
+    location: '14 Kennedy Rd S',
+    concernPostalCode: 'L6W 3E2',
+  },
+  {
+    requestType: 'Report Litter, Debris or Obstructions',
+    happeningNow: 'Yes',
+    description:
+      'A pile of old furniture and scattered debris is blocking most of the boulevard and part of the sidewalk. Pedestrians are stepping onto the road to get around it.',
+    addressType: 'Intersection',
+    location: 'Clark Blvd & Rutherford Rd S',
+    concernPostalCode: '',
+  },
+  {
+    requestType: 'Report Graffiti',
+    happeningNow: 'No',
+    description:
+      'The pavilion and two benches at the park have been spray painted with large tags over the weekend. Some of the writing is offensive and is right beside the playground.',
+    addressType: 'Street Address',
+    location: '20 Loafers Lake Lane',
+    concernPostalCode: 'L6Z 1X3',
+  },
+  {
+    requestType: 'Report a Noise Concern',
+    happeningNow: 'No',
+    description:
+      'Delivery trucks at the commercial plaza behind our homes idle and unload between 4 am and 6 am most weekdays. The banging and reversing alarms have been waking residents for over a month.',
+    addressType: 'Street Address',
+    location: '284 Orenda Rd',
+    concernPostalCode: 'L6T 4X6',
+  },
+  {
+    requestType: 'Report Road Damage',
+    happeningNow: 'Yes',
+    description:
+      'A section of the curb lane has sunken and cracked over several metres, and the road edge is breaking apart. Cyclists are swerving into the traffic lane to avoid it.',
+    addressType: 'Intersection',
+    location: 'Torbram Rd & Father Tobin Rd',
+    concernPostalCode: '',
+  },
+  {
+    requestType: 'Report Fireworks',
+    happeningNow: 'No',
+    description:
+      'Fireworks have been set off from the same backyard after midnight several nights in a row, well outside any holiday period. Debris has landed on neighbouring roofs and lawns.',
+    addressType: 'Street Address',
+    location: '106 Sunny Meadow Blvd',
+    concernPostalCode: 'L6R 3A4',
+  },
 ]
 
 type Status =
@@ -646,6 +799,9 @@ export default function ResidentNewRequestPage() {
   const [fileError, setFileError] = useState<string | null>(null)
   const [categoryQuery, setCategoryQuery] = useState('')
   const [activeGroup, setActiveGroup] = useState('All')
+  // Index of the last demo scenario shown, so consecutive clicks of the demo
+  // button never repeat the same scenario back-to-back.
+  const lastDemoIndex = useRef<number | null>(null)
 
   const selectedCategory = BRAMPTON_SERVICE_CATEGORIES.find((c) => c.label === form.requestType)
 
@@ -680,7 +836,16 @@ export default function ResidentNewRequestPage() {
   }
 
   function fillDemoComplaint() {
-    const scenario = DEMO_COMPLAINTS[Math.floor(Math.random() * DEMO_COMPLAINTS.length)]
+    // Pick uniformly at random from every scenario except the one shown last,
+    // so repeated clicks always visibly change the form.
+    const previous = lastDemoIndex.current
+    let index = Math.floor(Math.random() * DEMO_COMPLAINTS.length)
+    if (previous !== null && DEMO_COMPLAINTS.length > 1) {
+      index = Math.floor(Math.random() * (DEMO_COMPLAINTS.length - 1))
+      if (index >= previous) index += 1
+    }
+    lastDemoIndex.current = index
+    const scenario = DEMO_COMPLAINTS[index]
     setForm((current) => ({
       ...current,
       ...scenario,
