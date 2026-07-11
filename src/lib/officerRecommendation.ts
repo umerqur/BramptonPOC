@@ -16,7 +16,7 @@
 //   * Availability            — officer is on shift and able to take the case.
 
 import type { StaffProfile } from './roles'
-import { officerDisplayName } from './roles'
+import { getAssignableOfficers, officerDisplayName } from './roles'
 import type { DemoCategory } from '../data/demoWorkflowTypes'
 import type { ResidentRequestRow } from '../services/residentRequests'
 import { categoryForRequestType } from '../services/residentCaseBridge'
@@ -126,15 +126,6 @@ const OFFICER_ATTRIBUTES: Record<string, OfficerAttributes> = {
     recentWards: [2, 4],
     onShift: true,
     availabilityNote: 'On shift today',
-  },
-  // Officer Shaz — zoning/parking, currently carrying a heavier load.
-  'shahzadqu@gmail.com': {
-    homeWards: [2, 3, 7],
-    categoryExperience: { Zoning: 31, Parking: 24, 'Property Standards': 15 },
-    openCaseload: 8,
-    recentWards: [3, 7],
-    onShift: true,
-    availabilityNote: 'On shift, near capacity',
   },
 }
 
@@ -307,6 +298,11 @@ function totalFromDrivers(drivers: RecommendationDriver[]): number {
  * deterministic recommendation. Officers are ranked by weighted fit; ties break
  * by the officer's existing order (stable). The recommended officer is simply
  * the highest score — Officer Qureshi is recommended only when his score wins.
+ *
+ * Candidates are ALWAYS narrowed to the shared active-officer pool
+ * (getAssignableOfficers) before scoring, so the engine can never recommend an
+ * inactive or retired officer even if a caller passes an unfiltered list — the
+ * recommendation and the manual selection list draw from the same pool.
  */
 export function recommendOfficer(
   row: ResidentRequestRow,
@@ -315,7 +311,7 @@ export function recommendOfficer(
   const caseWard = caseWardForRow(row)
   const category = categoryForRequestType(row.request_type)
 
-  const ranked: OfficerScore[] = officers
+  const ranked: OfficerScore[] = getAssignableOfficers(officers)
     .map((officer) => {
       const drivers = scoreDrivers(attributesFor(officer), caseWard, category)
       return {
