@@ -21,7 +21,10 @@ vi.mock('../../lib/workflowStore', () => ({
 vi.mock('../../components/app/OfficerCaseAssistant', () => ({ default: () => null }))
 vi.mock('../../components/app/ResidentAttachments', () => ({ default: () => null }))
 vi.mock('../../components/app/SimilarCaseIntelligencePanel', () => ({ default: () => null }))
-vi.mock('../../services/similarCaseIntelligence', () => ({ featuresFromCase: () => null }))
+vi.mock('../../services/structuredSimilarCases', () => ({
+  similarQueryFromDemoCase: () => null,
+  similarQueryFromResidentRow: () => null,
+}))
 
 vi.mock('../../services/residentRequests', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/residentRequests')>()

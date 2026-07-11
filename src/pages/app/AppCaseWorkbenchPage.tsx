@@ -20,7 +20,7 @@ import {
 import ResidentAttachments from '../../components/app/ResidentAttachments'
 import StructuredFieldOutcomeRepairCard from '../../components/workflow/StructuredFieldOutcomeRepairCard'
 import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
-import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
+import { similarQueryFromDemoCase, type SimilarCaseQuery } from '../../services/structuredSimilarCases'
 import type { DemoCase, NycBenchmarkSource, Priority, ResidentComplaintInput } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
@@ -65,22 +65,11 @@ export default function AppCaseWorkbenchPage() {
   const fieldRef = useRef<HTMLDivElement>(null)
   const [logicOpen, setLogicOpen] = useState(true)
 
-  // Structured operational features for Similar Case Intelligence.
-  const similarFeatures = useMemo<CaseFeatures | null>(() => {
-    if (!c) return null
-    return featuresFromCase({
-      requestType: c.normalized.complaint_type ?? c.triage.category,
-      serviceCategory: c.triage.category,
-      district: c.normalized.ward_or_area ?? c.input.location ?? null,
-      priority: (c.priorityOverride ?? c.triage.recommendedPriority) as PriorityBand,
-      createdAt: c.normalized.submitted_at ?? c.createdAt,
-      status: c.normalized.status ?? c.stage,
-      fieldVisitCompleted: Boolean(c.fieldAction),
-      assignedOfficerName: c.assignedOfficer ?? null,
-      isClosed: c.stage === 'closed',
-      description: c.input.description,
-    })
-  }, [c])
+  // Rules-based Similar Case Intelligence query (structured fields only).
+  const similarQuery = useMemo<SimilarCaseQuery | null>(
+    () => (c ? similarQueryFromDemoCase(c) : null),
+    [c],
+  )
 
   function findSimilar() {
     requestAnimationFrame(() => similarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
@@ -431,7 +420,7 @@ export default function AppCaseWorkbenchPage() {
             </Sub>
           </CollapsibleCard>
 
-          <SimilarCaseIntelligencePanel features={similarFeatures} sectionRef={similarRef} />
+          <SimilarCaseIntelligencePanel query={similarQuery} sectionRef={similarRef} />
         </div>
 
         {/* Right: confidence gate + staff actions */}

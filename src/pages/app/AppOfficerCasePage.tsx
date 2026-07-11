@@ -16,7 +16,11 @@ import OfficerCaseAssistant, {
 } from '../../components/app/OfficerCaseAssistant'
 import { assessFieldOutcomeReadiness, isFieldMissing } from '../../lib/fieldOutcomeReadiness'
 import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
-import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
+import {
+  similarQueryFromDemoCase,
+  similarQueryFromResidentRow,
+  type SimilarCaseQuery,
+} from '../../services/structuredSimilarCases'
 import type { DemoCase, EnforcementAction, ServiceMethod } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
@@ -122,22 +126,12 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
   // enforcement decision) — routing recommendation, classification, priority.
   const support = useMemo(() => (row ? residentRowToCase(row) : null), [row])
 
-  // Structured operational features for Similar Case Intelligence (no embeddings).
-  const similarFeatures = useMemo<CaseFeatures | null>(() => {
-    if (!row || !support) return null
-    return featuresFromCase({
-      requestType: row.request_type,
-      serviceCategory: support.triage.category,
-      district: support.normalized.ward_or_area ?? row.city ?? null,
-      priority: support.triage.recommendedPriority as PriorityBand,
-      createdAt: row.created_at,
-      status: STATUS_LABELS[row.status] ?? row.status,
-      fieldVisitCompleted: row.field_visit_completed,
-      assignedOfficerName: row.assigned_officer_name,
-      isClosed: row.status === 'closed',
-      description: sanitizeResidentDescription(row.description),
-    })
-  }, [row, support])
+  // Rules-based Similar Case Intelligence query (structured fields only; uses
+  // the NYC 311 alignment columns — no embeddings, no resident details).
+  const similarQuery = useMemo<SimilarCaseQuery | null>(
+    () => (row ? similarQueryFromResidentRow(row) : null),
+    [row],
+  )
 
   if (row === undefined) {
     return <div className="container-page py-10 text-sm text-ink-subtle">Loading case…</div>
@@ -318,7 +312,7 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
             </dl>
           </details>
 
-          <SimilarCaseIntelligencePanel features={similarFeatures} />
+          <SimilarCaseIntelligencePanel query={similarQuery} />
         </div>
       </div>
     </div>
@@ -611,22 +605,12 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
   const c = cases.find((x) => x.id === caseId)
   const [justRecorded, setJustRecorded] = useState(false)
 
-  // Structured operational features for Similar Case Intelligence (no embeddings).
-  const similarFeatures = useMemo<CaseFeatures | null>(() => {
-    if (!c) return null
-    return featuresFromCase({
-      requestType: c.normalized.complaint_type ?? c.triage.category,
-      serviceCategory: c.triage.category,
-      district: c.normalized.ward_or_area ?? c.input.location ?? null,
-      priority: (c.priorityOverride ?? c.triage.recommendedPriority) as PriorityBand,
-      createdAt: c.normalized.submitted_at ?? c.createdAt,
-      status: c.normalized.status ?? c.stage,
-      fieldVisitCompleted: Boolean(c.fieldAction),
-      assignedOfficerName: c.assignedOfficer ?? null,
-      isClosed: c.stage === 'closed',
-      description: c.input.description,
-    })
-  }, [c])
+  // Rules-based Similar Case Intelligence query built from the verbatim NYC
+  // benchmark source fields (structured only — no embeddings).
+  const similarQuery = useMemo<SimilarCaseQuery | null>(
+    () => (c ? similarQueryFromDemoCase(c) : null),
+    [c],
+  )
 
   if (!c) {
     return (
@@ -733,7 +717,7 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
             </dl>
           </details>
 
-          <SimilarCaseIntelligencePanel features={similarFeatures} />
+          <SimilarCaseIntelligencePanel query={similarQuery} />
         </div>
       </div>
     </div>

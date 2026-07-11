@@ -1,33 +1,64 @@
-import { useMemo, type Ref } from 'react'
+import { useEffect, useState, type Ref } from 'react'
+import { Link } from 'react-router-dom'
 import {
-  computeSimilarCaseIntelligence,
-  type CaseFeatures,
-  type SimilarCaseMatch,
-} from '../../services/similarCaseIntelligence'
+  getStructuredSimilarCases,
+  type SimilarCaseQuery,
+  type StructuredSimilarCase,
+} from '../../services/structuredSimilarCases'
 import { ProvenanceBadge } from './ProvenanceLabels'
 
-// Similar Case Intelligence — STRUCTURED operational matches, not vector
-// embeddings. When an officer opens a case, this surfaces similar historical /
-// synthetic benchmark cases that help them understand the likely action path,
-// closure pattern, risk drivers, and workload impact.
+// Similar Case Intelligence — RULES-BASED structured similarity over the real
+// historical NYC 311 records (public.municipal_complaints). No CTGAN, no ABM,
+// no embeddings, no Qdrant, no reranking: candidates are narrowed with indexed
+// structured filters and scored with a transparent weighted rule set
+// (see structuredSimilarCases.ts for the documented weights).
 //
-// Matching is structured-first (category, location, priority/risk, closure
-// outcome, field-visit/assignment) with text overlap as a small secondary
-// signal. Candidates are CTGAN-style synthetic cases carrying ABM scenario
-// behavior. This is DECISION SUPPORT ONLY — it shows what similar cases SUGGEST
-// so the officer can review them; it does not decide the enforcement outcome.
+// It shows AT MOST the top 3 comparable closed cases. Each row is clickable and
+// opens the full historical case page (/app/nyc_case/:caseId) via normal React
+// Router navigation, so the officer can inspect it and come back.
+//
+// DECISION SUPPORT ONLY — it surfaces comparable public benchmark records for
+// staff reference. It does not decide the enforcement outcome, and it exposes
+// no resident personal information.
+
+type LoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; matches: StructuredSimilarCase[] }
+  | { status: 'error' }
 
 export default function SimilarCaseIntelligencePanel({
-  features,
+  query,
   sectionRef,
 }: {
-  features: CaseFeatures | null
+  query: SimilarCaseQuery | null
   sectionRef?: Ref<HTMLElement>
 }) {
-  const matches = useMemo(
-    () => (features ? computeSimilarCaseIntelligence(features) : []),
-    [features],
-  )
+  const [state, setState] = useState<LoadState>({ status: 'idle' })
+
+  // Key the effect on the structural fields so a stable case does not refetch.
+  const queryKey = query
+    ? [query.currentCaseId, query.complaintType, query.borough, query.councilDistrict].join('|')
+    : null
+
+  useEffect(() => {
+    if (!query) {
+      setState({ status: 'idle' })
+      return
+    }
+    let active = true
+    setState({ status: 'loading' })
+    getStructuredSimilarCases(query)
+      .then((matches) => active && setState({ status: 'ready', matches }))
+      .catch((err: unknown) => {
+        console.error('Similar case lookup failed:', err)
+        if (active) setState({ status: 'error' })
+      })
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey])
 
   return (
     <section ref={sectionRef} className="card p-5">
@@ -35,88 +66,96 @@ export default function SimilarCaseIntelligencePanel({
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-navy-900">Similar Case Intelligence</h3>
           <p className="mt-0.5 text-xs text-ink-subtle">
-            Structured operational matches based on category, location, risk pattern, and simulated workload behavior.
+            Top comparable closed cases from the historical NYC 311 record, matched on structured fields
+            (complaint type, descriptor, agency, area, closure timing).
           </p>
         </div>
         <ProvenanceBadge kind="structured-match" />
       </div>
 
       <div className="mt-4">
-        {matches.length === 0 ? (
+        {(state.status === 'idle' || state.status === 'loading') && (
+          <p className="text-xs text-ink-subtle">Finding comparable closed cases…</p>
+        )}
+
+        {state.status === 'error' && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-ink-muted">
-            <p className="font-semibold text-ink">No strong structured match yet.</p>
+            Comparable case lookup is unavailable right now.
+          </div>
+        )}
+
+        {state.status === 'ready' && state.matches.length === 0 && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-ink-muted">
+            <p className="font-semibold text-ink">No comparable closed cases found.</p>
             <p className="mt-1">
-              No benchmark case shares enough operational structure (category, location, risk, closure pattern) to act as
-              a useful reference for this file.
+              No historical case shares enough structured fields (complaint type, descriptor, area, closure
+              pattern) with this file to act as a useful reference.
             </p>
           </div>
-        ) : (
+        )}
+
+        {state.status === 'ready' && state.matches.length > 0 && (
           <ul className="space-y-3">
-            {matches.map((m) => (
-              <SimilarCaseCard key={m.caseId} m={m} />
+            {state.matches.map((m) => (
+              <SimilarCaseRow key={m.caseId} m={m} />
             ))}
           </ul>
         )}
 
         <p className="mt-3 text-[11px] leading-relaxed text-ink-subtle">
-          Decision support only. These are structured matches to synthetic benchmark cases — similar cases{' '}
-          <span className="font-medium">suggest</span> likely patterns the officer should review. The system does not
-          determine the enforcement outcome.
+          Decision support only. Rules-based matches to public historical benchmark records — similar cases{' '}
+          <span className="font-medium">suggest</span> likely patterns the officer should review. The system does
+          not determine the enforcement outcome.
         </p>
       </div>
     </section>
   )
 }
 
-function SimilarCaseCard({ m }: { m: SimilarCaseMatch }) {
+function SimilarCaseRow({ m }: { m: StructuredSimilarCase }) {
   return (
-    <li className="rounded-lg border border-slate-200 px-3.5 py-3 text-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <span className="font-mono text-[13px] font-semibold text-navy-900">{m.caseId}</span>
-          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-            <span className="badge bg-slate-100 text-slate-700">{m.serviceCategory}</span>
-            <span className="text-xs text-ink-subtle">{m.district}</span>
+    <li>
+      <Link
+        to={`/app/nyc_case/${encodeURIComponent(m.caseId)}`}
+        className="block rounded-lg border border-slate-200 px-3.5 py-3 text-sm transition hover:border-teal-400 hover:bg-teal-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+        aria-label={`Open similar case ${m.caseId}`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <span className="font-mono text-[13px] font-semibold text-navy-900">{m.caseId}</span>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+              {m.complaintType && <span className="badge bg-slate-100 text-slate-700">{m.complaintType}</span>}
+              <span className="text-xs text-ink-subtle">{m.area}</span>
+            </div>
           </div>
+          <span
+            className="badge shrink-0 bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200"
+            title="Deterministic rules-based similarity across complaint type, descriptor, agency, area, closure timing, season, and status. Not a confidence or accuracy score."
+          >
+            {m.similarityPct}% match
+          </span>
         </div>
-        <span
-          className="badge shrink-0 bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-200"
-          title="Structured similarity across category, location, priority/risk, closure pattern, field/assignment, and a minor text signal. Not a confidence or accuracy score."
-        >
-          {m.similarityPct}% match
-        </span>
-      </div>
 
-      <div className="mt-2 flex items-start gap-2">
-        <span className="badge bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200 shrink-0">
-          {m.statusOrOutcome}
-        </span>
-      </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+          {m.status && (
+            <span className="badge bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200">{m.status}</span>
+          )}
+          {m.closureDays != null && (
+            <span className="text-ink-subtle">
+              Closed in {m.closureDays} day{m.closureDays === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
 
-      <dl className="mt-2.5 space-y-1.5">
-        <Line label="Similar because">{m.matchedDimensions.join(', ')}.</Line>
-        <Line label="What happened next">{stripPrefix(m.pastOutcome, 'Past outcome: ')}</Line>
-        <Line label="Operational note">{stripPrefix(m.operationalNote, 'Operational note: ')}</Line>
-      </dl>
+        {m.resolutionSummary && (
+          <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-ink-muted">{m.resolutionSummary}</p>
+        )}
 
-      <div className="mt-2.5 rounded-md border border-teal-200 bg-teal-50/70 px-2.5 py-2 text-[13px] leading-relaxed text-ink">
-        <span className="font-semibold text-navy-900">Lesson for this case: </span>
-        {m.recommendedLesson}
-      </div>
+        <p className="mt-2 text-[11px] text-ink-subtle">
+          <span className="font-semibold uppercase tracking-wide">Similar because</span>{' '}
+          {m.reasons.join(' · ')}
+        </p>
+      </Link>
     </li>
   )
-}
-
-function Line({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-[auto,1fr] gap-x-2">
-      <dt className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">{label}</dt>
-      <dd className="text-[13px] leading-relaxed text-ink-muted">{children}</dd>
-    </div>
-  )
-}
-
-/** Drop a known sentence prefix the engine adds, so the card can relabel it. */
-function stripPrefix(value: string, prefix: string): string {
-  return value.startsWith(prefix) ? value.slice(prefix.length) : value
 }
