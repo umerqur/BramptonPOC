@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:netlify-functions": "node scripts/check-netlify-functions.mjs",
+    "verify": "npm run check:netlify-functions && npm run build && npm run lint && npm test"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.4",
