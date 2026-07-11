@@ -191,6 +191,38 @@ export type ResidentRequestRow = {
   nyc311_alignment_version: string | null
 }
 
+/**
+ * Structured enforcement-action storage (migration 028) is unavailable — the
+ * update touching field_enforcement_action / field_service_method /
+ * field_reference_number was rejected with a missing-column error. The field
+ * outcome is NEVER partially saved in this case: recording fails loudly instead
+ * of silently writing a visit with no structured action (which would show the
+ * officer success while blocking supervisor closure review).
+ */
+export class StructuredFieldOutcomeUnavailableError extends Error {
+  readonly code = 'STRUCTURED_FIELD_OUTCOME_UNAVAILABLE'
+
+  constructor() {
+    super(
+      'Structured enforcement action storage is unavailable. Apply the structured enforcement action migration before recording field outcomes.',
+    )
+    this.name = 'StructuredFieldOutcomeUnavailableError'
+  }
+}
+
+/** Typed guard for the structured-storage-unavailable error (works across bundling boundaries via the code). */
+export function isStructuredFieldOutcomeUnavailableError(
+  error: unknown,
+): error is StructuredFieldOutcomeUnavailableError {
+  return (
+    error instanceof StructuredFieldOutcomeUnavailableError ||
+    (typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'STRUCTURED_FIELD_OUTCOME_UNAVAILABLE')
+  )
+}
+
 /** What an officer records as the field outcome for an assigned request. */
 export type FieldOutcomeInput = {
   observedCondition: string
@@ -670,6 +702,20 @@ const RESIDENT_COLUMN_TIERS = [
   RESIDENT_REQUEST_BASE_COLUMNS,
 ] as const
 
+// Select tiers that all still include the migration-028 structured enforcement
+// columns. Used by writes that MUST persist the structured enforcement action
+// atomically: the returning select may degrade past missing 036/037 columns, but
+// never past the enforcement columns themselves — if every one of these tiers
+// fails with a missing-column error, structured enforcement storage is
+// unavailable and the write must fail loudly (no base-only fallback).
+// (Typed as plain strings so supabase-js treats the dynamic column list as an
+// untyped select, matching withResidentColumnFallback.)
+const RESIDENT_ENFORCEMENT_REQUIRED_TIERS: readonly string[] = [
+  RESIDENT_REQUEST_COLUMNS,
+  RESIDENT_REQUEST_SUPERVISOR_TIER,
+  RESIDENT_REQUEST_ENFORCEMENT_TIER,
+]
+
 type SupabaseColumnError = {
   code?: string
   message?: string
@@ -992,50 +1038,58 @@ export async function recordResidentFieldOutcome(
   const client = requireClient()
   const now = new Date().toISOString()
 
-  // Fields present since migration 017 (the core field outcome).
-  const basePayload = {
+  // The COMPLETE field outcome, including the structured enforcement action
+  // (migration 028). This payload is persisted atomically: there is deliberately
+  // NO base-only fallback, because saving the visit without the structured action
+  // creates an invalid partial state (officer sees success, supervisor closure
+  // review is blocked on "structured enforcement action required").
+  const payload = {
     field_visit_completed: true,
     field_observed_condition: outcome.observedCondition.trim() || null,
     field_violation_observed: outcome.violationObserved,
+    field_enforcement_action: outcome.enforcementAction,
+    field_service_method: outcome.enforcementAction === 'ticket_issued' ? outcome.serviceMethod ?? null : null,
+    field_reference_number:
+      outcome.enforcementAction === 'ticket_issued' ? outcome.referenceNumber?.trim() || null : null,
     field_action_taken: outcome.actionTaken?.trim() ? outcome.actionTaken.trim() : null,
     field_officer_notes: outcome.officerNotes?.trim() ? outcome.officerNotes.trim() : null,
     field_follow_up_required: outcome.followUpRequired,
     field_outcome_recorded_at: now,
     status: 'in_review' as const,
   }
-  // Structured enforcement action — added by migration 028. Method of service and
-  // notice number only apply to a ticket / penalty notice.
-  const enforcementPayload = {
-    field_enforcement_action: outcome.enforcementAction,
-    field_service_method: outcome.enforcementAction === 'ticket_issued' ? outcome.serviceMethod ?? null : null,
-    field_reference_number:
-      outcome.enforcementAction === 'ticket_issued' ? outcome.referenceNumber?.trim() || null : null,
-  }
 
-  // Persist the full outcome including the structured enforcement action. If the
-  // migration-028 columns are not present yet, fall back to recording the rest of
-  // the outcome so the officer is never hard-blocked. (Apply migration 028 to
-  // enable structured enforcement-action storage.)
-  const full = await client
-    .from(RESIDENT_REQUESTS_TABLE)
-    .update({ ...basePayload, ...enforcementPayload })
-    .eq('case_id', caseId)
-    .select(RESIDENT_REQUEST_COLUMNS)
-    .single()
-  let data = full.data as Record<string, unknown> | null
-  let error: unknown = full.error
-  if (error && isUndefinedColumnError(error)) {
-    const fallback = await client
+  // The returning select may degrade past missing 036/037 columns, but every
+  // tier keeps the enforcement columns. If all tiers fail with a missing-column
+  // error, the structured enforcement columns themselves are unavailable (028
+  // not applied, or a stale PostgREST schema cache) — fail loudly, save nothing.
+  let data: Record<string, unknown> | null = null
+  let saved = false
+  for (const columns of RESIDENT_ENFORCEMENT_REQUIRED_TIERS) {
+    const result = await client
       .from(RESIDENT_REQUESTS_TABLE)
-      .update(basePayload)
+      .update(payload)
       .eq('case_id', caseId)
-      .select(RESIDENT_REQUEST_ASSIGNMENT_COLUMNS)
+      .select(columns)
       .single()
-    data = fallback.data as Record<string, unknown> | null
-    error = fallback.error
+    if (!result.error) {
+      data = result.data as unknown as Record<string, unknown>
+      saved = true
+      break
+    }
+    if (!isUndefinedColumnError(result.error)) throw result.error
   }
-  if (error) throw error
+  if (!saved) throw new StructuredFieldOutcomeUnavailableError()
+
   const updated = withAssignmentDefaults(data as Record<string, unknown>)
+
+  // Trust only what the database returned: the officer success state must never
+  // appear unless the row actually carries the completed structured outcome.
+  if (!updated.field_visit_completed) {
+    throw new Error('The field visit was not marked complete. The field outcome was not saved.')
+  }
+  if (!updated.field_enforcement_action) {
+    throw new Error('The enforcement action was not saved. The field outcome was not completed.')
+  }
 
   await addWorkflowEvent({
     case_id: caseId,
@@ -1053,6 +1107,88 @@ export async function recordResidentFieldOutcome(
     }. Action notes: ${
       outcome.actionTaken?.trim() || '—'
     }. Follow-up required: ${outcome.followUpRequired ? 'yes' : 'no'}.`,
+  })
+
+  return updated
+}
+
+/**
+ * What staff provide to complete a field outcome that was recorded WITHOUT its
+ * structured enforcement action (a legacy row, or a row left partial by the old
+ * base-only fallback). The visit itself is not repeated — only the structured
+ * action (and its ticket details, when applicable) is filled in.
+ */
+export type StructuredFieldOutcomeRepairInput = {
+  enforcementAction: EnforcementAction
+  serviceMethod?: ServiceMethod
+  referenceNumber?: string
+  actionTaken?: string
+}
+
+/**
+ * Staff action: complete the structured enforcement action on a request whose
+ * field visit was already recorded but whose field_enforcement_action is still
+ * null. Guarded server-side by the update filters — it only ever touches rows in
+ * exactly that partial state, so a complete outcome can never be overwritten.
+ * Writes a workflow event; sends no resident email (closure review still follows).
+ */
+export async function repairResidentStructuredFieldOutcome(
+  caseId: string,
+  input: StructuredFieldOutcomeRepairInput,
+): Promise<ResidentRequestRow> {
+  const client = requireClient()
+
+  const actionTaken = input.actionTaken?.trim()
+  const payload: Record<string, unknown> = {
+    field_enforcement_action: input.enforcementAction,
+    field_service_method: input.enforcementAction === 'ticket_issued' ? input.serviceMethod ?? null : null,
+    field_reference_number:
+      input.enforcementAction === 'ticket_issued' ? input.referenceNumber?.trim() || null : null,
+    status: 'in_review' as const,
+    // Only replace the recorded action-taken text when staff typed one.
+    ...(actionTaken ? { field_action_taken: actionTaken } : {}),
+  }
+
+  let data: Record<string, unknown> | null = null
+  let saved = false
+  for (const columns of RESIDENT_ENFORCEMENT_REQUIRED_TIERS) {
+    const result = await client
+      .from(RESIDENT_REQUESTS_TABLE)
+      .update(payload)
+      .eq('case_id', caseId)
+      .eq('field_visit_completed', true)
+      .is('field_enforcement_action', null)
+      .select(columns)
+      .single()
+    if (!result.error) {
+      data = result.data as unknown as Record<string, unknown>
+      saved = true
+      break
+    }
+    if (isUndefinedColumnError(result.error)) continue
+    // .single() with no matching row (PGRST116): nothing is in the repairable
+    // partial state — already repaired, or no completed visit on file.
+    if ((result.error as SupabaseColumnError).code === 'PGRST116') {
+      throw new Error(
+        'This case has no incomplete structured field outcome to repair. It may already have been completed.',
+      )
+    }
+    throw result.error
+  }
+  if (!saved) throw new StructuredFieldOutcomeUnavailableError()
+
+  const updated = withAssignmentDefaults(data as Record<string, unknown>)
+
+  if (!updated.field_enforcement_action) {
+    throw new Error('The structured enforcement action was not saved.')
+  }
+
+  await addWorkflowEvent({
+    case_id: caseId,
+    event_type: 'resident_request_field_outcome_repaired',
+    event_label: 'Structured enforcement action completed',
+    actor_type: 'staff',
+    notes: `Structured enforcement action completed after an earlier incomplete field outcome. Enforcement action: ${input.enforcementAction}.`,
   })
 
   return updated

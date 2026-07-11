@@ -17,10 +17,12 @@ import type { DemoCase, EnforcementAction, ServiceMethod } from '../../data/demo
 import {
   STATUS_LABELS,
   getResidentRequestByCaseId,
+  isStructuredFieldOutcomeUnavailableError,
   recordResidentFieldOutcome,
   type FieldOutcomeInput,
   type ResidentRequestRow,
 } from '../../services/residentRequests'
+import StructuredEnforcementActionFields from '../../components/workflow/StructuredEnforcementActionFields'
 
 // Officer Case — the focused, officer-only view of one assigned case. It supports
 // BOTH sources the officer can be assigned:
@@ -420,10 +422,26 @@ function FieldOutcomeForm({
     }
     try {
       const updated = await recordResidentFieldOutcome(row.case_id, input)
+
+      // Never show "Field outcome recorded / Ready for supervisor closure
+      // review" unless the returned database row actually carries the completed
+      // structured outcome. (The service validates this too — belt and braces.)
+      if (!updated.field_visit_completed || !updated.field_enforcement_action) {
+        throw new Error('The complete field outcome was not saved. Please try again.')
+      }
+
       onRecorded(updated)
     } catch (err) {
       console.error('Failed to record field outcome:', err)
-      setError('Could not save the field outcome. Please try again.')
+
+      if (isStructuredFieldOutcomeUnavailableError(err)) {
+        setError(
+          'The structured enforcement action could not be saved because the required database migration is missing. Contact an administrator before continuing.',
+        )
+        return
+      }
+
+      setError(err instanceof Error ? err.message : 'Could not save the field outcome. Please try again.')
     } finally {
       setBusy(false)
     }
@@ -456,13 +474,13 @@ function FieldOutcomeForm({
           </select>
         </label>
 
-        <EnforcementActionFields
+        <StructuredEnforcementActionFields
           enforcementAction={fieldDraft.enforcementAction as EnforcementAction | ''}
-          setEnforcementAction={(v) => update('enforcementAction', v)}
+          onEnforcementActionChange={(v) => update('enforcementAction', v)}
           referenceNumber={fieldDraft.referenceNumber}
-          setReferenceNumber={(v) => update('referenceNumber', v)}
+          onReferenceNumberChange={(v) => update('referenceNumber', v)}
           serviceMethod={fieldDraft.serviceMethod as ServiceMethod}
-          setServiceMethod={(v) => update('serviceMethod', v)}
+          onServiceMethodChange={(v) => update('serviceMethod', v)}
         />
 
         <label className="block">
@@ -516,18 +534,6 @@ function FieldOutcomeForm({
 const fieldClass =
   'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none'
 
-// Display order for the structured field-outcome dropdowns.
-const ENFORCEMENT_ACTION_ORDER: EnforcementAction[] = [
-  'warning_education',
-  'notice_issued',
-  'ticket_issued',
-  'no_action',
-  'other',
-]
-// "Served in person" leads — it applies across violation types; the placed-on-
-// vehicle option is no longer the default first choice. Stored enum values stay.
-const SERVICE_METHOD_ORDER: ServiceMethod[] = ['handed_to_driver', 'placed_on_vehicle', 'sent_by_mail', 'other']
-
 /** Resolve a stored enforcement-action / service-method code to its label, or '—'. */
 function enforcementActionLabel(value: string | null): string {
   return value && value in ENFORCEMENT_ACTION_LABELS
@@ -536,79 +542,6 @@ function enforcementActionLabel(value: string | null): string {
 }
 function serviceMethodLabel(value: string | null): string {
   return value && value in SERVICE_METHOD_LABELS ? SERVICE_METHOD_LABELS[value as ServiceMethod] : '—'
-}
-
-// Shared structured enforcement-action fields, used by BOTH the resident
-// Supabase form and the local NYC benchmark form so the two paths capture the
-// same disposition. Selecting "Ticket / penalty notice issued" (a general by-law
-// ticket / penalty notice, valid for any violation type) reveals the notice
-// number and method-of-service fields. This only records what the officer did —
-// it is not a payment or ticket-issuance system.
-function EnforcementActionFields({
-  enforcementAction,
-  setEnforcementAction,
-  referenceNumber,
-  setReferenceNumber,
-  serviceMethod,
-  setServiceMethod,
-}: {
-  enforcementAction: EnforcementAction | ''
-  setEnforcementAction: (v: EnforcementAction | '') => void
-  referenceNumber: string
-  setReferenceNumber: (v: string) => void
-  serviceMethod: ServiceMethod
-  setServiceMethod: (v: ServiceMethod) => void
-}) {
-  return (
-    <>
-      <label className="block">
-        <span className="stat-label">Enforcement action</span>
-        <select
-          value={enforcementAction}
-          onChange={(e) => setEnforcementAction(e.target.value as EnforcementAction | '')}
-          className={fieldClass}
-        >
-          <option value="">Select an enforcement action…</option>
-          {ENFORCEMENT_ACTION_ORDER.map((a) => (
-            <option key={a} value={a}>
-              {ENFORCEMENT_ACTION_LABELS[a]}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {enforcementAction === 'ticket_issued' && (
-        <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-          <label className="block">
-            <span className="stat-label">Ticket / penalty notice number</span>
-            <input
-              value={referenceNumber}
-              onChange={(e) => setReferenceNumber(e.target.value)}
-              placeholder="e.g. PN-0001234"
-              className={fieldClass}
-            />
-          </label>
-          <label className="block">
-            <span className="stat-label">Method of service</span>
-            <select
-              value={serviceMethod}
-              onChange={(e) => setServiceMethod(e.target.value as ServiceMethod)}
-              className={fieldClass}
-            >
-              {SERVICE_METHOD_ORDER.map((m) => (
-                <option key={m} value={m}>
-                  {SERVICE_METHOD_LABELS[m]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="text-[11px] text-ink-subtle">
-            Records what the officer did on site. This does not issue a ticket or take a payment.
-          </p>
-        </div>
-      )}
-    </>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -883,13 +816,13 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
           </select>
         </label>
 
-        <EnforcementActionFields
+        <StructuredEnforcementActionFields
           enforcementAction={enforcementAction}
-          setEnforcementAction={setEnforcementAction}
+          onEnforcementActionChange={setEnforcementAction}
           referenceNumber={referenceNumber}
-          setReferenceNumber={setReferenceNumber}
+          onReferenceNumberChange={setReferenceNumber}
           serviceMethod={serviceMethod}
-          setServiceMethod={setServiceMethod}
+          onServiceMethodChange={setServiceMethod}
         />
 
         <label className="block">
