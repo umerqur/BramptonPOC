@@ -29,6 +29,10 @@ export const SERVICE_METHOD_ORDER: ServiceMethod[] = [
 const fieldClass =
   'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none disabled:bg-slate-50'
 
+// Ring styling for a required field the deterministic readiness check reports
+// as missing (applied by the parent form after a submit attempt).
+const missingFieldClass = 'border-rose-400 ring-1 ring-rose-300'
+
 type StructuredEnforcementActionFieldsProps = {
   enforcementAction: EnforcementAction | ''
   onEnforcementActionChange: (value: EnforcementAction | '') => void
@@ -37,6 +41,10 @@ type StructuredEnforcementActionFieldsProps = {
   referenceNumber: string
   onReferenceNumberChange: (value: string) => void
   disabled?: boolean
+  /** Visually highlight the enforcement-action select as missing. */
+  highlightActionMissing?: boolean
+  /** Visually highlight the reference-number input as missing. */
+  highlightReferenceMissing?: boolean
 }
 
 export default function StructuredEnforcementActionFields({
@@ -47,6 +55,8 @@ export default function StructuredEnforcementActionFields({
   referenceNumber,
   onReferenceNumberChange,
   disabled = false,
+  highlightActionMissing = false,
+  highlightReferenceMissing = false,
 }: StructuredEnforcementActionFieldsProps) {
   return (
     <>
@@ -56,7 +66,7 @@ export default function StructuredEnforcementActionFields({
           value={enforcementAction}
           onChange={(e) => onEnforcementActionChange(e.target.value as EnforcementAction | '')}
           disabled={disabled}
-          className={fieldClass}
+          className={`${fieldClass} ${highlightActionMissing ? missingFieldClass : ''}`}
         >
           <option value="">Select an enforcement action…</option>
           {ENFORCEMENT_ACTION_ORDER.map((a) => (
@@ -76,7 +86,7 @@ export default function StructuredEnforcementActionFields({
               onChange={(e) => onReferenceNumberChange(e.target.value)}
               disabled={disabled}
               placeholder="e.g. PN-0001234"
-              className={fieldClass}
+              className={`${fieldClass} ${highlightReferenceMissing ? missingFieldClass : ''}`}
             />
           </label>
           <label className="block">
