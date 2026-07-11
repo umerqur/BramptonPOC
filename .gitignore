@@ -13,6 +13,9 @@ dist-ssr
 *.local
 *.tsbuildinfo
 
+# Local Netlify CLI state and function bundles (created by `netlify build`)
+.netlify/
+
 # Local data exports
 # Raw and processed municipal data files are generated locally and should not be committed.
 data/raw/**/*.csv
