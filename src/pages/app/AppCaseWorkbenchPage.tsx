@@ -18,6 +18,7 @@ import {
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import StructuredFieldOutcomeRepairCard from '../../components/workflow/StructuredFieldOutcomeRepairCard'
 import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
 import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
 import type { DemoCase, NycBenchmarkSource, Priority, ResidentComplaintInput } from '../../data/demoWorkflowTypes'
@@ -40,8 +41,16 @@ function daysSince(iso: string | null): number {
 }
 
 export default function AppCaseWorkbenchPage() {
-  const { cases, activeCase, setActiveCase, requestMoreInfo, overridePriority, sendToStaffReview, role } =
-    useWorkflow()
+  const {
+    cases,
+    activeCase,
+    setActiveCase,
+    requestMoreInfo,
+    overridePriority,
+    sendToStaffReview,
+    ingestResidentCase,
+    role,
+  } = useWorkflow()
   const c = useDemoCase()
   const navigate = useNavigate()
   const [flash, setFlash] = useState<string | null>(null)
@@ -242,6 +251,21 @@ export default function AppCaseWorkbenchPage() {
         {nextActionButton && <div className="mt-3">{nextActionButton}</div>}
         <p className="mt-3 text-[11px] text-ink-subtle">{nextAction.staffNote}</p>
       </section>
+
+      {/* Repair path for the invalid partial state: a resident case whose field
+          visit was recorded but whose structured enforcement action is missing.
+          Staff complete the RECORDED action here — no repeated visit — and the
+          repaired Supabase row is re-ingested so the closure draft is rebuilt
+          from the actual action without a page reload. */}
+      {c.source.kind === 'resident' && !isClosed && c.fieldAction && fieldOutcomeNeedsStructuredAction(c.fieldAction) && (
+        <StructuredFieldOutcomeRepairCard
+          caseId={c.id}
+          onRepaired={(repaired) => {
+            ingestResidentCase(repaired)
+            note('Structured enforcement action completed. The closure draft now reflects the recorded action.')
+          }}
+        />
+      )}
 
       {isBenchmark && (
         <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs leading-relaxed text-teal-900">

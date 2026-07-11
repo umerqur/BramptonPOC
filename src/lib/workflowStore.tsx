@@ -33,7 +33,7 @@ import {
   FIELD_OUTCOME_LABELS,
   runWorkflow,
 } from '../services/demoWorkflowService'
-import { residentRowToCase } from '../services/residentCaseBridge'
+import { residentRowToCase, residentFieldOutcomeNeedsRepair } from '../services/residentCaseBridge'
 import { openRowToCase } from '../services/openCaseBridge'
 import type { ResidentRequestRow } from '../services/residentRequests'
 import type { OpenReviewRow } from '../services/caseExplorer'
@@ -234,13 +234,18 @@ export function WorkflowProvider({
         // Supabase truth and never keeps a stale localStorage fieldAction. We
         // refresh when there is a recorded outcome but no cached fieldAction, OR
         // when the Supabase recorded-at differs from the cached fieldAction's
-        // recordedAt (a newer / changed outcome). Closed cases are never re-derived.
+        // recordedAt (a newer / changed outcome), OR when the cached fieldAction
+        // still lacks a structured enforcement action but the row no longer needs
+        // repair (the missing action was completed via the Workbench repair card —
+        // recordedAt is unchanged, so only the action itself signals the refresh).
+        // Closed cases are never re-derived.
         const rowRecordedAt = row.field_outcome_recorded_at
         const staleFieldOutcome =
           row.field_visit_completed &&
           existing.stage !== 'closed' &&
           (!existing.fieldAction ||
-            (rowRecordedAt != null && rowRecordedAt !== existing.fieldAction.recordedAt))
+            (rowRecordedAt != null && rowRecordedAt !== existing.fieldAction.recordedAt) ||
+            (existing.fieldAction.enforcementAction == null && !residentFieldOutcomeNeedsRepair(row)))
         if (!staleFieldOutcome) return { ...s, activeCaseId: row.case_id }
         const refreshed = residentRowToCase(row)
         return {

@@ -283,21 +283,22 @@ function ReviewView({ c, sending, onApprove }: { c: DemoCase; sending: boolean; 
   )
 }
 
-// A field visit was recorded before structured enforcement actions existed, so
-// the disposition is unknown. Block closure approval until a structured action is
-// set — never infer a ticket/notice/warning from legacy free text.
+// A field visit was recorded, but no structured enforcement action was saved
+// with it (a legacy row, or a row left partial by an earlier save failure), so
+// the disposition is unknown. Block closure approval until the structured action
+// is set — never infer a ticket/notice/warning from free-text officer notes.
 function IncompleteOutcomeView({ c }: { c: DemoCase }) {
   return (
     <div className="mt-6 card p-8 text-center">
       <span className="badge bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200">Field outcome incomplete</span>
-      <h2 className="mt-3 text-base font-semibold text-navy-900">Structured enforcement action required</h2>
+      <h2 className="mt-3 text-base font-semibold text-navy-900">Field visit recorded, action incomplete</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-ink-muted">
-        This field outcome was recorded before structured enforcement actions were available. Select the recorded
-        enforcement action before preparing a closure draft.
+        The officer completed the visit, but the structured enforcement action is missing. Open the Case Workbench to
+        complete the recorded action before approving the resident response.
       </p>
       <div className="mt-5 flex flex-wrap justify-center gap-3">
         <Link to={`/app/workbench?case=${c.id}`} className="btn-secondary">
-          Open case workbench
+          Open Case Workbench
         </Link>
       </div>
     </div>

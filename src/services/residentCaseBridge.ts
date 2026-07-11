@@ -88,6 +88,16 @@ function normalizeServiceMethod(value: string | null): ServiceMethod | null {
 }
 
 /**
+ * True when the row carries a completed field visit with NO valid structured
+ * enforcement action — the invalid partial state the Workbench repair card
+ * fixes. The structured action must be explicitly selected by staff; it is never
+ * inferred from field_action_taken / field_officer_notes / observed condition.
+ */
+export function residentFieldOutcomeNeedsRepair(row: ResidentRequestRow): boolean {
+  return row.field_visit_completed === true && !normalizeEnforcementAction(row.field_enforcement_action)
+}
+
+/**
  * Build a recorded OfficerFieldAction from the resident request's field-outcome
  * columns, or null when the officer has not recorded an outcome yet. The
  * observed condition + officer notes are kept as internal observations.
