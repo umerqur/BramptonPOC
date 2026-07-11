@@ -115,12 +115,26 @@ function promptCacheEnabled(): boolean {
 // several legitimate calls per case (an automatic briefing on open, a couple of
 // follow-up questions, a supervisor handoff): the old hardcoded 9s / 10-per-hour
 // budget was too tight for that. Defaults stay conservative and safe.
-//   OFFICER_ASSISTANT_COOLDOWN_SECONDS  — seconds between calls (default 3)
-//   OFFICER_ASSISTANT_HOURLY_LIMIT      — calls per rolling hour   (default 30)
+//   OFFICER_ASSISTANT_COOLDOWN_SECONDS   — seconds between calls (default 3)
+//   OFFICER_ASSISTANT_HOURLY_LIMIT       — calls per rolling hour   (default 30)
+//   OFFICER_ASSISTANT_DISABLE_RATE_LIMIT — 'true' disables the throttle entirely
+//                                          (live-demo mode; set it in the Netlify
+//                                          environment, never through VITE_*)
 const DEFAULT_COOLDOWN_SECONDS = 3
 const DEFAULT_HOURLY_LIMIT = 30
 const ASSISTANT_WINDOW_MS = 60 * 60 * 1000
-const RATE_LIMIT_MESSAGE = 'Assistant usage limit reached for this demo. Please try again later.'
+
+// Distinct caller-facing messages: a short cooldown is a "slow down for a
+// moment", the hourly cap is a real budget — the UI treats them differently.
+const COOLDOWN_MESSAGE = 'Please wait a moment before sending another request.'
+const HOURLY_LIMIT_MESSAGE = 'Assistant request limit reached.'
+
+/** Live-demo escape hatch: disables the per-user throttle when the Netlify
+ *  environment sets OFFICER_ASSISTANT_DISABLE_RATE_LIMIT=true. Server-side
+ *  only — never exposed through a VITE_* variable. */
+export function assistantRateLimitDisabled(): boolean {
+  return process.env.OFFICER_ASSISTANT_DISABLE_RATE_LIMIT === 'true'
+}
 
 /** Positive-integer env override with a safe default (bad values are ignored). */
 function envLimit(name: string, fallback: number, max: number): number {
@@ -138,23 +152,37 @@ function assistantHourlyLimit(): number {
 
 const assistantCalls = new Map<string, number[]>()
 
-/** Records and checks the per-user call budget. Returns false (and records
- *  nothing) when the caller is in cooldown or over the hourly limit. */
-function checkAssistantRate(key: string): boolean {
-  const now = Date.now()
+/** Typed throttle verdict, so cooldown and hourly exhaustion produce distinct
+ *  responses (never one generic "usage limit reached" message). */
+export type RateLimitResult =
+  | { allowed: true }
+  | { allowed: false; reason: 'cooldown'; retryAfterSeconds: number }
+  | { allowed: false; reason: 'hourly_limit'; retryAfterSeconds: number }
+
+/** Records and checks the per-user call budget. On a block, nothing is
+ *  recorded and the result says WHY and how long to wait. `now` is injectable
+ *  for deterministic tests only. */
+export function checkAssistantRate(key: string, now: number = Date.now()): RateLimitResult {
+  if (assistantRateLimitDisabled()) {
+    return { allowed: true }
+  }
   const recent = (assistantCalls.get(key) ?? []).filter((t) => now - t < ASSISTANT_WINDOW_MS)
   const last = recent[recent.length - 1]
   if (last != null && now - last < assistantCooldownMs()) {
     assistantCalls.set(key, recent)
-    return false
+    const retryAfterSeconds = Math.max(1, Math.ceil((assistantCooldownMs() - (now - last)) / 1000))
+    return { allowed: false, reason: 'cooldown', retryAfterSeconds }
   }
   if (recent.length >= assistantHourlyLimit()) {
     assistantCalls.set(key, recent)
-    return false
+    // The budget frees up when the oldest call in the rolling window ages out.
+    const oldest = recent[0]
+    const retryAfterSeconds = Math.max(1, Math.ceil((ASSISTANT_WINDOW_MS - (now - oldest)) / 1000))
+    return { allowed: false, reason: 'hourly_limit', retryAfterSeconds }
   }
   recent.push(now)
   assistantCalls.set(key, recent)
-  return true
+  return { allowed: true }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,10 +317,10 @@ const HANDOFF_INSTRUCTION =
 // Small helpers
 // ---------------------------------------------------------------------------
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...extraHeaders },
   })
 }
 
@@ -379,6 +407,10 @@ const ENFORCEMENT_ACTION_LABELS: Record<string, string> = {
   warning_education: 'Education / warning provided',
   notice_issued: 'Notice issued',
   ticket_issued: 'Ticket / penalty notice issued',
+  city_service_referral: 'City service / repair referral',
+  referred_other_department: 'Referred to another department',
+  public_safety_response: 'Public safety response',
+  no_violation_found: 'No violation found',
   no_action: 'No action taken',
   other: 'Other',
 }
@@ -1285,13 +1317,24 @@ export default async function handler(req: Request): Promise<Response> {
 
   // Per-user throttle (server-side). Keyed by verified email, else client IP.
   // Enforced before any benchmark retrieval or model call so over-limit callers
-  // do no work. A browser cannot bypass this.
+  // do no work. A browser cannot bypass this. Cooldown and hourly exhaustion
+  // return DISTINCT codes/messages, both as HTTP 429 with a Retry-After header.
   const clientIp = (req.headers.get('x-nf-client-connection-ip') || req.headers.get('x-forwarded-for') || '')
     .split(',')[0]
     .trim()
   const rateKey = (rateSubject || clientIp || 'anon').toLowerCase()
-  if (!checkAssistantRate(rateKey)) {
-    return json({ error: RATE_LIMIT_MESSAGE }, 429)
+  const rate = checkAssistantRate(rateKey)
+  if (!rate.allowed) {
+    const cooldown = rate.reason === 'cooldown'
+    return json(
+      {
+        error: cooldown ? COOLDOWN_MESSAGE : HOURLY_LIMIT_MESSAGE,
+        code: cooldown ? 'ASSISTANT_COOLDOWN' : 'ASSISTANT_HOURLY_LIMIT',
+        retryAfterSeconds: rate.retryAfterSeconds,
+      },
+      429,
+      { 'retry-after': String(rate.retryAfterSeconds) },
+    )
   }
 
   // Optional benchmark references + same-address history (both best-effort;
@@ -1338,6 +1381,10 @@ export default async function handler(req: Request): Promise<Response> {
     readiness,
     question,
   })
+  // Case-safe id for correlating provider-failure log lines. Random — carries
+  // no case, resident, or prompt information.
+  const requestId = Math.random().toString(36).slice(2, 10)
+
   let text: string
   try {
     text =
@@ -1347,21 +1394,33 @@ export default async function handler(req: Request): Promise<Response> {
           ? await callAnthropic(provider.model, provider.apiKey, userMessage)
           : await callCohere(provider.model, provider.apiKey, userMessage)
   } catch (err) {
-    // Log status/message only — never the key or the full prompt.
-    console.error(`officer-case-assistant: ${provider.kind} request failed:`, errorText(err))
-    return json({ error: 'Assistant service error. Please try again.' }, 502)
+    // An upstream failure (429, 5xx, timeout, network) is a PROVIDER error —
+    // never converted into the local rate-limit response. Log only the provider
+    // kind, the status/abort text, and the case-safe request id — never keys,
+    // prompts, resident details, or full provider response bodies.
+    console.error(
+      `officer-case-assistant: provider request failed (provider=${provider.kind}, request=${requestId}): ${errorText(err)}`,
+    )
+    return json({ error: 'Assistant service error. Please try again.', code: 'ASSISTANT_PROVIDER_ERROR' }, 502)
   }
 
   const allowedCaseIds = new Set(benchmarks.map((b) => b.case_id))
   let result: AssistantResult
   try {
     result = parseResult(text, allowedCaseIds, nextStep)
-  } catch (err) {
-    console.error('officer-case-assistant: failed to parse assistant JSON:', errorText(err))
-    return json({ error: 'Assistant service did not return a structured answer.' }, 502)
+  } catch {
+    // Malformed provider response. The parse error text can quote the response
+    // body, so it is intentionally NOT logged — provider kind + request id only.
+    console.error(
+      `officer-case-assistant: failed to parse assistant JSON (provider=${provider.kind}, request=${requestId})`,
+    )
+    return json(
+      { error: 'Assistant service did not return a structured answer.', code: 'ASSISTANT_PROVIDER_ERROR' },
+      502,
+    )
   }
   if (!result.answer) {
-    return json({ error: 'Assistant service returned an empty answer.' }, 502)
+    return json({ error: 'Assistant service returned an empty answer.', code: 'ASSISTANT_PROVIDER_ERROR' }, 502)
   }
   // A briefing must always carry a briefing object; synthesize a minimal one
   // from deterministic context if the model omitted it, so the UI never shows

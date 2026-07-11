@@ -136,6 +136,33 @@ export class AssistantNotConfiguredError extends Error {
   }
 }
 
+/** Thrown on a server-side 429 (the app's own throttle — cooldown or hourly
+ *  budget), carrying the distinct code and how long to wait. */
+export class AssistantRateLimitError extends Error {
+  code: 'ASSISTANT_COOLDOWN' | 'ASSISTANT_HOURLY_LIMIT'
+  retryAfterSeconds: number
+  constructor(
+    message: string,
+    code: 'ASSISTANT_COOLDOWN' | 'ASSISTANT_HOURLY_LIMIT',
+    retryAfterSeconds: number,
+  ) {
+    super(message)
+    this.name = 'AssistantRateLimitError'
+    this.code = code
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+/** Thrown when the upstream model provider failed (5xx / timeout / malformed
+ *  response). Distinct from the local rate limit — the UI shows a temporary
+ *  "service unavailable" message, never a usage-limit one. */
+export class AssistantServiceError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AssistantServiceError'
+  }
+}
+
 export type AskAssistantOptions = {
   mode?: AssistantMode
   question?: string
@@ -181,9 +208,25 @@ export async function askOfficerCaseAssistant(
   }
 
   if (!res.ok) {
-    const message =
-      (payload as { error?: string } | null)?.error ?? `Request failed (status ${res.status}).`
+    const errBody = (payload ?? {}) as { error?: string; code?: string; retryAfterSeconds?: number }
+    const message = errBody.error ?? `Request failed (status ${res.status}).`
     if (res.status === 503) throw new AssistantNotConfiguredError(message)
+    if (res.status === 429 && (errBody.code === 'ASSISTANT_COOLDOWN' || errBody.code === 'ASSISTANT_HOURLY_LIMIT')) {
+      // Prefer the body's retryAfterSeconds; fall back to the Retry-After header.
+      const headerRetry = Number(res.headers.get('retry-after'))
+      const retryAfterSeconds =
+        typeof errBody.retryAfterSeconds === 'number' && errBody.retryAfterSeconds > 0
+          ? errBody.retryAfterSeconds
+          : Number.isFinite(headerRetry) && headerRetry > 0
+            ? headerRetry
+            : 5
+      throw new AssistantRateLimitError(message, errBody.code, retryAfterSeconds)
+    }
+    // Upstream provider / gateway failures — a temporary service problem, never
+    // presented as a usage limit.
+    if (res.status >= 500 || errBody.code === 'ASSISTANT_PROVIDER_ERROR') {
+      throw new AssistantServiceError(message)
+    }
     throw new Error(message)
   }
 

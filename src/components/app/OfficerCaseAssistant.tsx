@@ -3,6 +3,8 @@ import type { DemoCategory } from '../../data/demoWorkflowTypes'
 import {
   askOfficerCaseAssistant,
   AssistantNotConfiguredError,
+  AssistantRateLimitError,
+  AssistantServiceError,
   type AssistantBriefing,
   type AssistantHandoff,
   type AssistantResponse,
@@ -97,13 +99,37 @@ type BriefingState =
   | { status: 'loading' }
   | { status: 'ready'; response: AssistantResponse }
   | { status: 'unconfigured'; message: string }
-  | { status: 'error'; message: string }
+  // A failed automatic briefing never blocks manual questions: the panel shows
+  // a calm one-line note and the Ask input / quick actions stay enabled. The
+  // failure DETAIL goes to the single consolidated notice below.
+  | { status: 'failed' }
 
 type AskState =
   | { status: 'idle' }
   | { status: 'loading'; kind: 'question' | 'handoff' }
   | { status: 'ready'; kind: 'question' | 'handoff'; response: AssistantResponse }
-  | { status: 'error'; message: string }
+
+// The ONE consolidated error/notice surface for the whole panel — a failure is
+// never shown twice (e.g. once inside the briefing warning and again below the
+// input). Cooldowns are a small temporary message that clears itself; the
+// hourly limit and service problems are real (single) error boxes.
+type AssistantNotice =
+  | { kind: 'cooldown'; retryAfterSeconds: number }
+  | { kind: 'hourly_limit'; message: string }
+  | { kind: 'service_unavailable' }
+  | { kind: 'error'; message: string }
+
+function noticeFromError(err: unknown): AssistantNotice {
+  if (err instanceof AssistantRateLimitError) {
+    return err.code === 'ASSISTANT_COOLDOWN'
+      ? { kind: 'cooldown', retryAfterSeconds: err.retryAfterSeconds }
+      : { kind: 'hourly_limit', message: err.message }
+  }
+  // Upstream provider failures are temporary service problems — never presented
+  // as a usage limit.
+  if (err instanceof AssistantServiceError) return { kind: 'service_unavailable' }
+  return { kind: 'error', message: err instanceof Error ? err.message : String(err) }
+}
 
 export default function OfficerCaseAssistant({
   ctx,
@@ -118,6 +144,7 @@ export default function OfficerCaseAssistant({
 }) {
   const [briefing, setBriefing] = useState<BriefingState>({ status: 'loading' })
   const [askState, setAskState] = useState<AskState>({ status: 'idle' })
+  const [notice, setNotice] = useState<AssistantNotice | null>(null)
   const [input, setInput] = useState('')
   const [lastQuestion, setLastQuestion] = useState<string | null>(null)
   // Guard against duplicate automatic briefings (React StrictMode re-runs
@@ -146,6 +173,7 @@ export default function OfficerCaseAssistant({
     if (briefedCaseRef.current === ctx.caseId) return
     briefedCaseRef.current = ctx.caseId
     setAskState({ status: 'idle' })
+    setNotice(null)
     setLastQuestion(null)
     setInput('')
     setBriefing({ status: 'loading' })
@@ -157,10 +185,11 @@ export default function OfficerCaseAssistant({
         if (err instanceof AssistantNotConfiguredError) {
           setBriefing({ status: 'unconfigured', message: err.message })
         } else {
-          setBriefing({
-            status: 'error',
-            message: err instanceof Error ? err.message : String(err),
-          })
+          // A temporary failure (cooldown, provider error) must not block the
+          // manual Ask flow — mark the briefing failed and surface the detail
+          // ONCE through the consolidated notice.
+          setBriefing({ status: 'failed' })
+          setNotice(noticeFromError(err))
         }
       })
     return () => {
@@ -171,11 +200,24 @@ export default function OfficerCaseAssistant({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx.caseId])
 
+  // A cooldown is temporary by definition: clear the notice (re-enabling the
+  // Ask input and quick actions) once retryAfterSeconds has elapsed.
+  useEffect(() => {
+    if (notice?.kind !== 'cooldown') return
+    const timer = setTimeout(() => setNotice(null), notice.retryAfterSeconds * 1000)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  // Requests pause while loading or during a short cooldown; the cooldown
+  // notice clears itself and re-enables everything after retryAfterSeconds.
+  const paused = askState.status === 'loading' || notice?.kind === 'cooldown'
+
   async function ask(question: string, kind: 'question' | 'handoff' = 'question') {
-    if (askState.status === 'loading') return
+    if (paused) return
     const q = question.trim()
     if (kind === 'question' && !q) return
     setLastQuestion(kind === 'handoff' ? null : q)
+    setNotice(null)
     setAskState({ status: 'loading', kind })
     try {
       const response = await askOfficerCaseAssistant(ctx.caseId, {
@@ -186,11 +228,11 @@ export default function OfficerCaseAssistant({
       })
       setAskState({ status: 'ready', kind, response })
     } catch (err) {
+      setAskState({ status: 'idle' })
       if (err instanceof AssistantNotConfiguredError) {
         setBriefing({ status: 'unconfigured', message: err.message })
-        setAskState({ status: 'idle' })
       } else {
-        setAskState({ status: 'error', message: err instanceof Error ? err.message : String(err) })
+        setNotice(noticeFromError(err))
       }
     }
   }
@@ -217,11 +259,12 @@ export default function OfficerCaseAssistant({
         {briefing.status === 'loading' && (
           <p className="text-sm text-ink-subtle">Preparing the field briefing for this case…</p>
         )}
-        {briefing.status === 'error' && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
-            The automatic field briefing is unavailable right now ({briefing.message}). You can still ask
-            case-scoped questions below.
-          </div>
+        {briefing.status === 'failed' && (
+          // Calm, non-error note only — the failure detail is shown ONCE via the
+          // consolidated notice below, and asking questions stays available.
+          <p className="text-xs text-ink-subtle">
+            The automatic field briefing is unavailable right now. You can still ask case-scoped questions below.
+          </p>
         )}
         {briefing.status === 'ready' && <BriefingView response={briefing.response} />}
 
@@ -232,7 +275,7 @@ export default function OfficerCaseAssistant({
               <button
                 key={chip.label}
                 type="button"
-                disabled={askState.status === 'loading'}
+                disabled={paused}
                 onClick={() => ask(chip.question)}
                 className="rounded-full border border-teal-200 bg-teal-50/50 px-3 py-1 text-xs font-medium text-teal-800 transition hover:border-teal-400 hover:bg-teal-50 hover:text-teal-900 disabled:opacity-60"
               >
@@ -241,7 +284,7 @@ export default function OfficerCaseAssistant({
             ))}
             <button
               type="button"
-              disabled={askState.status === 'loading'}
+              disabled={paused}
               onClick={() => ask('', 'handoff')}
               className="rounded-full border border-navy-200 bg-navy-50/60 px-3 py-1 text-xs font-medium text-navy-800 transition hover:border-navy-400 hover:bg-navy-50 disabled:opacity-60"
             >
@@ -265,7 +308,7 @@ export default function OfficerCaseAssistant({
             />
             <button
               type="submit"
-              disabled={!input.trim() || askState.status === 'loading'}
+              disabled={!input.trim() || paused}
               className="btn-primary text-sm disabled:opacity-60"
             >
               Ask
@@ -273,15 +316,26 @@ export default function OfficerCaseAssistant({
           </form>
 
           <div className="mt-4">
+            {/* THE single consolidated notice — a failure is shown exactly once. */}
+            {notice && notice.kind === 'cooldown' && (
+              <p role="status" className="text-xs text-ink-subtle">
+                Please wait a moment before sending another request… available again in about{' '}
+                {notice.retryAfterSeconds}s.
+              </p>
+            )}
+            {notice && notice.kind !== 'cooldown' && (
+              <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
+                {notice.kind === 'hourly_limit'
+                  ? notice.message
+                  : notice.kind === 'service_unavailable'
+                    ? 'The assistant service is temporarily unavailable. Please try again.'
+                    : notice.message}
+              </div>
+            )}
             {askState.status === 'loading' && (
               <p className="text-sm text-ink-subtle">
                 {askState.kind === 'handoff' ? 'Preparing the supervisor handoff…' : 'Reviewing the case file…'}
               </p>
-            )}
-            {askState.status === 'error' && (
-              <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
-                {askState.message}
-              </div>
             )}
             {askState.status === 'ready' && askState.kind === 'handoff' && askState.response.result.handoff && (
               <HandoffView handoff={askState.response.result.handoff} />
