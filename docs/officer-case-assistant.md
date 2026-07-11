@@ -50,14 +50,28 @@ model answered from the browser network tab.
 Server-side, per verified user (or client IP in POC mode):
 
 ```
-OFFICER_ASSISTANT_COOLDOWN_SECONDS=3   # seconds between calls (default 3, max 300)
-OFFICER_ASSISTANT_HOURLY_LIMIT=30      # calls per rolling hour (default 30, max 1000)
+OFFICER_ASSISTANT_COOLDOWN_SECONDS=3       # seconds between calls (default 3, max 300)
+OFFICER_ASSISTANT_HOURLY_LIMIT=30          # calls per rolling hour (default 30, max 1000)
+OFFICER_ASSISTANT_DISABLE_RATE_LIMIT=true  # live-demo mode: disables the throttle entirely
 ```
 
 Defaults reflect the field workflow: opening a case costs one automatic
 briefing, plus a few follow-up questions and a supervisor handoff. The old
 hardcoded 9 s / 10-per-hour budget was too tight for that; invalid or missing
 values fall back to the defaults.
+
+The two blocked conditions return distinct HTTP 429 responses, each with a
+`Retry-After` header and a JSON body carrying `code` (`ASSISTANT_COOLDOWN` or
+`ASSISTANT_HOURLY_LIMIT`) plus `retryAfterSeconds`. Upstream provider failures
+(429/5xx/timeout/malformed response) are returned as 502 with
+`code: ASSISTANT_PROVIDER_ERROR` — never as a local rate limit — and are logged
+with the provider kind, status, and a case-safe request id only (never keys,
+prompts, resident details, or provider response bodies).
+
+For the live Brampton POC demo, set `OFFICER_ASSISTANT_DISABLE_RATE_LIMIT=true`
+in the Netlify **production environment variables** (Site settings →
+Environment variables). It is read server-side only — do not create a `VITE_`
+copy. Remove the variable to restore the configurable limits.
 
 ## Data the assistant sees
 

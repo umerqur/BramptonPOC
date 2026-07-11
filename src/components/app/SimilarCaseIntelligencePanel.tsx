@@ -8,9 +8,9 @@ import {
 import { ProvenanceBadge } from './ProvenanceLabels'
 
 // Similar Case Intelligence — RULES-BASED structured similarity over the real
-// historical NYC 311 records (public.municipal_complaints). No CTGAN, no ABM,
-// no embeddings, no Qdrant, no reranking: candidates are narrowed with indexed
-// structured filters and scored with a transparent weighted rule set
+// historical NYC 311 records (public.municipal_complaints). No generative or
+// ML retrieval of any kind: candidates are narrowed with indexed structured
+// filters and scored with a transparent weighted rule set
 // (see structuredSimilarCases.ts for the documented weights).
 //
 // It shows AT MOST the top 3 comparable closed cases. Each row is clickable and

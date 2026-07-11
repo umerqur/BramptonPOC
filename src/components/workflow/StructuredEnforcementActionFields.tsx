@@ -9,11 +9,19 @@ import { ENFORCEMENT_ACTION_LABELS, SERVICE_METHOD_LABELS } from '../../services
 // type) reveals the notice number and method-of-service fields. This only
 // records what the officer did — it is not a payment or ticket-issuance system.
 
-// Display order for the structured field-outcome dropdowns.
+// Display order for the structured field-outcome dropdowns: enforcement
+// dispositions first, then the non-enforcement outcomes (service referrals,
+// public safety, no violation) so infrastructure and service cases are never
+// forced into a false enforcement outcome. Nothing is preselected — the
+// officer must always make the choice explicitly.
 export const ENFORCEMENT_ACTION_ORDER: EnforcementAction[] = [
   'warning_education',
   'notice_issued',
   'ticket_issued',
+  'city_service_referral',
+  'referred_other_department',
+  'public_safety_response',
+  'no_violation_found',
   'no_action',
   'other',
 ]

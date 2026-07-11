@@ -70,6 +70,10 @@ const ENFORCEMENT_ACTIONS: EnforcementAction[] = [
   'warning_education',
   'notice_issued',
   'ticket_issued',
+  'city_service_referral',
+  'referred_other_department',
+  'public_safety_response',
+  'no_violation_found',
   'no_action',
   'other',
 ]

@@ -65,6 +65,30 @@ describe('assessFieldOutcomeReadiness', () => {
     expect(withRef.ready).toBe(true)
   })
 
+  it('accepts the non-enforcement actions without requiring a reference number', () => {
+    // A fallen City stop sign: Violation observed "No", a City service /
+    // repair referral, follow-up required — a complete, submittable outcome.
+    for (const action of [
+      'city_service_referral',
+      'referred_other_department',
+      'public_safety_response',
+      'no_violation_found',
+    ]) {
+      const r = assessFieldOutcomeReadiness({
+        ...completeDraft,
+        violationObserved: 'no',
+        enforcementAction: action,
+        actionTaken: 'Reported the fallen stop sign for repair.',
+        followUpRequired: true,
+      })
+      expect(r.ready).toBe(true)
+      expect(r.missingLabels).toEqual([])
+      const ref = r.items.find((i) => i.field === 'reference_number')
+      expect(ref?.status).toBe('complete')
+      expect(ref?.detail).toMatch(/not required/i)
+    }
+  })
+
   it('flags "unclear" violation as attention without blocking readiness', () => {
     const r = assessFieldOutcomeReadiness({ ...completeDraft, violationObserved: 'unclear' })
     expect(r.ready).toBe(true)

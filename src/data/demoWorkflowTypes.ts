@@ -112,7 +112,17 @@ export type CaseSummary = {
  * activity when one of these has been recorded. Mirrors a standard municipal
  * by-law enforcement disposition.
  */
-export type FieldVisitOutcome = 'no_violation' | 'notice_issued' | 'ticket_issued' | 'resolved' | 'warning_education'
+export type FieldVisitOutcome =
+  | 'no_violation'
+  | 'notice_issued'
+  | 'ticket_issued'
+  | 'resolved'
+  | 'warning_education'
+  // Non-enforcement dispositions — infrastructure / service issues (e.g. a
+  // fallen City stop sign) are never forced into a false enforcement outcome.
+  | 'city_service_referral'
+  | 'referred_other_department'
+  | 'public_safety_response'
 
 /**
  * The structured enforcement action an officer selects on the field-outcome
@@ -124,6 +134,12 @@ export type EnforcementAction =
   | 'warning_education' // Education / warning provided
   | 'notice_issued' // Notice issued
   | 'ticket_issued' // Ticket / penalty notice issued (general by-law ticket / penalty / offence notice — any violation type)
+  // Non-enforcement field outcomes, so infrastructure and service cases (e.g. a
+  // fallen City stop sign) are never forced into a false enforcement outcome.
+  | 'city_service_referral' // City service / repair referral
+  | 'referred_other_department' // Referred to another department
+  | 'public_safety_response' // Public safety response
+  | 'no_violation_found' // No violation found
   | 'no_action' // No action taken
   | 'other' // Other
 
