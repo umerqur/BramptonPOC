@@ -35,11 +35,14 @@ vi.mock('../../services/residentRequests', async (importOriginal) => {
   }
 })
 
+// Mirrors the real production route: App.tsx maps /app/field/:caseId to
+// AppOfficerCasePage (the resident officer case page shown in the field
+// console), so these tests exercise the exact component the live route serves.
 function renderPage(caseId: string) {
   return render(
-    <MemoryRouter initialEntries={[`/case/${caseId}`]}>
+    <MemoryRouter initialEntries={[`/app/field/${caseId}`]}>
       <Routes>
-        <Route path="/case/:caseId" element={<AppOfficerCasePage />} />
+        <Route path="/app/field/:caseId" element={<AppOfficerCasePage />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -66,6 +69,30 @@ async function fillAndSubmitCompleteForm() {
 beforeEach(() => {
   vi.mocked(getResidentRequestByCaseId).mockResolvedValue(makeResidentRow())
   vi.mocked(recordResidentFieldOutcome).mockReset()
+})
+
+describe('AppOfficerCasePage enforcement action dropdown', () => {
+  it('renders all nine enforcement actions, including the non-enforcement outcomes', async () => {
+    renderPage('RSR-20260709-7BX8')
+    await screen.findByText('Record field outcome')
+
+    const select = screen.getByLabelText('Enforcement action') as HTMLSelectElement
+    const optionLabels = Array.from(select.options).map((o) => o.textContent)
+    expect(optionLabels).toEqual([
+      'Select an enforcement action…',
+      'Education / warning provided',
+      'Notice issued',
+      'Ticket / penalty notice issued',
+      'City service / repair referral',
+      'Referred to another department',
+      'Public safety response',
+      'No violation found',
+      'No action taken',
+      'Other',
+    ])
+    // Nothing is preselected — the officer must choose explicitly.
+    expect(select.value).toBe('')
+  })
 })
 
 describe('AppOfficerCasePage field outcome submission', () => {
