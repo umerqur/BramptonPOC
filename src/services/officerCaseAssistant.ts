@@ -1,18 +1,23 @@
 import { supabase } from '../lib/supabase'
+import type { FormReadiness } from '../lib/fieldOutcomeReadiness'
 import type { OfficerFieldDraft } from '../components/app/OfficerCaseAssistant'
 
 // Client wrapper for the server-side "Officer Case Assistant" Netlify function
 // (netlify/functions/officer-case-assistant.ts).
 //
-// The Anthropic / Cohere generation keys and the Supabase service role key live
-// ONLY on the server. The browser sends the case id, the officer's question,
-// and — when a
-// Supabase session exists — the access token in the Authorization header so the
-// server can resolve the authenticated staff identity and enforce case-scoped
-// access. The assistant is case-scoped decision support; it never writes to
-// Supabase and never decides an enforcement outcome.
+// The Groq / Anthropic / Cohere generation keys and the Supabase service role
+// key live ONLY on the server. The browser sends the case id, the request mode
+// (briefing / question / handoff), the officer's question when asking one,
+// and — when a Supabase session exists — the access token in the Authorization
+// header so the server can resolve the authenticated staff identity and enforce
+// case-scoped access. The assistant is case-scoped decision support; it never
+// writes to Supabase and never decides an enforcement outcome.
 
 const ENDPOINT = '/.netlify/functions/officer-case-assistant'
+
+// The assistant's request modes. 'briefing' and 'handoff' use fixed
+// server-side instructions — the browser only selects the mode.
+export type AssistantMode = 'question' | 'briefing' | 'handoff'
 
 // Limited case context the client may supply. In the server-verified path this
 // is ignored (the server fetches authoritative context from Supabase); it is
@@ -45,24 +50,81 @@ export type BenchmarkNote = {
   note: string
 }
 
+// Assistant-drafted text the officer can insert into the field-outcome form.
+// Never saved automatically — the officer reviews and submits.
+export type AssistantFieldDrafts = {
+  observed_condition: string | null
+  action_taken: string | null
+  officer_notes: string | null
+}
+
+// The automatic Officer Field Briefing, generated when a case opens.
+export type AssistantBriefing = {
+  attending: string
+  verify: string[]
+  evidence: string[]
+  information_gaps: string[]
+  expected_next_step: string
+}
+
+// The structured Supervisor Handoff.
+export type AssistantHandoff = {
+  observed_condition_summary: string
+  evidence_captured: string
+  officer_action_recorded: string
+  outstanding_information: string[]
+  follow_up_requirement: string
+  supervisor_summary_draft: string
+}
+
+// A prior service request at the same address (operational fields only — the
+// server never selects resident names or contact details for this).
+export type LocationHistoryCase = {
+  case_id: string
+  request_type: string | null
+  status: string | null
+  created_at: string | null
+  field_visit_completed: boolean
+  field_outcome_recorded_at: string | null
+  field_enforcement_action: string | null
+  field_follow_up_required: boolean
+}
+
+export type LocationHistory = {
+  matched_location: string
+  repeat_complaint_count: number
+  open_case_count: number
+  previous_field_visit_count: number
+  cases: LocationHistoryCase[]
+}
+
 export type AssistantResult = {
   answer: string
   used_context: string[]
   officer_checklist: string[]
   missing_information: string[]
   benchmark_notes: BenchmarkNote[]
+  field_drafts: AssistantFieldDrafts | null
+  briefing: AssistantBriefing | null
+  handoff: AssistantHandoff | null
   limitations: string
 }
 
 export type AssistantResponse = {
-  /** Which generation provider answered: 'anthropic' (Claude) or 'cohere'. */
-  provider?: 'anthropic' | 'cohere'
+  /** Which generation provider answered: 'groq', 'anthropic', or 'cohere'. */
+  provider?: 'groq' | 'anthropic' | 'cohere'
   model: string
   prompt_version: string
+  mode: AssistantMode
   poc_only: boolean
   benchmarks_used: number
   /** The retrieved benchmark references that grounded the answer. */
   benchmarks: BenchmarkReference[]
+  /** Same-address history, computed deterministically server-side (non-PII). */
+  location_history: LocationHistory | null
+  /** Deterministic readiness verdict — TypeScript decides, the model explains. */
+  form_readiness: FormReadiness | null
+  expected_next_step: string | null
   result: AssistantResult
 }
 
@@ -74,12 +136,46 @@ export class AssistantNotConfiguredError extends Error {
   }
 }
 
+/** Thrown on a server-side 429 (the app's own throttle — cooldown or hourly
+ *  budget), carrying the distinct code and how long to wait. */
+export class AssistantRateLimitError extends Error {
+  code: 'ASSISTANT_COOLDOWN' | 'ASSISTANT_HOURLY_LIMIT'
+  retryAfterSeconds: number
+  constructor(
+    message: string,
+    code: 'ASSISTANT_COOLDOWN' | 'ASSISTANT_HOURLY_LIMIT',
+    retryAfterSeconds: number,
+  ) {
+    super(message)
+    this.name = 'AssistantRateLimitError'
+    this.code = code
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+/** Thrown when the upstream model provider failed (5xx / timeout / malformed
+ *  response). Distinct from the local rate limit — the UI shows a temporary
+ *  "service unavailable" message, never a usage-limit one. */
+export class AssistantServiceError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AssistantServiceError'
+  }
+}
+
+export type AskAssistantOptions = {
+  mode?: AssistantMode
+  question?: string
+  caseContext?: AssistantCaseContextInput
+  fieldDraft?: OfficerFieldDraft
+}
+
 export async function askOfficerCaseAssistant(
   caseId: string,
-  question: string,
-  caseContext?: AssistantCaseContextInput,
-  fieldDraft?: OfficerFieldDraft,
+  options: AskAssistantOptions,
 ): Promise<AssistantResponse> {
+  const { mode = 'question', question, caseContext, fieldDraft } = options
+
   // Attach the Supabase access token when available so the server can verify
   // identity. Best-effort: if there is no session the server falls back to its
   // POC path (or returns 401 when server-side auth is configured).
@@ -95,7 +191,13 @@ export async function askOfficerCaseAssistant(
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ caseId, question, caseContext: caseContext ?? {}, field_draft: fieldDraft ?? null }),
+    body: JSON.stringify({
+      caseId,
+      mode,
+      question: question ?? '',
+      caseContext: caseContext ?? {},
+      field_draft: fieldDraft ?? null,
+    }),
   })
 
   let payload: unknown = null
@@ -106,9 +208,25 @@ export async function askOfficerCaseAssistant(
   }
 
   if (!res.ok) {
-    const message =
-      (payload as { error?: string } | null)?.error ?? `Request failed (status ${res.status}).`
+    const errBody = (payload ?? {}) as { error?: string; code?: string; retryAfterSeconds?: number }
+    const message = errBody.error ?? `Request failed (status ${res.status}).`
     if (res.status === 503) throw new AssistantNotConfiguredError(message)
+    if (res.status === 429 && (errBody.code === 'ASSISTANT_COOLDOWN' || errBody.code === 'ASSISTANT_HOURLY_LIMIT')) {
+      // Prefer the body's retryAfterSeconds; fall back to the Retry-After header.
+      const headerRetry = Number(res.headers.get('retry-after'))
+      const retryAfterSeconds =
+        typeof errBody.retryAfterSeconds === 'number' && errBody.retryAfterSeconds > 0
+          ? errBody.retryAfterSeconds
+          : Number.isFinite(headerRetry) && headerRetry > 0
+            ? headerRetry
+            : 5
+      throw new AssistantRateLimitError(message, errBody.code, retryAfterSeconds)
+    }
+    // Upstream provider / gateway failures — a temporary service problem, never
+    // presented as a usage limit.
+    if (res.status >= 500 || errBody.code === 'ASSISTANT_PROVIDER_ERROR') {
+      throw new AssistantServiceError(message)
+    }
     throw new Error(message)
   }
 

@@ -604,9 +604,9 @@ function SourceWarning({ label, error }: { label: string; error: string }) {
  * lift to a white chip on hover — so each tab clearly reads as its own button.
  *
  * `alert` marks a tab holding work the user has not seen yet (the New tab with
- * fresh intakes): the segment glows with a looping red blink, the count badge
- * turns solid red, and a pinging dot sits on its corner. It keeps blinking until
- * the tab is opened — under reduced motion, the static red badge + dot remain.
+ * fresh intakes): the count badge turns solid red and a small pinging red dot
+ * sits on the tab's corner — the tab itself stays still. The dot keeps blinking
+ * until the tab is opened, then the "seen" state clears it.
  */
 function TabButton({
   label,
@@ -632,7 +632,7 @@ function TabButton({
         active
           ? 'bg-navy-900 text-white shadow-sm'
           : 'text-navy-700 hover:bg-white hover:text-navy-900 hover:shadow-sm'
-      } ${showAlert ? 'animate-queue-tab-alert' : ''}`}
+      }`}
     >
       {label}
       {count != null && (

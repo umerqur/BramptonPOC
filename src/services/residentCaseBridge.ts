@@ -70,6 +70,10 @@ const ENFORCEMENT_ACTIONS: EnforcementAction[] = [
   'warning_education',
   'notice_issued',
   'ticket_issued',
+  'city_service_referral',
+  'referred_other_department',
+  'public_safety_response',
+  'no_violation_found',
   'no_action',
   'other',
 ]
@@ -85,6 +89,16 @@ function normalizeEnforcementAction(value: string | null): EnforcementAction | n
 function normalizeServiceMethod(value: string | null): ServiceMethod | null {
   const v = (value ?? '').trim()
   return (SERVICE_METHODS as string[]).includes(v) ? (v as ServiceMethod) : null
+}
+
+/**
+ * True when the row carries a completed field visit with NO valid structured
+ * enforcement action — the invalid partial state the Workbench repair card
+ * fixes. The structured action must be explicitly selected by staff; it is never
+ * inferred from field_action_taken / field_officer_notes / observed condition.
+ */
+export function residentFieldOutcomeNeedsRepair(row: ResidentRequestRow): boolean {
+  return row.field_visit_completed === true && !normalizeEnforcementAction(row.field_enforcement_action)
 }
 
 /**

@@ -32,13 +32,13 @@ const workflowCards = [
 
 // 3. Where AI and advanced analytics are used — compact cards, one capability
 // each. Only genuine model-backed capabilities are described as AI: the case
-// scoped Field Support Assistant (Groq LPU inference), embeddings/reranking for
+// scoped Enforcement AI Assistant (Groq LPU inference), embeddings/reranking for
 // similar case retrieval, CTGAN synthetic demand, and the ABM queue simulation.
 // Rules based workflow support (intake, officer recommendation, closure) is
 // called out as decision support, not AI.
 const aiCards = [
   [
-    'Field Support Assistant',
+    'Enforcement AI Assistant',
     'Case scoped AI assistant for officers. Helps prepare site checks, evidence notes, field summaries, and supervisor handoff. Staff decide all actions. Uses LPU (Language Processing Unit) inference to reduce latency and runtime cost compared with GPU based serving for supported language model workloads.',
   ],
   [

@@ -18,8 +18,9 @@ import {
   WorkflowStepper,
 } from '../../components/workflow/WorkflowUI'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
+import StructuredFieldOutcomeRepairCard from '../../components/workflow/StructuredFieldOutcomeRepairCard'
 import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
-import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
+import { similarQueryFromDemoCase, type SimilarCaseQuery } from '../../services/structuredSimilarCases'
 import type { DemoCase, NycBenchmarkSource, Priority, ResidentComplaintInput } from '../../data/demoWorkflowTypes'
 
 // Case Workbench — assembles the gathered enforcement context and the case
@@ -40,8 +41,16 @@ function daysSince(iso: string | null): number {
 }
 
 export default function AppCaseWorkbenchPage() {
-  const { cases, activeCase, setActiveCase, requestMoreInfo, overridePriority, sendToStaffReview, role } =
-    useWorkflow()
+  const {
+    cases,
+    activeCase,
+    setActiveCase,
+    requestMoreInfo,
+    overridePriority,
+    sendToStaffReview,
+    ingestResidentCase,
+    role,
+  } = useWorkflow()
   const c = useDemoCase()
   const navigate = useNavigate()
   const [flash, setFlash] = useState<string | null>(null)
@@ -56,22 +65,11 @@ export default function AppCaseWorkbenchPage() {
   const fieldRef = useRef<HTMLDivElement>(null)
   const [logicOpen, setLogicOpen] = useState(true)
 
-  // Structured operational features for Similar Case Intelligence.
-  const similarFeatures = useMemo<CaseFeatures | null>(() => {
-    if (!c) return null
-    return featuresFromCase({
-      requestType: c.normalized.complaint_type ?? c.triage.category,
-      serviceCategory: c.triage.category,
-      district: c.normalized.ward_or_area ?? c.input.location ?? null,
-      priority: (c.priorityOverride ?? c.triage.recommendedPriority) as PriorityBand,
-      createdAt: c.normalized.submitted_at ?? c.createdAt,
-      status: c.normalized.status ?? c.stage,
-      fieldVisitCompleted: Boolean(c.fieldAction),
-      assignedOfficerName: c.assignedOfficer ?? null,
-      isClosed: c.stage === 'closed',
-      description: c.input.description,
-    })
-  }, [c])
+  // Rules-based Similar Case Intelligence query (structured fields only).
+  const similarQuery = useMemo<SimilarCaseQuery | null>(
+    () => (c ? similarQueryFromDemoCase(c) : null),
+    [c],
+  )
 
   function findSimilar() {
     requestAnimationFrame(() => similarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
@@ -243,6 +241,21 @@ export default function AppCaseWorkbenchPage() {
         <p className="mt-3 text-[11px] text-ink-subtle">{nextAction.staffNote}</p>
       </section>
 
+      {/* Repair path for the invalid partial state: a resident case whose field
+          visit was recorded but whose structured enforcement action is missing.
+          Staff complete the RECORDED action here — no repeated visit — and the
+          repaired Supabase row is re-ingested so the closure draft is rebuilt
+          from the actual action without a page reload. */}
+      {c.source.kind === 'resident' && !isClosed && c.fieldAction && fieldOutcomeNeedsStructuredAction(c.fieldAction) && (
+        <StructuredFieldOutcomeRepairCard
+          caseId={c.id}
+          onRepaired={(repaired) => {
+            ingestResidentCase(repaired)
+            note('Structured enforcement action completed. The closure draft now reflects the recorded action.')
+          }}
+        />
+      )}
+
       {isBenchmark && (
         <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs leading-relaxed text-teal-900">
           This is an <span className="font-semibold">NYC open benchmark</span> case worked through the same operational
@@ -407,7 +420,7 @@ export default function AppCaseWorkbenchPage() {
             </Sub>
           </CollapsibleCard>
 
-          <SimilarCaseIntelligencePanel features={similarFeatures} sectionRef={similarRef} />
+          <SimilarCaseIntelligencePanel query={similarQuery} sectionRef={similarRef} />
         </div>
 
         {/* Right: confidence gate + staff actions */}

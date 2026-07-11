@@ -46,12 +46,16 @@
 // writes, and answers from the limited case context the client supplies.
 
 import { allowedRolesForEmail } from '../../src/lib/roles'
+import {
+  assessFieldOutcomeReadiness,
+  type FormReadiness,
+} from '../../src/lib/fieldOutcomeReadiness'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const PROMPT_VERSION = 'officer-case-assistant-v1'
+const PROMPT_VERSION = 'officer-case-assistant-v2'
 // Cohere v2 Chat API — required for the current Command models (e.g.
 // command-a-plus-05-2026). It takes a `messages` array (system + user) and
 // returns the answer under message.content[].text.
@@ -66,7 +70,7 @@ const ANTHROPIC_VERSION = '2023-06-01'
 // grounded answer, and a server-side timeout so a slow upstream never hangs the
 // request. Sonnet/Haiku-class models accept `temperature`; do not point
 // ANTHROPIC_OFFICER_ASSISTANT_MODEL at an Opus 4.7+/Fable model, which rejects it.
-const ANTHROPIC_MAX_TOKENS = 900
+const ANTHROPIC_MAX_TOKENS = 1200
 const ANTHROPIC_TEMPERATURE = 0.2
 const ANTHROPIC_TIMEOUT_MS = 12_000
 
@@ -77,10 +81,15 @@ const ANTHROPIC_TIMEOUT_MS = 12_000
 // to pick the open-source model; otherwise a sensible default is used.
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
 // Open-source GPT-OSS 20B on Groq — small and fast, available on this account.
-// Override with GROQ_OFFICER_ASSISTANT_MODEL to use another available model
-// (e.g. openai/gpt-oss-120b, llama-3.3-70b-versatile).
+// This default is intentionally the safe fallback; stronger models are tested
+// through CONFIGURATION ONLY (never hardcoded here) by setting
+// GROQ_OFFICER_ASSISTANT_MODEL in the Netlify environment, e.g.:
+//   GROQ_OFFICER_ASSISTANT_MODEL=openai/gpt-oss-120b
+//   GROQ_OFFICER_ASSISTANT_MODEL=llama-3.3-70b-versatile
+//   GROQ_OFFICER_ASSISTANT_MODEL=openai/gpt-oss-20b   (the default)
+// See docs/officer-case-assistant.md for the test procedure and rollback.
 const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b'
-const GROQ_MAX_TOKENS = 900
+const GROQ_MAX_TOKENS = 1200
 const GROQ_TEMPERATURE = 0.2
 const GROQ_TIMEOUT_MS = 12_000
 
@@ -96,35 +105,84 @@ function promptCacheEnabled(): boolean {
 // App-level abuse controls (server-side, not browser-only)
 // ---------------------------------------------------------------------------
 
-// Simple per-user throttle: an ~8–10s cooldown between calls and a rolling
+// Simple per-user throttle: a short cooldown between calls and a rolling
 // hourly cap. Best-effort in-memory store — serverless containers recycle, so
 // this holds within a warm instance; combined with the hourly cap and the
 // 600-char question limit it is a reasonable demo abuse guard. It runs
 // server-side, so the browser cannot bypass it.
-const ASSISTANT_COOLDOWN_MS = 9_000
-const ASSISTANT_HOURLY_LIMIT = 10
+//
+// The limits are environment-configurable because the field workflow now makes
+// several legitimate calls per case (an automatic briefing on open, a couple of
+// follow-up questions, a supervisor handoff): the old hardcoded 9s / 10-per-hour
+// budget was too tight for that. Defaults stay conservative and safe.
+//   OFFICER_ASSISTANT_COOLDOWN_SECONDS   — seconds between calls (default 3)
+//   OFFICER_ASSISTANT_HOURLY_LIMIT       — calls per rolling hour   (default 30)
+//   OFFICER_ASSISTANT_DISABLE_RATE_LIMIT — 'true' disables the throttle entirely
+//                                          (live-demo mode; set it in the Netlify
+//                                          environment, never through VITE_*)
+const DEFAULT_COOLDOWN_SECONDS = 3
+const DEFAULT_HOURLY_LIMIT = 30
 const ASSISTANT_WINDOW_MS = 60 * 60 * 1000
-const RATE_LIMIT_MESSAGE = 'Assistant usage limit reached for this demo. Please try again later.'
+
+// Distinct caller-facing messages: a short cooldown is a "slow down for a
+// moment", the hourly cap is a real budget — the UI treats them differently.
+const COOLDOWN_MESSAGE = 'Please wait a moment before sending another request.'
+const HOURLY_LIMIT_MESSAGE = 'Assistant request limit reached.'
+
+/** Live-demo escape hatch: disables the per-user throttle when the Netlify
+ *  environment sets OFFICER_ASSISTANT_DISABLE_RATE_LIMIT=true. Server-side
+ *  only — never exposed through a VITE_* variable. */
+export function assistantRateLimitDisabled(): boolean {
+  return process.env.OFFICER_ASSISTANT_DISABLE_RATE_LIMIT === 'true'
+}
+
+/** Positive-integer env override with a safe default (bad values are ignored). */
+function envLimit(name: string, fallback: number, max: number): number {
+  const raw = Number(process.env[name])
+  return Number.isFinite(raw) && raw > 0 && raw <= max ? Math.floor(raw) : fallback
+}
+
+function assistantCooldownMs(): number {
+  return envLimit('OFFICER_ASSISTANT_COOLDOWN_SECONDS', DEFAULT_COOLDOWN_SECONDS, 300) * 1000
+}
+
+function assistantHourlyLimit(): number {
+  return envLimit('OFFICER_ASSISTANT_HOURLY_LIMIT', DEFAULT_HOURLY_LIMIT, 1000)
+}
 
 const assistantCalls = new Map<string, number[]>()
 
-/** Records and checks the per-user call budget. Returns false (and records
- *  nothing) when the caller is in cooldown or over the hourly limit. */
-function checkAssistantRate(key: string): boolean {
-  const now = Date.now()
+/** Typed throttle verdict, so cooldown and hourly exhaustion produce distinct
+ *  responses (never one generic "usage limit reached" message). */
+export type RateLimitResult =
+  | { allowed: true }
+  | { allowed: false; reason: 'cooldown'; retryAfterSeconds: number }
+  | { allowed: false; reason: 'hourly_limit'; retryAfterSeconds: number }
+
+/** Records and checks the per-user call budget. On a block, nothing is
+ *  recorded and the result says WHY and how long to wait. `now` is injectable
+ *  for deterministic tests only. */
+export function checkAssistantRate(key: string, now: number = Date.now()): RateLimitResult {
+  if (assistantRateLimitDisabled()) {
+    return { allowed: true }
+  }
   const recent = (assistantCalls.get(key) ?? []).filter((t) => now - t < ASSISTANT_WINDOW_MS)
   const last = recent[recent.length - 1]
-  if (last != null && now - last < ASSISTANT_COOLDOWN_MS) {
+  if (last != null && now - last < assistantCooldownMs()) {
     assistantCalls.set(key, recent)
-    return false
+    const retryAfterSeconds = Math.max(1, Math.ceil((assistantCooldownMs() - (now - last)) / 1000))
+    return { allowed: false, reason: 'cooldown', retryAfterSeconds }
   }
-  if (recent.length >= ASSISTANT_HOURLY_LIMIT) {
+  if (recent.length >= assistantHourlyLimit()) {
     assistantCalls.set(key, recent)
-    return false
+    // The budget frees up when the oldest call in the rolling window ages out.
+    const oldest = recent[0]
+    const retryAfterSeconds = Math.max(1, Math.ceil((ASSISTANT_WINDOW_MS - (now - oldest)) / 1000))
+    return { allowed: false, reason: 'hourly_limit', retryAfterSeconds }
   }
   recent.push(now)
   assistantCalls.set(key, recent)
-  return true
+  return { allowed: true }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,23 +280,47 @@ const PREAMBLE = [
   '- Refer to the fields only by their human-readable labels. Never expose raw internal field names or codes.',
   '- If there is NO field outcome draft text yet and the user asks to clean up notes or draft text, do NOT return a long checklist. Set answer to exactly: "No field notes have been entered yet. Add observed condition or action taken details, then I can help clean them up." and return empty officer_checklist and missing_information.',
   '',
+  'Form readiness rules:',
+  '- The FORM READINESS section, when present, is computed deterministically by the application. It is the authoritative readiness verdict.',
+  '- You may explain the missing items in plain language, but never contradict the FORM READINESS section and never declare the form ready or not ready yourself.',
+  '',
+  'Address history rules (the ADDRESS HISTORY section):',
+  '- These are prior service requests recorded at the same location, retrieved from the case database. Use them only as provided.',
+  '- Never invent prior cases, visits, or outcomes. If no address history is provided, say the case file shows no prior requests at this location.',
+  '- Never speculate about the people involved; address history is about the LOCATION only.',
+  '',
+  'Insertable draft rules (the field_drafts output):',
+  '- Only populate field_drafts when the request asks you to draft or clean up field text (observed condition, action taken, or officer notes).',
+  '- Draft text must be grounded ONLY in the case file, the officer draft, and the address history. Neutral, factual, internal tone. No enforcement recommendations inside draft text.',
+  '- The officer reviews and edits every draft before saving; drafts are suggestions, not records.',
+  '',
   'Return ONLY a single JSON object (no markdown, no code fences, no commentary) with exactly these fields:',
   '- answer: string — a concise, plain-language answer grounded only in the provided context.',
-  '- used_context: string[] — short labels for the context you actually relied on (e.g. "case details", "workflow timeline", "benchmark references").',
+  '- used_context: string[] — short labels for the context you actually relied on (e.g. "case details", "workflow timeline", "benchmark references", "address history").',
   '- officer_checklist: string[] — concrete things to verify or do on site / before closure review, or [] if not applicable.',
   '- missing_information: string[] — important information not present in the case file, or [] if nothing is clearly missing.',
-  '- benchmark_notes: array of objects, each {"case_id": string, "note": string} — a neutral observation directly supported by ONE retrieved benchmark reference, where case_id exactly matches a provided benchmark case_id. Return [] when no benchmark references are provided.',
+  '- benchmark_notes: array of objects, each {"case_id": string, "note": string} — a neutral observation directly supported by ONE retrieved benchmark reference, where case_id exactly matches a provided benchmark case_id. In a briefing, each note should say WHY that case is similar to this one. Return [] when no benchmark references are provided.',
+  '- field_drafts: object or null — ONLY when asked to draft/clean up field text: {"observed_condition"?: string, "action_taken"?: string, "officer_notes"?: string} with the drafted text. Otherwise null.',
+  '- briefing: object or null — ONLY for a field briefing request: {"attending": string (1-2 sentences: what the officer is attending and where), "verify": string[] (what to verify on site), "evidence": string[] (evidence to capture), "information_gaps": string[] (known gaps in the case file), "expected_next_step": string (the expected next workflow step, consistent with the EXPECTED NEXT WORKFLOW STEP line)}. Otherwise null.',
+  '- handoff: object or null — ONLY for a supervisor handoff request: {"observed_condition_summary": string, "evidence_captured": string, "officer_action_recorded": string, "outstanding_information": string[], "follow_up_requirement": string, "supervisor_summary_draft": string (a neutral 3-5 sentence internal summary for the supervisor; it must NOT approve closure and must NOT recommend a ticket, fine, warning, or closure)}. Otherwise null.',
   `- limitations: string — must include: "${REQUIRED_LIMITATION}"`,
 ].join('\n')
+
+// The internal instruction sent as the "question" for the two structured modes.
+// These are fixed server-side strings — the browser only selects a mode.
+const BRIEFING_INSTRUCTION =
+  'Produce the Officer Field Briefing for this case before the site visit. Fill the briefing object: what the officer is attending, what to verify on site, evidence to capture, known information gaps, and the expected next workflow step. Use benchmark_notes to explain why each retrieved similar case is relevant. Keep answer to a 1-2 sentence overview.'
+const HANDOFF_INSTRUCTION =
+  'Produce the structured Supervisor Handoff for this case from the recorded case file and the current field outcome draft. Fill the handoff object: observed condition summary, evidence captured, officer action recorded, outstanding information, follow-up requirement, and a neutral internal supervisor summary draft. Do not approve closure and do not recommend any enforcement action. Keep answer to a 1-2 sentence overview.'
 
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...extraHeaders },
   })
 }
 
@@ -325,6 +407,10 @@ const ENFORCEMENT_ACTION_LABELS: Record<string, string> = {
   warning_education: 'Education / warning provided',
   notice_issued: 'Notice issued',
   ticket_issued: 'Ticket / penalty notice issued',
+  city_service_referral: 'City service / repair referral',
+  referred_other_department: 'Referred to another department',
+  public_safety_response: 'Public safety response',
+  no_violation_found: 'No violation found',
   no_action: 'No action taken',
   other: 'Other',
 }
@@ -360,13 +446,165 @@ type BenchmarkNote = {
   note: string
 }
 
+// The assistant's request modes. 'question' is the existing free-text path;
+// 'briefing' and 'handoff' use fixed server-side instructions (the browser
+// only selects the mode, it cannot inject its own instruction for them).
+type AssistantMode = 'question' | 'briefing' | 'handoff'
+
+// Insertable draft text for the officer form. Never saved automatically — the
+// UI offers "Insert into …" buttons and the officer reviews before submitting.
+type FieldDrafts = {
+  observed_condition: string | null
+  action_taken: string | null
+  officer_notes: string | null
+}
+
+// The automatic Officer Field Briefing, produced when a case opens.
+type Briefing = {
+  attending: string
+  verify: string[]
+  evidence: string[]
+  information_gaps: string[]
+  expected_next_step: string
+}
+
+// The structured Supervisor Handoff.
+type Handoff = {
+  observed_condition_summary: string
+  evidence_captured: string
+  officer_action_recorded: string
+  outstanding_information: string[]
+  follow_up_requirement: string
+  supervisor_summary_draft: string
+}
+
 type AssistantResult = {
   answer: string
   used_context: string[]
   officer_checklist: string[]
   missing_information: string[]
   benchmark_notes: BenchmarkNote[]
+  field_drafts: FieldDrafts | null
+  briefing: Briefing | null
+  handoff: Handoff | null
   limitations: string
+}
+
+// ---------------------------------------------------------------------------
+// Repeat location intelligence (same-address history)
+// ---------------------------------------------------------------------------
+
+// A prior service request recorded at the same location. ONLY non-PII,
+// operational columns are selected — no resident names, contact details, unit
+// numbers, or postal codes ever leave the database through this path.
+type LocationHistoryCase = {
+  case_id: string
+  request_type: string | null
+  status: string | null
+  created_at: string | null
+  field_visit_completed: boolean
+  field_outcome_recorded_at: string | null
+  /** Human-readable enforcement action label (never the raw code). */
+  field_enforcement_action: string | null
+  field_follow_up_required: boolean
+}
+
+type LocationHistory = {
+  /** The normalized location the history was matched on (street address text). */
+  matched_location: string
+  /** Prior requests at this address, excluding the current case. */
+  repeat_complaint_count: number
+  open_case_count: number
+  previous_field_visit_count: number
+  cases: LocationHistoryCase[]
+}
+
+const LOCATION_HISTORY_LIMIT = 10
+
+// Only these operational columns are read for address history — resident
+// name / phone / email / unit / postal code are intentionally NOT selected.
+const LOCATION_HISTORY_SELECT = [
+  'case_id',
+  'request_type',
+  'status',
+  'created_at',
+  'field_visit_completed',
+  'field_outcome_recorded_at',
+  'field_enforcement_action',
+  'field_follow_up_required',
+].join(',')
+
+/** Collapse whitespace + lowercase so the same street address matches across
+ *  formatting differences. Matching is on the address text only. */
+function normalizeLocationKey(value: string | null): string {
+  return asString(value).toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/** Escape PostgREST filter-value characters for an ilike match (no wildcards
+ *  added — this is a case-insensitive equality on the normalized address). */
+function escapePostgrestValue(value: string): string {
+  return value.replace(/([\\%_,()."])/g, '\\$1')
+}
+
+/**
+ * Fetch prior service requests recorded at the same address (best-effort;
+ * never blocks the answer). Runs with the service role but selects ONLY
+ * non-PII operational columns, and the raw rows are re-checked against the
+ * normalized address key before being counted.
+ */
+async function fetchLocationHistory(
+  supabaseUrl: string,
+  serviceKey: string,
+  caseId: string,
+  location: string | null,
+): Promise<LocationHistory | null> {
+  const key = normalizeLocationKey(location)
+  if (!key) return null
+
+  const base = supabaseUrl.replace(/\/$/, '')
+  const headers = { apikey: serviceKey, authorization: `Bearer ${serviceKey}` }
+  try {
+    const res = await fetch(
+      `${base}/rest/v1/resident_service_requests?select=${encodeURIComponent(LOCATION_HISTORY_SELECT + ',location')}` +
+        `&location=ilike.${encodeURIComponent(escapePostgrestValue(asString(location).trim()))}` +
+        `&case_id=neq.${encodeURIComponent(caseId)}` +
+        `&order=created_at.desc&limit=${LOCATION_HISTORY_LIMIT * 3}`,
+      { headers },
+    )
+    if (!res.ok) return null
+    const rows = (await res.json()) as Record<string, unknown>[]
+
+    const cases: LocationHistoryCase[] = rows
+      // Belt and braces: re-verify the normalized address key on each row.
+      .filter((r) => normalizeLocationKey(strOrNull(r.location)) === key)
+      .slice(0, LOCATION_HISTORY_LIMIT)
+      .map((r) => {
+        const action = strOrNull(r.field_enforcement_action)
+        return {
+          case_id: asString(r.case_id),
+          request_type: strOrNull(r.request_type),
+          status: strOrNull(r.status),
+          created_at: strOrNull(r.created_at),
+          field_visit_completed: r.field_visit_completed === true,
+          field_outcome_recorded_at: strOrNull(r.field_outcome_recorded_at),
+          field_enforcement_action: action ? ENFORCEMENT_ACTION_LABELS[action] ?? action : null,
+          field_follow_up_required: r.field_follow_up_required === true,
+        }
+      })
+      .filter((c) => c.case_id)
+
+    if (cases.length === 0) return null
+    return {
+      matched_location: asString(location).trim(),
+      repeat_complaint_count: cases.length,
+      open_case_count: cases.filter((c) => c.status !== 'closed').length,
+      previous_field_visit_count: cases.filter((c) => c.field_visit_completed).length,
+      cases,
+    }
+  } catch (err) {
+    console.error('officer-case-assistant: location history skipped:', errorText(err))
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +618,8 @@ type ServerCase = {
   assignedOfficerEmail: string
   /** Text used to drive benchmark retrieval. */
   retrievalText: string
+  /** The raw street-address text (location column only), for address history. */
+  rawLocation: string | null
 }
 
 /** Resolve the authenticated user's email from a Supabase access token. */
@@ -497,6 +737,7 @@ async function fetchServerCase(
     timeline,
     assignedOfficerEmail: normalizeEmail(context.assigned_officer_email),
     retrievalText,
+    rawLocation: strOrNull(row.location),
   }
 }
 
@@ -576,14 +817,32 @@ function fieldDraftHasText(d: FieldDraft | null): boolean {
   return !!(d && (d.observed_condition || d.action_taken || d.officer_notes))
 }
 
+/**
+ * The expected next workflow step, derived DETERMINISTICALLY from the case
+ * state (never by the model). Injected into the prompt so briefings describe
+ * the real workflow, and returned to the UI as ground truth.
+ */
+function expectedNextWorkflowStep(c: CaseContext): string {
+  if (c.closure_status === 'closed') return 'This case is closed. The record is read only.'
+  if (c.closure_status === 'ready_for_closure_review') {
+    return 'A supervisor reviews the recorded field outcome and approves the closure response.'
+  }
+  if (c.field_visit_completed) {
+    return 'The field outcome is recorded; the case moves to supervisor closure review.'
+  }
+  return 'Complete the site visit and record the field outcome (observed condition, enforcement action, action taken). A supervisor then reviews it for closure.'
+}
+
 function buildMessage(args: {
   context: CaseContext
   timeline: TimelineEvent[]
   benchmarks: BenchmarkRef[]
   fieldDraft: FieldDraft | null
+  locationHistory: LocationHistory | null
+  readiness: FormReadiness | null
   question: string
 }): string {
-  const { context: c, timeline, benchmarks, fieldDraft, question } = args
+  const { context: c, timeline, benchmarks, fieldDraft, locationHistory, readiness, question } = args
   const field = (label: string, value: string | number | boolean | null) =>
     `${label}: ${value === null || value === '' ? '(not available in case file)' : String(value)}`
 
@@ -622,6 +881,33 @@ function buildMessage(args: {
     ? timeline.map((e) => `- [${e.created_at ?? '—'}] ${e.event_label ?? 'event'} (${e.actor_type ?? 'staff'})${e.notes ? ` — ${e.notes}` : ''}`)
     : ['- (no workflow events available)']
 
+  // Same-address history (non-PII, operational fields only). The counts are
+  // computed deterministically; the model may only restate what is listed.
+  const historyLines = locationHistory
+    ? [
+        `Prior service requests recorded at "${locationHistory.matched_location}" (excluding this case):`,
+        `- repeat_complaint_count: ${locationHistory.repeat_complaint_count}`,
+        `- related_open_cases: ${locationHistory.open_case_count}`,
+        `- previous_field_visits: ${locationHistory.previous_field_visit_count}`,
+        ...locationHistory.cases.map(
+          (h) =>
+            `- case ${h.case_id}: type ${h.request_type ?? '(n/a)'} | status ${h.status ?? '(n/a)'} | opened ${h.created_at ?? '(n/a)'}` +
+            `${h.field_visit_completed ? ` | field visit completed${h.field_outcome_recorded_at ? ` ${h.field_outcome_recorded_at}` : ''}` : ' | no field visit recorded'}` +
+            `${h.field_enforcement_action ? ` | outcome: ${h.field_enforcement_action}` : ''}` +
+            `${h.field_follow_up_required ? ' | follow-up was required' : ''}`,
+        ),
+      ]
+    : ['(no prior service requests found at this location in the case database)']
+
+  // Deterministic readiness ground truth (computed by assessFieldOutcomeReadiness,
+  // never by the model). Present only when the officer has a live draft.
+  const readinessLines = readiness
+    ? [
+        `Verdict (deterministic, authoritative): ${readiness.ready ? 'READY — no required fields are missing.' : 'NOT READY — required fields are missing.'}`,
+        ...readiness.items.map((i) => `- ${i.label}: ${i.status.toUpperCase()} — ${i.detail}`),
+      ]
+    : ['(no live field outcome draft — readiness not evaluated)']
+
   const benchmarkLines = benchmarks.length
     ? benchmarks.map((b, i) =>
         `${i + 1}. case_id: ${b.case_id} | type: ${b.complaint_type ?? '(n/a)'}` +
@@ -653,18 +939,25 @@ function buildMessage(args: {
     field('field_officer_notes', c.field_officer_notes),
     field('field_follow_up_required', c.field_follow_up_required),
     field('closure_status', c.closure_status),
+    `EXPECTED NEXT WORKFLOW STEP (deterministic): ${expectedNextWorkflowStep(c)}`,
     '',
     'RECENT WORKFLOW TIMELINE (most recent first)',
     ...timelineLines,
     '',
+    'ADDRESS HISTORY (prior requests at the same location — operational data only, no resident details)',
+    ...historyLines,
+    '',
     "CURRENT FIELD OUTCOME DRAFT (the officer's live, unsaved field-outcome form — use this to clean up notes, draft action-taken text, or check closure-review readiness)",
     ...draftLines,
+    '',
+    'FORM READINESS (computed deterministically by the application — authoritative; explain it, never contradict it)',
+    ...readinessLines,
     '',
     'BENCHMARK REFERENCES (similar closed cases, for reference only — not this case)',
     'Cite a benchmark only by the exact case_id shown below. Do not reference any case not listed here.',
     ...benchmarkLines,
     '',
-    'STAFF QUESTION',
+    'STAFF REQUEST',
     question,
   ].join('\n')
 }
@@ -688,8 +981,65 @@ function validateBenchmarkNotes(value: unknown, allowedCaseIds: Set<string>): Be
   return out
 }
 
+// Bounded string field from model output (drafts and summaries are inserted
+// into UI text areas, so cap their size defensively).
+const MAX_DRAFT_LEN = 2000
+
+function boundedStr(value: unknown, max = MAX_DRAFT_LEN): string | null {
+  const s = asString(value).trim()
+  return s ? s.slice(0, max) : null
+}
+
+/** Parse the optional field_drafts object (insertable form text). */
+function parseFieldDrafts(value: unknown): FieldDrafts | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const o = value as Record<string, unknown>
+  const drafts: FieldDrafts = {
+    observed_condition: boundedStr(o.observed_condition),
+    action_taken: boundedStr(o.action_taken),
+    officer_notes: boundedStr(o.officer_notes),
+  }
+  return drafts.observed_condition || drafts.action_taken || drafts.officer_notes ? drafts : null
+}
+
+/** Parse the optional briefing object. expectedNextStep (deterministic) is the
+ *  fallback when the model leaves the field empty. */
+function parseBriefing(value: unknown, expectedNextStep: string): Briefing | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const o = value as Record<string, unknown>
+  const attending = boundedStr(o.attending)
+  if (!attending) return null
+  return {
+    attending,
+    verify: strArray(o.verify, 8),
+    evidence: strArray(o.evidence, 8),
+    information_gaps: strArray(o.information_gaps, 8),
+    expected_next_step: boundedStr(o.expected_next_step) ?? expectedNextStep,
+  }
+}
+
+/** Parse the optional supervisor handoff object. */
+function parseHandoff(value: unknown): Handoff | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const o = value as Record<string, unknown>
+  const summary = boundedStr(o.supervisor_summary_draft)
+  if (!summary) return null
+  return {
+    observed_condition_summary: boundedStr(o.observed_condition_summary) ?? '(not provided)',
+    evidence_captured: boundedStr(o.evidence_captured) ?? '(not provided)',
+    officer_action_recorded: boundedStr(o.officer_action_recorded) ?? '(not provided)',
+    outstanding_information: strArray(o.outstanding_information, 8),
+    follow_up_requirement: boundedStr(o.follow_up_requirement) ?? '(not provided)',
+    supervisor_summary_draft: summary,
+  }
+}
+
 // Pull the JSON object out of the model text, tolerating a stray code fence.
-function parseResult(text: string, allowedCaseIds: Set<string>): AssistantResult {
+function parseResult(
+  text: string,
+  allowedCaseIds: Set<string>,
+  expectedNextStep: string,
+): AssistantResult {
   let candidate = text.trim()
   const fence = candidate.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
   if (fence) candidate = fence[1].trim()
@@ -712,6 +1062,9 @@ function parseResult(text: string, allowedCaseIds: Set<string>): AssistantResult
     officer_checklist: strArray(parsed.officer_checklist),
     missing_information: strArray(parsed.missing_information),
     benchmark_notes: validateBenchmarkNotes(parsed.benchmark_notes, allowedCaseIds),
+    field_drafts: parseFieldDrafts(parsed.field_drafts),
+    briefing: parseBriefing(parsed.briefing, expectedNextStep),
+    handoff: parseHandoff(parsed.handoff),
     limitations,
   }
 }
@@ -773,7 +1126,7 @@ async function callCohere(model: string, apiKey: string, userMessage: string): P
       // Force a JSON object response so the structured contract is reliable.
       response_format: { type: 'json_object' },
       temperature: 0.2,
-      max_tokens: 900,
+      max_tokens: 1200,
     }),
   })
   if (!res.ok) throw new Error(`Cohere returned status ${res.status}`)
@@ -856,7 +1209,18 @@ export default async function handler(req: Request): Promise<Response> {
 
   const input = (body ?? {}) as Record<string, unknown>
   const caseId = asString(input.caseId || input.case_id).trim()
-  const question = asString(input.question).trim().slice(0, MAX_QUESTION_LEN)
+  // Mode: 'question' (free text), 'briefing' (automatic field briefing on case
+  // open), or 'handoff' (structured supervisor handoff). For the two structured
+  // modes the instruction is a FIXED server-side string — the browser cannot
+  // inject its own instruction for them.
+  const rawMode = asString(input.mode).trim().toLowerCase()
+  const mode: AssistantMode = rawMode === 'briefing' || rawMode === 'handoff' ? rawMode : 'question'
+  const question =
+    mode === 'briefing'
+      ? BRIEFING_INSTRUCTION
+      : mode === 'handoff'
+        ? HANDOFF_INSTRUCTION
+        : asString(input.question).trim().slice(0, MAX_QUESTION_LEN)
   // The officer's live, unsaved field outcome draft (best-effort, client-supplied
   // — it is not yet persisted). Used only as model context, never written.
   const fieldDraft = parseFieldDraft(input.field_draft)
@@ -870,6 +1234,7 @@ export default async function handler(req: Request): Promise<Response> {
   let context: CaseContext
   let timeline: TimelineEvent[] = []
   let retrievalText = ''
+  let rawLocation: string | null = null
   let pocOnly = false
   // Subject for the per-user throttle: the server-verified email when we have
   // one, otherwise the client IP (POC path). Never the client-passed identity.
@@ -919,6 +1284,7 @@ export default async function handler(req: Request): Promise<Response> {
     context = serverCase.context
     timeline = serverCase.timeline
     retrievalText = serverCase.retrievalText
+    rawLocation = serverCase.rawLocation
     rateSubject = authedEmail
   } else {
     // ---- POC fallback path ----------------------------------------------
@@ -951,21 +1317,74 @@ export default async function handler(req: Request): Promise<Response> {
 
   // Per-user throttle (server-side). Keyed by verified email, else client IP.
   // Enforced before any benchmark retrieval or model call so over-limit callers
-  // do no work. A browser cannot bypass this.
+  // do no work. A browser cannot bypass this. Cooldown and hourly exhaustion
+  // return DISTINCT codes/messages, both as HTTP 429 with a Retry-After header.
   const clientIp = (req.headers.get('x-nf-client-connection-ip') || req.headers.get('x-forwarded-for') || '')
     .split(',')[0]
     .trim()
   const rateKey = (rateSubject || clientIp || 'anon').toLowerCase()
-  if (!checkAssistantRate(rateKey)) {
-    return json({ error: RATE_LIMIT_MESSAGE }, 429)
+  const rate = checkAssistantRate(rateKey)
+  if (!rate.allowed) {
+    const cooldown = rate.reason === 'cooldown'
+    return json(
+      {
+        error: cooldown ? COOLDOWN_MESSAGE : HOURLY_LIMIT_MESSAGE,
+        code: cooldown ? 'ASSISTANT_COOLDOWN' : 'ASSISTANT_HOURLY_LIMIT',
+        retryAfterSeconds: rate.retryAfterSeconds,
+      },
+      429,
+      { 'retry-after': String(rate.retryAfterSeconds) },
+    )
   }
 
-  // Optional benchmark references (best-effort; degrades to none).
-  const benchmarks = await fetchBenchmarks(caseId, retrievalText)
+  // Optional benchmark references + same-address history (both best-effort;
+  // each degrades to none independently). Fetched concurrently.
+  const [benchmarks, locationHistory] = await Promise.all([
+    fetchBenchmarks(caseId, retrievalText),
+    supabaseUrl && serviceKey
+      ? fetchLocationHistory(supabaseUrl, serviceKey, caseId, rawLocation)
+      : Promise.resolve(null),
+  ])
+
+  // Deterministic form readiness: from the live draft when one exists, else
+  // from the SAVED field outcome on the case (useful for the handoff after the
+  // outcome is recorded). TypeScript decides readiness — never the model.
+  const readinessSource = fieldDraft ?? {
+    observed_condition: context.field_observed_condition,
+    violation_observed: context.field_violation_observed,
+    enforcement_action: context.field_enforcement_action,
+    reference_number: null,
+    service_method: null,
+    action_taken: context.field_action_taken,
+    officer_notes: context.field_officer_notes,
+    follow_up_required: context.field_follow_up_required,
+  }
+  const readiness = assessFieldOutcomeReadiness({
+    observedCondition: readinessSource.observed_condition,
+    violationObserved: readinessSource.violation_observed,
+    enforcementAction: readinessSource.enforcement_action,
+    referenceNumber: readinessSource.reference_number,
+    actionTaken: readinessSource.action_taken,
+    followUpRequired: readinessSource.follow_up_required ?? false,
+  })
+  const nextStep = expectedNextWorkflowStep(context)
 
   // Generate the answer with the selected provider. The prompt (guardrails +
-  // case context + benchmarks + question) is identical across providers.
-  const userMessage = buildMessage({ context, timeline, benchmarks, fieldDraft, question })
+  // case context + history + readiness + benchmarks + request) is identical
+  // across providers.
+  const userMessage = buildMessage({
+    context,
+    timeline,
+    benchmarks,
+    fieldDraft,
+    locationHistory,
+    readiness,
+    question,
+  })
+  // Case-safe id for correlating provider-failure log lines. Random — carries
+  // no case, resident, or prompt information.
+  const requestId = Math.random().toString(36).slice(2, 10)
+
   let text: string
   try {
     text =
@@ -975,22 +1394,49 @@ export default async function handler(req: Request): Promise<Response> {
           ? await callAnthropic(provider.model, provider.apiKey, userMessage)
           : await callCohere(provider.model, provider.apiKey, userMessage)
   } catch (err) {
-    // Log status/message only — never the key or the full prompt.
-    console.error(`officer-case-assistant: ${provider.kind} request failed:`, errorText(err))
-    return json({ error: 'Assistant service error. Please try again.' }, 502)
+    // An upstream failure (429, 5xx, timeout, network) is a PROVIDER error —
+    // never converted into the local rate-limit response. Log only the provider
+    // kind, the status/abort text, and the case-safe request id — never keys,
+    // prompts, resident details, or full provider response bodies.
+    console.error(
+      `officer-case-assistant: provider request failed (provider=${provider.kind}, request=${requestId}): ${errorText(err)}`,
+    )
+    return json({ error: 'Assistant service error. Please try again.', code: 'ASSISTANT_PROVIDER_ERROR' }, 502)
   }
 
   const allowedCaseIds = new Set(benchmarks.map((b) => b.case_id))
   let result: AssistantResult
   try {
-    result = parseResult(text, allowedCaseIds)
-  } catch (err) {
-    console.error('officer-case-assistant: failed to parse assistant JSON:', errorText(err))
-    return json({ error: 'Assistant service did not return a structured answer.' }, 502)
+    result = parseResult(text, allowedCaseIds, nextStep)
+  } catch {
+    // Malformed provider response. The parse error text can quote the response
+    // body, so it is intentionally NOT logged — provider kind + request id only.
+    console.error(
+      `officer-case-assistant: failed to parse assistant JSON (provider=${provider.kind}, request=${requestId})`,
+    )
+    return json(
+      { error: 'Assistant service did not return a structured answer.', code: 'ASSISTANT_PROVIDER_ERROR' },
+      502,
+    )
   }
   if (!result.answer) {
-    return json({ error: 'Assistant service returned an empty answer.' }, 502)
+    return json({ error: 'Assistant service returned an empty answer.', code: 'ASSISTANT_PROVIDER_ERROR' }, 502)
   }
+  // A briefing must always carry a briefing object; synthesize a minimal one
+  // from deterministic context if the model omitted it, so the UI never shows
+  // an empty briefing panel.
+  if (mode === 'briefing' && !result.briefing) {
+    result.briefing = {
+      attending: [context.issue_type, context.location].filter(Boolean).join(' — ') || 'This case.',
+      verify: result.officer_checklist,
+      evidence: [],
+      information_gaps: result.missing_information,
+      expected_next_step: nextStep,
+    }
+  }
+  // Structured modes never return insertable drafts; only an explicit drafting
+  // request may populate the form.
+  if (mode !== 'question') result.field_drafts = null
 
   // Audit: intentionally NOT persisted, and PII-free. The assistant never writes
   // to Supabase, and we do not store the free-text prompt in this POC.
@@ -1000,11 +1446,17 @@ export default async function handler(req: Request): Promise<Response> {
     provider: provider.kind,
     model: provider.model,
     prompt_version: PROMPT_VERSION,
+    mode,
     poc_only: pocOnly,
     benchmarks_used: benchmarks.length,
     // The exact retrieved benchmark references (with scores) that grounded the
     // answer, so the UI can show which case supports each benchmark note.
     benchmarks,
+    // Same-address history (non-PII), computed deterministically server-side.
+    location_history: locationHistory,
+    // Deterministic readiness verdict — TypeScript decides, the model explains.
+    form_readiness: readiness,
+    expected_next_step: nextStep,
     result,
   })
 }

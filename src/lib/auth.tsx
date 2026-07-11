@@ -15,6 +15,9 @@ export const ALLOWED_EMAILS = [
   'ousmaan_ahmed@icloud.com',
   'balraj_m7@hotmail.com',
   'yuri.levin@queensu.ca',
+  'harmanpreet.gill@brampton.ca',
+  'vince.chung@brampton.ca',
+  'kamal.birdi@brampton.ca',
   // Demo By-law Officer account (staff role comes from the profile list in
   // src/lib/roles.ts — this email is the officer profile).
   'oakley.carpentry_worker@yahoo.com',

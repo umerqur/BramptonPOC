@@ -32,6 +32,9 @@ type OfficerItem = {
   /** Field outcome recorded and awaiting supervisor closure review. */
   inReview: boolean
   source: 'resident' | 'nyc_open'
+  /** Resident who filed the request (first + last name) and their email. */
+  residentName: string
+  residentEmail: string
 }
 
 function residentToItem(row: ResidentRequestRow): OfficerItem {
@@ -46,6 +49,9 @@ function residentToItem(row: ResidentRequestRow): OfficerItem {
     isClosed: row.status === 'closed',
     inReview: row.field_visit_completed && row.status === 'in_review',
     source: 'resident',
+    residentName:
+      [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || row.resident_name?.trim() || '',
+    residentEmail: row.resident_email?.trim() ?? '',
   }
 }
 
@@ -64,6 +70,11 @@ function localCaseToItem(c: DemoCase): OfficerItem {
     isClosed,
     inReview: recorded && !isClosed,
     source: 'nyc_open',
+    residentName:
+      [c.input.residentFirstName, c.input.residentLastName].filter(Boolean).join(' ').trim() ||
+      c.input.residentName?.trim() ||
+      '',
+    residentEmail: c.input.residentEmail?.trim() ?? '',
   }
 }
 
@@ -215,7 +226,29 @@ function OfficerCaseCard({ item }: { item: OfficerItem }) {
       subtitle={item.location || 'Location not provided'}
       decision={
         <DecisionStrip tone={recorded ? 'emerald' : 'neutral'}>
-          Assigned to you · {recorded ? 'Field outcome recorded' : 'Field outcome needed'}
+          <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2">
+            <span className="min-w-0">
+              Assigned to you · {recorded ? 'Field outcome recorded' : 'Field outcome needed'}
+            </span>
+            {(item.residentName || item.residentEmail) && (
+              <div className="min-w-0">
+                <span className="block text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">
+                  Resident
+                </span>
+                <span className="block truncate text-sm font-semibold text-navy-900">
+                  {item.residentName || '—'}
+                </span>
+                {item.residentEmail && (
+                  <a
+                    href={`mailto:${item.residentEmail}`}
+                    className="block truncate text-xs font-medium text-accent-700 hover:underline"
+                  >
+                    {item.residentEmail}
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
         </DecisionStrip>
       }
       actions={

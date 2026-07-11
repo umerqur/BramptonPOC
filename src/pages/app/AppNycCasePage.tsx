@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { getUnifiedNycCaseDetail, type UnifiedNycCaseDetail } from '../../services/caseExplorer'
 import { buildCasePriorityContext } from '../../services/benchmarks'
 import { getSyntheticPatrolLogs, type SyntheticPatrolLog } from '../../services/syntheticPatrol'
+import BackButton from '../../components/app/BackButton'
 
 // Full NYC 311 case page (replaces the old side drawer). Reads one case by id
 // from the unified detail reader, which resolves it from EITHER the historical
@@ -100,7 +101,10 @@ function NycCaseDetailView({ detail }: { detail: UnifiedNycCaseDetail }) {
   return (
     <div className="container-page py-10">
       {/* Header */}
-      <div className="text-xs text-ink-subtle">
+      {/* Back returns to the exact previous screen (officer case, workbench,
+          explorer…) with its scroll context; deep links fall back to Insights. */}
+      <BackButton fallback="/app/insights" label="Back" />
+      <div className="mt-3 text-xs text-ink-subtle">
         <Link to="/app/insights" className="link-quiet">
           Insights
         </Link>

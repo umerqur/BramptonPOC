@@ -10,17 +10,27 @@ import {
 import { residentRowToCase } from '../../services/residentCaseBridge'
 import { sanitizeResidentDescription } from '../../lib/residentDescription'
 import ResidentAttachments from '../../components/app/ResidentAttachments'
-import OfficerCaseAssistant, { type OfficerFieldDraft } from '../../components/app/OfficerCaseAssistant'
+import OfficerCaseAssistant, {
+  type InsertableDraftField,
+  type OfficerFieldDraft,
+} from '../../components/app/OfficerCaseAssistant'
+import { assessFieldOutcomeReadiness, isFieldMissing } from '../../lib/fieldOutcomeReadiness'
 import SimilarCaseIntelligencePanel from '../../components/app/SimilarCaseIntelligencePanel'
-import { featuresFromCase, type CaseFeatures, type PriorityBand } from '../../services/similarCaseIntelligence'
+import {
+  similarQueryFromDemoCase,
+  similarQueryFromResidentRow,
+  type SimilarCaseQuery,
+} from '../../services/structuredSimilarCases'
 import type { DemoCase, EnforcementAction, ServiceMethod } from '../../data/demoWorkflowTypes'
 import {
   STATUS_LABELS,
   getResidentRequestByCaseId,
+  isStructuredFieldOutcomeUnavailableError,
   recordResidentFieldOutcome,
   type FieldOutcomeInput,
   type ResidentRequestRow,
 } from '../../services/residentRequests'
+import StructuredEnforcementActionFields from '../../components/workflow/StructuredEnforcementActionFields'
 
 // Officer Case — the focused, officer-only view of one assigned case. It supports
 // BOTH sources the officer can be assigned:
@@ -91,7 +101,7 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
   // show a focused success panel with the obvious next step.
   const [justRecorded, setJustRecorded] = useState(false)
   // The officer's live, unsaved field outcome draft — owned here so it is shared
-  // by the field-outcome form and the Field Support Assistant.
+  // by the field-outcome form and the Enforcement AI Assistant.
   const [fieldDraft, setFieldDraft] = useState<OfficerFieldDraft>(EMPTY_FIELD_DRAFT)
 
   useEffect(() => {
@@ -116,22 +126,12 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
   // enforcement decision) — routing recommendation, classification, priority.
   const support = useMemo(() => (row ? residentRowToCase(row) : null), [row])
 
-  // Structured operational features for Similar Case Intelligence (no embeddings).
-  const similarFeatures = useMemo<CaseFeatures | null>(() => {
-    if (!row || !support) return null
-    return featuresFromCase({
-      requestType: row.request_type,
-      serviceCategory: support.triage.category,
-      district: support.normalized.ward_or_area ?? row.city ?? null,
-      priority: support.triage.recommendedPriority as PriorityBand,
-      createdAt: row.created_at,
-      status: STATUS_LABELS[row.status] ?? row.status,
-      fieldVisitCompleted: row.field_visit_completed,
-      assignedOfficerName: row.assigned_officer_name,
-      isClosed: row.status === 'closed',
-      description: sanitizeResidentDescription(row.description),
-    })
-  }, [row, support])
+  // Rules-based Similar Case Intelligence query (structured fields only; uses
+  // the NYC 311 alignment columns — no embeddings, no resident details).
+  const similarQuery = useMemo<SimilarCaseQuery | null>(
+    () => (row ? similarQueryFromResidentRow(row) : null),
+    [row],
+  )
 
   if (row === undefined) {
     return <div className="container-page py-10 text-sm text-ink-subtle">Loading case…</div>
@@ -193,6 +193,22 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
   // Rendered in two spots (mobile: before the form; desktop: right column). A
   // render function avoids reusing one React element in two places and keeps the
   // ctx / fieldDraft props identical between the two.
+  // Reviewable insert: assistant-drafted text fills the form field (replacing
+  // empty text, appending otherwise). Nothing is saved or submitted — the
+  // officer reviews the form and submits it themselves.
+  const draftKeyByField: Record<InsertableDraftField, 'observedCondition' | 'actionTaken' | 'officerNotes'> = {
+    observedCondition: 'observedCondition',
+    actionTaken: 'actionTaken',
+    officerNotes: 'officerNotes',
+  }
+  const insertDraftText = (field: InsertableDraftField, text: string) => {
+    const key = draftKeyByField[field]
+    setFieldDraft((d) => ({
+      ...d,
+      [key]: d[key].trim() ? `${d[key].trimEnd()}\n\n${text}` : text,
+    }))
+  }
+
   const renderAssistant = () => (
     <OfficerCaseAssistant
       ctx={{
@@ -204,6 +220,7 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
         assignedOfficer: row.assigned_officer_name ?? null,
       }}
       fieldDraft={fieldDraft}
+      onInsertDraft={isClosed || row.field_visit_completed ? undefined : insertDraftText}
     />
   )
 
@@ -295,7 +312,7 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
             </dl>
           </details>
 
-          <SimilarCaseIntelligencePanel features={similarFeatures} />
+          <SimilarCaseIntelligencePanel query={similarQuery} />
         </div>
       </div>
     </div>
@@ -383,29 +400,28 @@ function FieldOutcomeForm({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Missing-field highlighting turns on after the first submit attempt, so the
+  // officer is not shouted at while still filling the form in.
+  const [showValidation, setShowValidation] = useState(false)
+
+  // Deterministic readiness — plain TypeScript decides whether the required
+  // fields are complete (the assistant may explain, but never decides this).
+  const readiness = assessFieldOutcomeReadiness(fieldDraft)
+  const missing = (field: Parameters<typeof isFieldMissing>[1]) =>
+    showValidation && isFieldMissing(readiness, field)
+  const missingFieldClass = 'border-rose-400 ring-1 ring-rose-300'
 
   // Update a single field of the shared draft.
   const update = <K extends keyof OfficerFieldDraft>(key: K, value: OfficerFieldDraft[K]) =>
     setFieldDraft((d) => ({ ...d, [key]: value }))
 
   async function submit() {
-    if (!fieldDraft.observedCondition.trim()) {
-      setError('Describe the observed condition before completing the field outcome.')
-      return
-    }
-    if (!fieldDraft.enforcementAction) {
-      setError('Select the enforcement action you took before completing the field outcome.')
+    if (!readiness.ready) {
+      setShowValidation(true)
+      setError(`Complete the required fields before completing the field outcome: ${readiness.missingLabels.join(', ')}.`)
       return
     }
     const isTicket = fieldDraft.enforcementAction === 'ticket_issued'
-    if (isTicket && !fieldDraft.referenceNumber.trim()) {
-      setError('Enter the ticket / penalty notice number before completing the field outcome.')
-      return
-    }
-    if (!fieldDraft.actionTaken.trim()) {
-      setError('Describe the action taken or reason no action was required before completing the field outcome.')
-      return
-    }
     setBusy(true)
     setError(null)
     const input: FieldOutcomeInput = {
@@ -420,10 +436,26 @@ function FieldOutcomeForm({
     }
     try {
       const updated = await recordResidentFieldOutcome(row.case_id, input)
+
+      // Never show "Field outcome recorded / Ready for supervisor closure
+      // review" unless the returned database row actually carries the completed
+      // structured outcome. (The service validates this too — belt and braces.)
+      if (!updated.field_visit_completed || !updated.field_enforcement_action) {
+        throw new Error('The complete field outcome was not saved. Please try again.')
+      }
+
       onRecorded(updated)
     } catch (err) {
       console.error('Failed to record field outcome:', err)
-      setError('Could not save the field outcome. Please try again.')
+
+      if (isStructuredFieldOutcomeUnavailableError(err)) {
+        setError(
+          'The structured enforcement action could not be saved because the required database migration is missing. Contact an administrator before continuing.',
+        )
+        return
+      }
+
+      setError(err instanceof Error ? err.message : 'Could not save the field outcome. Please try again.')
     } finally {
       setBusy(false)
     }
@@ -439,7 +471,7 @@ function FieldOutcomeForm({
             onChange={(e) => update('observedCondition', e.target.value)}
             rows={3}
             placeholder="Describe what you observed on site…"
-            className={fieldClass}
+            className={`${fieldClass} ${missing('observed_condition') ? missingFieldClass : ''}`}
           />
         </label>
 
@@ -448,7 +480,7 @@ function FieldOutcomeForm({
           <select
             value={fieldDraft.violationObserved}
             onChange={(e) => update('violationObserved', e.target.value as 'yes' | 'no' | 'unclear')}
-            className={fieldClass}
+            className={`${fieldClass} ${missing('violation_observed') ? missingFieldClass : ''}`}
           >
             <option value="yes">Yes</option>
             <option value="no">No</option>
@@ -456,13 +488,15 @@ function FieldOutcomeForm({
           </select>
         </label>
 
-        <EnforcementActionFields
+        <StructuredEnforcementActionFields
           enforcementAction={fieldDraft.enforcementAction as EnforcementAction | ''}
-          setEnforcementAction={(v) => update('enforcementAction', v)}
+          onEnforcementActionChange={(v) => update('enforcementAction', v)}
           referenceNumber={fieldDraft.referenceNumber}
-          setReferenceNumber={(v) => update('referenceNumber', v)}
+          onReferenceNumberChange={(v) => update('referenceNumber', v)}
           serviceMethod={fieldDraft.serviceMethod as ServiceMethod}
-          setServiceMethod={(v) => update('serviceMethod', v)}
+          onServiceMethodChange={(v) => update('serviceMethod', v)}
+          highlightActionMissing={missing('enforcement_action')}
+          highlightReferenceMissing={missing('reference_number')}
         />
 
         <label className="block">
@@ -472,7 +506,7 @@ function FieldOutcomeForm({
             onChange={(e) => update('actionTaken', e.target.value)}
             rows={2}
             placeholder="Describe the action taken, notice issued, warning provided, or reason no action was required…"
-            className={fieldClass}
+            className={`${fieldClass} ${missing('action_taken') ? missingFieldClass : ''}`}
           />
         </label>
 
@@ -497,6 +531,41 @@ function FieldOutcomeForm({
           Follow-up required
         </label>
 
+        {/* Deterministic readiness checklist — computed in TypeScript from the
+            form values, never by the assistant. */}
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5">
+          <div className="flex items-center justify-between">
+            <span className="stat-label">Closure review readiness</span>
+            <span
+              className={`badge ${readiness.ready ? 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200' : 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200'}`}
+            >
+              {readiness.ready ? 'Required fields complete' : `${readiness.missingLabels.length} required field${readiness.missingLabels.length === 1 ? '' : 's'} missing`}
+            </span>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {readiness.items.map((item) => (
+              <li key={item.field} className="flex items-start gap-1.5 text-xs">
+                <span
+                  aria-hidden
+                  className={
+                    item.status === 'complete'
+                      ? 'text-emerald-600'
+                      : item.status === 'attention'
+                        ? 'text-amber-600'
+                        : 'text-rose-600'
+                  }
+                >
+                  {item.status === 'complete' ? '✓' : item.status === 'attention' ? '!' : '•'}
+                </span>
+                <span className={item.status === 'missing' ? 'font-medium text-rose-700' : 'text-ink-muted'}>
+                  {item.label}
+                  <span className="font-normal text-ink-subtle"> — {item.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
         {error && (
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
         )}
@@ -516,18 +585,6 @@ function FieldOutcomeForm({
 const fieldClass =
   'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none'
 
-// Display order for the structured field-outcome dropdowns.
-const ENFORCEMENT_ACTION_ORDER: EnforcementAction[] = [
-  'warning_education',
-  'notice_issued',
-  'ticket_issued',
-  'no_action',
-  'other',
-]
-// "Served in person" leads — it applies across violation types; the placed-on-
-// vehicle option is no longer the default first choice. Stored enum values stay.
-const SERVICE_METHOD_ORDER: ServiceMethod[] = ['handed_to_driver', 'placed_on_vehicle', 'sent_by_mail', 'other']
-
 /** Resolve a stored enforcement-action / service-method code to its label, or '—'. */
 function enforcementActionLabel(value: string | null): string {
   return value && value in ENFORCEMENT_ACTION_LABELS
@@ -536,79 +593,6 @@ function enforcementActionLabel(value: string | null): string {
 }
 function serviceMethodLabel(value: string | null): string {
   return value && value in SERVICE_METHOD_LABELS ? SERVICE_METHOD_LABELS[value as ServiceMethod] : '—'
-}
-
-// Shared structured enforcement-action fields, used by BOTH the resident
-// Supabase form and the local NYC benchmark form so the two paths capture the
-// same disposition. Selecting "Ticket / penalty notice issued" (a general by-law
-// ticket / penalty notice, valid for any violation type) reveals the notice
-// number and method-of-service fields. This only records what the officer did —
-// it is not a payment or ticket-issuance system.
-function EnforcementActionFields({
-  enforcementAction,
-  setEnforcementAction,
-  referenceNumber,
-  setReferenceNumber,
-  serviceMethod,
-  setServiceMethod,
-}: {
-  enforcementAction: EnforcementAction | ''
-  setEnforcementAction: (v: EnforcementAction | '') => void
-  referenceNumber: string
-  setReferenceNumber: (v: string) => void
-  serviceMethod: ServiceMethod
-  setServiceMethod: (v: ServiceMethod) => void
-}) {
-  return (
-    <>
-      <label className="block">
-        <span className="stat-label">Enforcement action</span>
-        <select
-          value={enforcementAction}
-          onChange={(e) => setEnforcementAction(e.target.value as EnforcementAction | '')}
-          className={fieldClass}
-        >
-          <option value="">Select an enforcement action…</option>
-          {ENFORCEMENT_ACTION_ORDER.map((a) => (
-            <option key={a} value={a}>
-              {ENFORCEMENT_ACTION_LABELS[a]}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {enforcementAction === 'ticket_issued' && (
-        <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-          <label className="block">
-            <span className="stat-label">Ticket / penalty notice number</span>
-            <input
-              value={referenceNumber}
-              onChange={(e) => setReferenceNumber(e.target.value)}
-              placeholder="e.g. PN-0001234"
-              className={fieldClass}
-            />
-          </label>
-          <label className="block">
-            <span className="stat-label">Method of service</span>
-            <select
-              value={serviceMethod}
-              onChange={(e) => setServiceMethod(e.target.value as ServiceMethod)}
-              className={fieldClass}
-            >
-              {SERVICE_METHOD_ORDER.map((m) => (
-                <option key={m} value={m}>
-                  {SERVICE_METHOD_LABELS[m]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="text-[11px] text-ink-subtle">
-            Records what the officer did on site. This does not issue a ticket or take a payment.
-          </p>
-        </div>
-      )}
-    </>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -621,22 +605,12 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
   const c = cases.find((x) => x.id === caseId)
   const [justRecorded, setJustRecorded] = useState(false)
 
-  // Structured operational features for Similar Case Intelligence (no embeddings).
-  const similarFeatures = useMemo<CaseFeatures | null>(() => {
-    if (!c) return null
-    return featuresFromCase({
-      requestType: c.normalized.complaint_type ?? c.triage.category,
-      serviceCategory: c.triage.category,
-      district: c.normalized.ward_or_area ?? c.input.location ?? null,
-      priority: (c.priorityOverride ?? c.triage.recommendedPriority) as PriorityBand,
-      createdAt: c.normalized.submitted_at ?? c.createdAt,
-      status: c.normalized.status ?? c.stage,
-      fieldVisitCompleted: Boolean(c.fieldAction),
-      assignedOfficerName: c.assignedOfficer ?? null,
-      isClosed: c.stage === 'closed',
-      description: c.input.description,
-    })
-  }, [c])
+  // Rules-based Similar Case Intelligence query built from the verbatim NYC
+  // benchmark source fields (structured only — no embeddings).
+  const similarQuery = useMemo<SimilarCaseQuery | null>(
+    () => (c ? similarQueryFromDemoCase(c) : null),
+    [c],
+  )
 
   if (!c) {
     return (
@@ -743,7 +717,7 @@ function LocalOfficerCaseView({ caseId }: { caseId: string }) {
             </dl>
           </details>
 
-          <SimilarCaseIntelligencePanel features={similarFeatures} />
+          <SimilarCaseIntelligencePanel query={similarQuery} />
         </div>
       </div>
     </div>
@@ -818,29 +792,34 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
   const [officerNotes, setOfficerNotes] = useState('')
   const [followUpRequired, setFollowUpRequired] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showValidation, setShowValidation] = useState(false)
+
+  // Deterministic readiness — same TypeScript rules as the resident form.
+  const readiness = assessFieldOutcomeReadiness({
+    observedCondition,
+    violationObserved,
+    enforcementAction,
+    referenceNumber,
+    actionTaken,
+    followUpRequired,
+  })
+  const missing = (field: Parameters<typeof isFieldMissing>[1]) =>
+    showValidation && isFieldMissing(readiness, field)
+  const missingFieldClass = 'border-rose-400 ring-1 ring-rose-300'
 
   // Same structure as Officer Oakley's resident field-outcome form. The closure
   // disposition is derived from the violation + the STRUCTURED enforcement
   // action; the officer never types the disposition into a free-text box, and a
   // ticket is only recorded when explicitly selected.
   function submit() {
-    if (!observedCondition.trim()) {
-      setError('Describe the observed condition before completing the field outcome.')
+    if (!readiness.ready) {
+      setShowValidation(true)
+      setError(`Complete the required fields before completing the field outcome: ${readiness.missingLabels.join(', ')}.`)
       return
     }
-    if (!enforcementAction) {
-      setError('Select the enforcement action you took before completing the field outcome.')
-      return
-    }
+    // readiness.ready guarantees a selection; this narrows the type for TS.
+    if (!enforcementAction) return
     const isTicket = enforcementAction === 'ticket_issued'
-    if (isTicket && !referenceNumber.trim()) {
-      setError('Enter the ticket / penalty notice number before completing the field outcome.')
-      return
-    }
-    if (!actionTaken.trim()) {
-      setError('Describe the action taken or reason no action was required before completing the field outcome.')
-      return
-    }
     setError(null)
     const input: FieldActionInput = {
       observedCondition: observedCondition.trim(),
@@ -866,7 +845,7 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
             onChange={(e) => setObservedCondition(e.target.value)}
             rows={3}
             placeholder="Describe what you observed on site…"
-            className={fieldClass}
+            className={`${fieldClass} ${missing('observed_condition') ? missingFieldClass : ''}`}
           />
         </label>
 
@@ -875,7 +854,7 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
           <select
             value={violationObserved}
             onChange={(e) => setViolationObserved(e.target.value as 'yes' | 'no' | 'unclear')}
-            className={fieldClass}
+            className={`${fieldClass} ${missing('violation_observed') ? missingFieldClass : ''}`}
           >
             <option value="yes">Yes</option>
             <option value="no">No</option>
@@ -883,13 +862,15 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
           </select>
         </label>
 
-        <EnforcementActionFields
+        <StructuredEnforcementActionFields
           enforcementAction={enforcementAction}
-          setEnforcementAction={setEnforcementAction}
+          onEnforcementActionChange={setEnforcementAction}
           referenceNumber={referenceNumber}
-          setReferenceNumber={setReferenceNumber}
+          onReferenceNumberChange={setReferenceNumber}
           serviceMethod={serviceMethod}
-          setServiceMethod={setServiceMethod}
+          onServiceMethodChange={setServiceMethod}
+          highlightActionMissing={missing('enforcement_action')}
+          highlightReferenceMissing={missing('reference_number')}
         />
 
         <label className="block">
@@ -899,7 +880,7 @@ function LocalFieldOutcomeForm({ caseId, onRecorded }: { caseId: string; onRecor
             onChange={(e) => setActionTaken(e.target.value)}
             rows={2}
             placeholder="Describe the action taken, notice issued, warning provided, or reason no action was required…"
-            className={fieldClass}
+            className={`${fieldClass} ${missing('action_taken') ? missingFieldClass : ''}`}
           />
         </label>
 
