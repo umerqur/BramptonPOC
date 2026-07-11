@@ -239,7 +239,7 @@ export default function OfficerCaseAssistant({
 
   if (briefing.status === 'unconfigured') {
     return (
-      <section className="overflow-hidden rounded-2xl border border-teal-200 bg-white shadow-sm">
+      <section className={ASSISTANT_CONTAINER_CLASS}>
         <AssistantHeader />
         <div className="px-5 py-4">
           <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-navy-800">
@@ -251,13 +251,13 @@ export default function OfficerCaseAssistant({
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-teal-200 bg-white shadow-sm">
+    <section className={ASSISTANT_CONTAINER_CLASS}>
       <AssistantHeader />
 
       <div className="px-5 py-4">
         {/* ---- Automatic Officer Field Briefing ---- */}
         {briefing.status === 'loading' && (
-          <p className="text-sm text-ink-subtle">Preparing the field briefing for this case…</p>
+          <p className="text-sm text-ink-subtle">The AI is preparing the field briefing for this case…</p>
         )}
         {briefing.status === 'failed' && (
           // Calm, non-error note only — the failure detail is shown ONCE via the
@@ -293,26 +293,31 @@ export default function OfficerCaseAssistant({
           </div>
 
           <form
-            className="mt-3 flex items-center gap-2"
+            className="mt-3"
             onSubmit={(e) => {
               e.preventDefault()
               ask(input)
               setInput('')
             }}
           >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask for field support on this case…"
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 focus:border-accent-500 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={!input.trim() || paused}
-              className="btn-primary text-sm disabled:opacity-60"
-            >
-              Ask
-            </button>
+            {/* The one interactive affordance on the panel — framed in teal so it
+                clearly invites a question, with a focus ring for keyboard users. */}
+            <div className="flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50/40 p-1.5 pl-3 transition focus-within:border-teal-400 focus-within:ring-2 focus-within:ring-teal-100">
+              <SparklesIcon className="h-4 w-4 shrink-0 text-teal-600" />
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask the AI about this case, risk factors, history, or next steps…"
+                className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-navy-900 placeholder:text-ink-subtle focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!input.trim() || paused}
+                className="btn-primary shrink-0 px-3.5 py-1.5 text-sm disabled:opacity-60"
+              >
+                Ask AI
+              </button>
+            </div>
           </form>
 
           <div className="mt-4">
@@ -355,30 +360,59 @@ export default function OfficerCaseAssistant({
 
         {/* Calm, muted guardrail note — no scary warning styling unless an actual error occurs. */}
         <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-ink-subtle">
-          Decision support only · Does not issue tickets, submit forms, close cases, or approve closures.
+          AI decision support only · The officer makes all enforcement decisions · Does not issue tickets, submit
+          forms, or close cases.
         </p>
       </div>
     </section>
   )
 }
 
+// The assistant panel keeps the app's card language (rounded-xl, shadow-card)
+// but wears a teal border so it reads as the one interactive AI surface on the
+// page rather than another read-only dashboard card.
+const ASSISTANT_CONTAINER_CLASS =
+  'overflow-hidden rounded-xl border border-teal-200 bg-white shadow-card'
+
+// Sparkles icon (Lucide-style, inlined — lucide-react is not a dependency).
+function SparklesIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M12 3l1.9 5.2a2 2 0 0 0 1.9 1.3l5.2 1.5-5.2 1.5a2 2 0 0 0-1.9 1.3L12 19l-1.9-5.2a2 2 0 0 0-1.9-1.3L3 11l5.2-1.5a2 2 0 0 0 1.9-1.3z" />
+      <path d="M19 3v4" />
+      <path d="M21 5h-4" />
+      <path d="M5 17v2" />
+      <path d="M6 18H4" />
+    </svg>
+  )
+}
+
+// Dark navy header (the app's primary brand colour) so the AI panel is
+// unmistakable next to the white dashboard cards, with "AI" front and centre.
 function AssistantHeader() {
   return (
-    <div className="border-b border-teal-100 bg-teal-50/60 px-5 py-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-600 text-white">
-          {/* Checklist / support icon */}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
+    <div className="border-b border-navy-800 bg-navy-900 px-5 py-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-400/20 text-teal-300">
+          <SparklesIcon className="h-5 w-5" />
         </div>
-        <div>
-          <h3 className="text-sm font-semibold text-navy-900">Field Support Assistant</h3>
-          <p className="mt-0.5 text-xs text-teal-900/80">
-            Briefs the site visit, helps with field notes, and prepares the supervisor handoff. Staff decide all
-            enforcement actions.
-          </p>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-white">Enforcement AI Assistant</h3>
+            <span className="rounded-full bg-teal-400/20 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-teal-300">
+              AI
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-navy-200">AI-powered decision support · Officer review required</p>
         </div>
       </div>
     </div>

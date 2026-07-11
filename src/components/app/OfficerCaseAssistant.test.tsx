@@ -74,14 +74,14 @@ describe('OfficerCaseAssistant error handling', () => {
     ).toBeInTheDocument()
 
     // Ask input, quick actions, and the handoff button all stay enabled.
-    const input = screen.getByPlaceholderText('Ask for field support on this case…')
+    const input = screen.getByPlaceholderText('Ask the AI about this case, risk factors, history, or next steps…')
     expect(input).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Prepare site checklist' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Supervisor handoff' })).toBeEnabled()
 
     // And asking actually works.
     fireEvent.change(input, { target: { value: 'What should I verify?' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }))
     expect(await screen.findByText('Grounded answer.')).toBeInTheDocument()
   })
 
@@ -123,20 +123,20 @@ describe('OfficerCaseAssistant error handling', () => {
     render(<OfficerCaseAssistant ctx={CTX} />)
     expect(await screen.findByText(/attending a parking concern/i)).toBeInTheDocument()
 
-    const input = screen.getByPlaceholderText('Ask for field support on this case…')
+    const input = screen.getByPlaceholderText('Ask the AI about this case, risk factors, history, or next steps…')
     fireEvent.change(input, { target: { value: 'What should I verify?' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }))
 
     // A small status message — not a red alert — and the controls pause.
     expect(await screen.findByText(/wait a moment before sending another request/i)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     fireEvent.change(input, { target: { value: 'Second question' } })
-    expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Ask AI' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Prepare site checklist' })).toBeDisabled()
 
     // After retryAfterSeconds (1s) everything re-enables automatically.
     await waitFor(
-      () => expect(screen.getByRole('button', { name: 'Ask' })).toBeEnabled(),
+      () => expect(screen.getByRole('button', { name: 'Ask AI' })).toBeEnabled(),
       { timeout: 3000 },
     )
     expect(screen.getByRole('button', { name: 'Prepare site checklist' })).toBeEnabled()

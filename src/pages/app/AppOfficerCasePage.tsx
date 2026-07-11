@@ -101,7 +101,7 @@ function SupabaseOfficerCaseView({ caseId, officerEmail }: { caseId: string; off
   // show a focused success panel with the obvious next step.
   const [justRecorded, setJustRecorded] = useState(false)
   // The officer's live, unsaved field outcome draft — owned here so it is shared
-  // by the field-outcome form and the Field Support Assistant.
+  // by the field-outcome form and the Enforcement AI Assistant.
   const [fieldDraft, setFieldDraft] = useState<OfficerFieldDraft>(EMPTY_FIELD_DRAFT)
 
   useEffect(() => {
