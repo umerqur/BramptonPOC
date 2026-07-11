@@ -368,6 +368,9 @@ export const FIELD_OUTCOME_LABELS: Record<FieldVisitOutcome, string> = {
   ticket_issued: 'Ticket issued',
   resolved: 'Resolved on site',
   warning_education: 'Warning or education provided',
+  city_service_referral: 'City service / repair referral',
+  referred_other_department: 'Referred to another department',
+  public_safety_response: 'Public safety response',
 }
 
 /** Label for each structured enforcement action the officer can select. */
@@ -375,6 +378,10 @@ export const ENFORCEMENT_ACTION_LABELS: Record<EnforcementAction, string> = {
   warning_education: 'Education / warning provided',
   notice_issued: 'Notice issued',
   ticket_issued: 'Ticket / penalty notice issued',
+  city_service_referral: 'City service / repair referral',
+  referred_other_department: 'Referred to another department',
+  public_safety_response: 'Public safety response',
+  no_violation_found: 'No violation found',
   no_action: 'No action taken',
   other: 'Other',
 }
@@ -399,23 +406,46 @@ export const SERVICE_METHOD_LABELS: Record<ServiceMethod, string> = {
  * NYC benchmark path use this single rule set, so the closure draft is grounded
  * the same way:
  *
- *   enforcementAction === ticket_issued    → ticket_issued
- *   enforcementAction === notice_issued    → notice_issued
- *   enforcementAction === warning_education → warning_education
- *   enforcementAction === no_action        → resolved (no further action)
- *   enforcementAction === other / unset    → resolved (no further action)
+ *   enforcementAction === ticket_issued              → ticket_issued
+ *   enforcementAction === notice_issued              → notice_issued
+ *   enforcementAction === warning_education          → warning_education
+ *   enforcementAction === city_service_referral      → city_service_referral
+ *   enforcementAction === referred_other_department  → referred_other_department
+ *   enforcementAction === public_safety_response     → public_safety_response
+ *   enforcementAction === no_violation_found         → no_violation
+ *   enforcementAction === no_action                  → resolved (no further action)
+ *   enforcementAction === other / unset              → resolved (no further action)
  *
- * A "no" violation always takes precedence and is recorded as no_violation. A
- * ticket is ONLY ever claimed when the officer explicitly selected the
- * "Ticket / penalty notice issued" action — a general by-law ticket /
- * administrative penalty / offence notice, valid for any violation type — never
- * inferred from a violation being observed.
+ * The non-enforcement dispositions (referrals, public safety response) record a
+ * REAL action even when no violation was observed — a fallen City stop sign is
+ * "no violation + City service / repair referral", never "no violation, nothing
+ * done". For the remaining actions a "no" violation takes precedence and is
+ * recorded as no_violation. A ticket is ONLY ever claimed when the officer
+ * explicitly selected the "Ticket / penalty notice issued" action — a general
+ * by-law ticket / administrative penalty / offence notice, valid for any
+ * violation type — never inferred from a violation being observed.
  */
 export function deriveFieldVisitOutcome(
   violationObserved: string | null,
   enforcementAction: EnforcementAction | null,
 ): FieldVisitOutcome {
   const violation = (violationObserved ?? '').trim().toLowerCase()
+
+  switch (enforcementAction) {
+    // Non-enforcement actions are truthful with OR without a violation: the
+    // referral / response is what actually happened, so it is always recorded.
+    case 'city_service_referral':
+      return 'city_service_referral'
+    case 'referred_other_department':
+      return 'referred_other_department'
+    case 'public_safety_response':
+      return 'public_safety_response'
+    // The officer explicitly recorded that no violation was found.
+    case 'no_violation_found':
+      return 'no_violation'
+    default:
+      break
+  }
 
   // "No violation observed" is the most truthful disposition regardless of action.
   if (violation === 'no') return 'no_violation'
@@ -534,6 +564,27 @@ function closureOutcomeParagraph(
         `A by-law enforcement officer attended the location${where} on ${date}. ` +
         `After reviewing the matter, no further enforcement action under ${policy} was required at this time, so this file has been closed.` +
         ` Thank you for reporting it.` +
+        inviteBack
+      )
+    case 'city_service_referral':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date} and confirmed the reported condition. ` +
+        `This matter does not require by-law enforcement — it has been referred to the appropriate City service team for repair or maintenance.` +
+        ` Your service request has been closed now that the referral has been submitted.` +
+        inviteBack
+      )
+    case 'referred_other_department':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date} and reviewed the reported concern. ` +
+        `The matter falls under the responsibility of another City department and has been referred to them for follow-up.` +
+        ` Your service request has been closed now that the referral has been made.` +
+        inviteBack
+      )
+    case 'public_safety_response':
+      return (
+        `A by-law enforcement officer attended the location${where} on ${date} and assessed the reported condition. ` +
+        `A public safety response was initiated to address the condition on site.` +
+        ` Your service request has been closed now that this action has been taken.` +
         inviteBack
       )
   }

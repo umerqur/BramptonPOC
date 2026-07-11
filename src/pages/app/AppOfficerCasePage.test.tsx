@@ -109,4 +109,48 @@ describe('AppOfficerCasePage field outcome submission', () => {
     expect(await screen.findByText('Field outcome recorded')).toBeInTheDocument()
     expect(screen.getByText(/Ready for supervisor closure review/)).toBeInTheDocument()
   })
+
+  it('records a City service / repair referral for an infrastructure case without a false enforcement outcome', async () => {
+    // A fallen City stop sign: Violation observed "No", enforcement action
+    // "City service / repair referral", follow-up required. No ticket details
+    // apply, and the officer selects the action explicitly — nothing defaults.
+    vi.mocked(recordResidentFieldOutcome).mockResolvedValue(
+      makeCompleteOutcomeRow({
+        field_violation_observed: 'no',
+        field_enforcement_action: 'city_service_referral',
+        field_follow_up_required: true,
+      }),
+    )
+
+    renderPage('RSR-20260709-7BX8')
+    await screen.findByText('Record field outcome')
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you observed on site…'), {
+      target: { value: 'Stop sign at the corner has fallen and is lying on the boulevard.' },
+    })
+    fireEvent.change(screen.getByLabelText('Violation observed'), { target: { value: 'no' } })
+    fireEvent.change(screen.getByLabelText('Enforcement action'), {
+      target: { value: 'city_service_referral' },
+    })
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        'Describe the action taken, notice issued, warning provided, or reason no action was required…',
+      ),
+      { target: { value: 'Submitted a repair referral for the fallen stop sign.' } },
+    )
+    fireEvent.click(screen.getByLabelText('Follow-up required'))
+    fireEvent.click(screen.getByRole('button', { name: 'Field outcome complete' }))
+
+    expect(await screen.findByText('Field outcome recorded')).toBeInTheDocument()
+    expect(recordResidentFieldOutcome).toHaveBeenCalledWith(
+      'RSR-20260709-7BX8',
+      expect.objectContaining({
+        violationObserved: 'no',
+        enforcementAction: 'city_service_referral',
+        followUpRequired: true,
+        serviceMethod: undefined,
+        referenceNumber: undefined,
+      }),
+    )
+  })
 })
