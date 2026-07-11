@@ -60,15 +60,20 @@ export default function SimilarCaseIntelligencePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey])
 
+  // Resident (Brampton) cases get benchmark framing: NYC records are reference
+  // context for how a comparable issue was handled — never Brampton precedents.
+  const isBenchmark = query?.mode === 'brampton_benchmark'
+  const title = isBenchmark ? 'Comparable NYC benchmark outcomes' : 'Similar Case Intelligence'
+  const subtitle = isBenchmark
+    ? 'Closed public NYC 311 records involving a comparable reported issue. Review how those records were handled and resolved. These are benchmark references, not Brampton precedents.'
+    : 'Top comparable closed cases from the historical NYC 311 record, matched on structured fields (complaint type, descriptor, agency, area, closure timing).'
+
   return (
     <section ref={sectionRef} className="card p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-navy-900">Similar Case Intelligence</h3>
-          <p className="mt-0.5 text-xs text-ink-subtle">
-            Top comparable closed cases from the historical NYC 311 record, matched on structured fields
-            (complaint type, descriptor, agency, area, closure timing).
-          </p>
+          <h3 className="text-sm font-semibold text-navy-900">{title}</h3>
+          <p className="mt-0.5 text-xs text-ink-subtle">{subtitle}</p>
         </div>
         <ProvenanceBadge kind="structured-match" />
       </div>
@@ -140,15 +145,26 @@ function SimilarCaseRow({ m }: { m: StructuredSimilarCase }) {
           {m.status && (
             <span className="badge bg-indigo-50 text-indigo-800 ring-1 ring-inset ring-indigo-200">{m.status}</span>
           )}
+          {/* Conservative label derived only from explicit resolution phrasing —
+              shown for reference, never as a recommendation for this case. */}
+          {m.historicalResolution && (
+            <span className="badge bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200">
+              {m.historicalResolution}
+            </span>
+          )}
+          {m.agency && <span className="text-ink-subtle">{m.agency}</span>}
           {m.closureDays != null && (
             <span className="text-ink-subtle">
-              Closed in {m.closureDays} day{m.closureDays === 1 ? '' : 's'}
+              · Closed in {m.closureDays} day{m.closureDays === 1 ? '' : 's'}
             </span>
           )}
         </div>
 
         {m.resolutionSummary && (
-          <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-ink-muted">{m.resolutionSummary}</p>
+          <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-ink-muted">
+            <span className="font-semibold text-ink">Historical resolution: </span>
+            {m.resolutionSummary}
+          </p>
         )}
 
         <p className="mt-2 text-[11px] text-ink-subtle">
