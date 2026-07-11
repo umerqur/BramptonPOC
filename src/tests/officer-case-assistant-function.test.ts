@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import handler, { assistantRateLimitDisabled, checkAssistantRate } from './officer-case-assistant'
+import handler, {
+  assistantRateLimitDisabled,
+  checkAssistantRate,
+} from '../../netlify/functions/officer-case-assistant'
 
 // Rate-limit behavior of the Officer Case Assistant function:
 //   * OFFICER_ASSISTANT_DISABLE_RATE_LIMIT=true disables the throttle (live demo).
