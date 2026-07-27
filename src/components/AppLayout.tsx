@@ -46,6 +46,12 @@ const SUPERVISOR_NAV: NavItem[] = [
     icon: <StressTestIcon />,
     match: (p, s) => p === '/app/insights' && tabParam(s) === 'simulations',
   },
+  {
+    to: '/app/solution-architecture',
+    label: 'Architecture',
+    icon: <ArchitectureIcon />,
+    match: (p) => p === '/app/solution-architecture',
+  },
 ]
 
 const OFFICER_NAV: NavItem[] = [
@@ -383,6 +389,18 @@ function StressTestIcon({ className = 'h-4 w-4' }: { className?: string }) {
       <path d="M4 13a8 8 0 1 1 16 0" />
       <path d="M12 13l3-3" />
       <circle cx="12" cy="13" r="1.2" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+/** Architecture — layered boxes, evoking the solution architecture diagram. */
+function ArchitectureIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="8.5" y="14" width="7" height="7" rx="1" />
+      <path d="M6.5 10v2h11v-2M12 12v2" />
     </svg>
   )
 }

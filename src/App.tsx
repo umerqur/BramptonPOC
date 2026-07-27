@@ -14,6 +14,7 @@ import AppCaseWorkbenchPage from './pages/app/AppCaseWorkbenchPage'
 import AppClosureDraftsPage from './pages/app/AppClosureDraftsPage'
 import AppInsightsPage from './pages/app/AppInsightsPage'
 import AppOfficerConsolePage from './pages/app/AppOfficerConsolePage'
+import AppSolutionArchitecturePage from './pages/app/AppSolutionArchitecturePage'
 import AppOfficerCasePage from './pages/app/AppOfficerCasePage'
 import ResidentLayout from './components/resident/ResidentLayout'
 import ResidentHomePage from './pages/resident/ResidentHomePage'
@@ -62,6 +63,9 @@ export default function App() {
         <Route path="closure" element={<AppClosureDraftsPage />} />
         {/* Insights — NYC 311 workload heat map only. */}
         <Route path="insights" element={<AppInsightsPage />} />
+        {/* Solution Architecture — AI, data, and cybersecurity architecture
+            reference for City reviewers (diagram + narrative + exports). */}
+        <Route path="solution-architecture" element={<AppSolutionArchitecturePage />} />
         {/* Officer Field Console — By-law Officer landing: only their assigned
             cases and the field outcome they record. */}
         <Route path="field" element={<AppOfficerConsolePage />} />
