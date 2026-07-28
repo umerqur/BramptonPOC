@@ -47,10 +47,11 @@ const SUPERVISOR_NAV: NavItem[] = [
     match: (p, s) => p === '/app/insights' && tabParam(s) === 'simulations',
   },
   {
-    to: '/app/solution-architecture',
+    // Now a public page (no session required) — the link leaves the app shell.
+    to: '/solution-architecture',
     label: 'Architecture',
     icon: <ArchitectureIcon />,
-    match: (p) => p === '/app/solution-architecture',
+    match: (p) => p === '/solution-architecture',
   },
 ]
 

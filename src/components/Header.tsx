@@ -26,6 +26,18 @@ export default function Header() {
           >
             Methodology
           </NavLink>
+          <NavLink
+            to="/solution-architecture"
+            className={({ isActive }) =>
+              `px-3 py-2 rounded-md text-sm font-medium transition ${
+                isActive
+                  ? 'text-navy-900 bg-slate-100'
+                  : 'text-ink-muted hover:text-navy-900 hover:bg-slate-50'
+              }`
+            }
+          >
+            Solution Architecture
+          </NavLink>
           <Link
             to="/login"
             className="px-3 py-2 rounded-md text-sm font-medium text-ink-muted hover:text-navy-900 hover:bg-slate-50 transition"
@@ -61,6 +73,17 @@ export default function Header() {
               }
             >
               Methodology
+            </NavLink>
+            <NavLink
+              to="/solution-architecture"
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `px-3 py-2 rounded-md text-sm font-medium ${
+                  isActive ? 'text-navy-900 bg-slate-100' : 'text-ink-muted'
+                }`
+              }
+            >
+              Solution Architecture
             </NavLink>
             <Link
               to="/login"

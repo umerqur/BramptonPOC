@@ -31,6 +31,13 @@ export default function App() {
         {/* Methodology is the single public explanation page; old links redirect. */}
         <Route path="/how-it-works" element={<Navigate to="/methodology" replace />} />
         <Route path="/methodology" element={<MethodologyPage />} />
+        {/* Solution Architecture is public so external City reviewers can open
+            it (and export SVG/PNG/PDF) without a Supabase session. It exposes
+            no operational data — just the static diagram and narrative. */}
+        <Route path="/solution-architecture" element={<AppSolutionArchitecturePage />} />
+        {/* Old authenticated URL — redirect here (outside ProtectedRoute) so
+            logged-out visitors with the old link reach the page, not /login. */}
+        <Route path="/app/solution-architecture" element={<Navigate to="/solution-architecture" replace />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/login" element={<LoginPage />} />
         {/* The dashboard / case demo is no longer public — route any old
@@ -63,9 +70,9 @@ export default function App() {
         <Route path="closure" element={<AppClosureDraftsPage />} />
         {/* Insights — NYC 311 workload heat map only. */}
         <Route path="insights" element={<AppInsightsPage />} />
-        {/* Solution Architecture — AI, data, and cybersecurity architecture
-            reference for City reviewers (diagram + narrative + exports). */}
-        <Route path="solution-architecture" element={<AppSolutionArchitecturePage />} />
+        {/* Solution Architecture moved to the public site; the backward-compat
+            redirect for /app/solution-architecture lives in the public block
+            above so it works without a session. */}
         {/* Officer Field Console — By-law Officer landing: only their assigned
             cases and the field outcome they record. */}
         <Route path="field" element={<AppOfficerConsolePage />} />
